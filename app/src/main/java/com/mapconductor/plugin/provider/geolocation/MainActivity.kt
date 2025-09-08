@@ -31,26 +31,28 @@ import androidx.compose.ui.unit.dp
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val vm: GeoLocationProviderViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
-        val uiState by vm.uiState.collectAsState()
+        setContent {
+            val vm: GeoLocationProviderViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+            val uiState by vm.uiState.collectAsState()
 
-        androidx.compose.foundation.layout.Column(
-            modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
-            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
-        ) {
-            GeoLocationProviderScreen(
-                state = uiState,
-                onButtonClick = { vm.onGeoLocationProviderClicked() },
-            )
-            androidx.compose.foundation.layout.Spacer(
-                androidx.compose.ui.Modifier.height(12.dp)
-            )
-            ServiceControlButtonsWithPermission()
-            androidx.compose.foundation.layout.Spacer(
-                androidx.compose.ui.Modifier.height(12.dp)
-            )
-            ServiceLocationReadout()
+            androidx.compose.foundation.layout.Column(
+                modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center
+            ) {
+                GeoLocationProviderScreen(
+                    state = uiState,
+                    onButtonClick = { vm.onGeoLocationProviderClicked() },
+                )
+                androidx.compose.foundation.layout.Spacer(
+                    androidx.compose.ui.Modifier.height(12.dp)
+                )
+                ServiceControlButtonsWithPermission()
+                androidx.compose.foundation.layout.Spacer(
+                    androidx.compose.ui.Modifier.height(12.dp)
+                )
+                ServiceLocationReadout()
+            }
         }
     }
 }
