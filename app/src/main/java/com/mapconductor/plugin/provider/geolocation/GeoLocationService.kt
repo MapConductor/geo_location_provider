@@ -2,7 +2,9 @@ package com.mapconductor.plugin.provider.geolocation
 
 import android.app.*
 import android.content.Intent
+import android.content.IntentFilter // ★ 追加
 import android.location.Location
+import android.os.BatteryManager   // ★ 追加
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -20,6 +22,11 @@ class GeoLocationService : Service() {
     private val _locationFlow = MutableStateFlow<Location?>(null)
     val locationFlow: StateFlow<Location?> get() = _locationFlow
 
+    // ★ バッテリー情報も公開（任意でUIから購読可能）
+    data class BatteryInfo(val pct: Int, val isCharging: Boolean)
+    private val _batteryFlow = MutableStateFlow<BatteryInfo?>(null)
+    val batteryFlow: StateFlow<BatteryInfo?> get() = _batteryFlow
+
     private lateinit var fused: FusedLocationProviderClient
     private var callback: LocationCallback? = null
 
@@ -35,6 +42,9 @@ class GeoLocationService : Service() {
         createNotificationChannelIfNeeded()
         startForeground(NOTIF_ID, buildNotification("Waiting for location…"))
         fused = LocationServices.getFusedLocationProviderClient(this)
+
+        // ★ 起動時点のバッテリー初期値（任意）
+        _batteryFlow.value = getBatteryInfo()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,11 +103,21 @@ class GeoLocationService : Service() {
     }
 
     private fun onNewLocation(loc: Location) {
+        // ★ バッテリー取得（即時）
+        val batt = getBatteryInfo()
+
         // 1) Flow を更新（UI が bind していれば即時反映）
         _locationFlow.value = loc
+        _batteryFlow.value = batt // ★ 追加
 
-        // 2) 通知の本文を更新（ユーザーにも位置を“表示”）
-        val text = "lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}m"
+        // 2) 通知の本文を更新（位置 + バッテリーを表示）
+        val text = buildString {
+            append("lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}m")
+            if (batt.pct >= 0) {
+                append(" | battery=${batt.pct}%")
+                if (batt.isCharging) append(" (充電中)")
+            }
+        }
         notifyForeground(text)
 
         // 3) ログ（“tick...”の代わり）
@@ -125,6 +145,19 @@ class GeoLocationService : Service() {
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()
+    }
+
+    // ★ バッテリー情報の即時取得（追加の権限は不要）
+    private fun getBatteryInfo(): BatteryInfo {
+        val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+
+        val pct = if (level >= 0 && scale > 0) (level * 100) / scale else -1
+        val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+        return BatteryInfo(pct, isCharging)
     }
 
     companion object {

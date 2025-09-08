@@ -30,9 +30,21 @@ fun ServiceLocationReadout() {
     val loc by (service?.locationFlow?.collectAsState(initial = null)
         ?: remember { mutableStateOf<Location?>(null) })
 
+    val batt by (service?.batteryFlow?.collectAsState(initial = null)
+        ?: remember { mutableStateOf<GeoLocationService.BatteryInfo?>(null) })
+
     Text(
-        text = loc?.let {
-            "lat=%.6f\nlon=%.6f\nacc=%.1fm".format(it.latitude, it.longitude, it.accuracy)
-        } ?: "Waiting for location…"
+        text = buildString {
+            if (loc != null) {
+                append("lat=%.6f\nlon=%.6f\nacc=%.1fm".format(loc!!.latitude, loc!!.longitude, loc!!.accuracy))
+            } else {
+                append("Waiting for location…")
+            }
+            batt?.let {
+                append("\n")
+                append("battery=${it.pct}%")
+                if (it.isCharging) append(" (充電中)")
+            }
+        }
     )
 }
