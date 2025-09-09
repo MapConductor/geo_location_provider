@@ -1,50 +1,35 @@
 package com.mapconductor.plugin.provider.geolocation
 
-import android.content.ComponentName
-import android.content.Intent
-import android.content.ServiceConnection
-import android.os.IBinder
-import android.location.Location
-import androidx.compose.runtime.*
 import androidx.compose.material3.Text
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.*
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @Composable
-fun ServiceLocationReadout() {
-    val context = LocalContext.current
-    var service by remember { mutableStateOf<GeoLocationService?>(null) }
+fun ServiceLocationReadout(
+    historyVm: HistoryViewModel = viewModel()
+) {
+    // サービスの実行状態だけは StateFlow で参照（バインド不要）
+    val running by GeoLocationService.running.collectAsState()
 
-    // ※ 権限取得後/サービス開始後にバインドするのが安全
-    DisposableEffect(Unit) {
-        val conn = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                service = (binder as GeoLocationService.LocalBinder).getService()
-            }
-            override fun onServiceDisconnected(name: ComponentName?) { service = null }
+    // 位置/バッテリーは DB の最新1件から読む（ほぼリアルタイム）
+    val latest by historyVm.latestOne.collectAsState(initial = null)
+
+    val text = buildString {
+        if (latest != null) {
+            append("lat=%.6f\nlon=%.6f\nacc=%.1fm".format(
+                latest!!.lat, latest!!.lon, latest!!.accuracy
+            ))
+        } else {
+            append(if (running) "Initializing location…" else "Service stopped")
         }
-        // 既に Start ボタンで起動する前提なら flags=0 でもOK
-        context.bindService(Intent(context, GeoLocationService::class.java), conn, 0)
-        onDispose { runCatching { context.unbindService(conn) } }
+        append("\n")
+        if (latest != null) {
+            append("battery=${latest!!.batteryPct}%")
+            if (latest!!.isCharging) append(" (charging)")
+        } else {
+            append(if (running) "battery=initializing…" else "battery=unknown")
+        }
     }
 
-    val loc by (service?.locationFlow?.collectAsState(initial = null)
-        ?: remember { mutableStateOf<Location?>(null) })
-
-    val batt by (service?.batteryFlow?.collectAsState(initial = null)
-        ?: remember { mutableStateOf<GeoLocationService.BatteryInfo?>(null) })
-
-    Text(
-        text = buildString {
-            if (loc != null) {
-                append("lat=%.6f\nlon=%.6f\nacc=%.1fm".format(loc!!.latitude, loc!!.longitude, loc!!.accuracy))
-            } else {
-                append("Waiting for location…")
-            }
-            batt?.let {
-                append("\n")
-                append("battery=${it.pct}%")
-                if (it.isCharging) append(" (充電中)")
-            }
-        }
-    )
+    Text(text)
 }

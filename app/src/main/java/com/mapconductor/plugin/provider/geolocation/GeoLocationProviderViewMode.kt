@@ -10,16 +10,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-// 画面の状態（View専用データ）
+/** 画面の状態（必要に応じて項目を足してください） */
 data class UiState(
-    val buttonText: String = "GeoLocationProvider",
+    val title: String = "GeoLocationProvider",
+    val subtitle: String = "FGS + Location + Battery + Room",
 )
 
-// 一回性イベント（Toast/ダイアログ表示合図など）
+/** 一回性イベント（Toast など） */
 sealed interface UiEvent {
     data class ShowToast(val message: String) : UiEvent
 }
 
+/** 画面用 ViewModel（最小構成） */
 class GeoLocationProviderViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(UiState())
@@ -28,17 +30,10 @@ class GeoLocationProviderViewModel : ViewModel() {
     private val _events = MutableSharedFlow<UiEvent>()
     val events = _events.asSharedFlow()
 
-    private val ioScope = CoroutineScope(Dispatchers.Default)
+    private val vmScope = CoroutineScope(Dispatchers.Default)
 
-    /** ビジネスロジック：ボタンクリック時の処理 */
     fun onGeoLocationProviderClicked() {
-        // ここで将来的に位置情報取得などのユースケースを呼び出す想定
-        // 今回は簡易にイベントを発火
-        ioScope.launch {
-            _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked!"))
-        }
-
-        // UI状態を更新したい場合の例（今回は見た目変化なし）
+        vmScope.launch { _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked!")) }
         _uiState.update { it.copy() }
     }
 }

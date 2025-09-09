@@ -1,36 +1,60 @@
 package com.mapconductor.plugin.provider.geolocation
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Intent
-import android.content.IntentFilter // ★ 追加
+import android.content.IntentFilter
 import android.location.Location
-import android.os.BatteryManager   // ★ 追加
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import com.google.android.gms.location.* // FusedLocationProvider
-import kotlinx.coroutines.*
+import com.google.android.gms.location.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 class GeoLocationService : Service() {
 
+    // 実行状態（UIトグルと厳密同期）
+    companion object {
+        private const val TAG = "GeoLocationService"
+        private const val CHANNEL_ID = "geo_location_service"
+        private const val NOTIF_ID = 1001
+
+        const val ACTION_UPDATE_INTERVAL = "GeoLocationService.ACTION_UPDATE_INTERVAL"
+        const val EXTRA_UPDATE_MS = "extra_update_ms"
+
+        val running = MutableStateFlow(false)
+    }
+
+    // バッテリー情報
+    data class BatteryInfo(val pct: Int, val isCharging: Boolean)
+
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    // UI から bind して観測できるよう公開（最新の位置）
+    // UI から bind して観測できるフロー
     private val _locationFlow = MutableStateFlow<Location?>(null)
     val locationFlow: StateFlow<Location?> get() = _locationFlow
 
-    // ★ バッテリー情報も公開（任意でUIから購読可能）
-    data class BatteryInfo(val pct: Int, val isCharging: Boolean)
     private val _batteryFlow = MutableStateFlow<BatteryInfo?>(null)
     val batteryFlow: StateFlow<BatteryInfo?> get() = _batteryFlow
 
     private lateinit var fused: FusedLocationProviderClient
     private var callback: LocationCallback? = null
+    private var updateIntervalMs: Long = 5_000L
 
-    // bind 用（任意。UI で状態を読むならあると便利）
+    // DB
+    private lateinit var db: AppDatabase
+
+    // bind 用
     inner class LocalBinder : android.os.Binder() {
         fun getService(): GeoLocationService = this@GeoLocationService
     }
@@ -42,20 +66,42 @@ class GeoLocationService : Service() {
         createNotificationChannelIfNeeded()
         startForeground(NOTIF_ID, buildNotification("Waiting for location…"))
         fused = LocationServices.getFusedLocationProviderClient(this)
-
-        // ★ 起動時点のバッテリー初期値（任意）
+        db = AppDatabase.get(this)
+        running.value = true
         _batteryFlow.value = getBatteryInfo()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startLocationUpdates()
-        return START_STICKY
+        when (intent?.action) {
+            ACTION_UPDATE_INTERVAL -> {
+                val ms = intent.getLongExtra(EXTRA_UPDATE_MS, -1)
+                Log.d(TAG, "ACTION_UPDATE_INTERVAL received: ms=$ms (old=$updateIntervalMs)")
+                if (ms > 0) {
+                    updateIntervalMs = ms
+                    restartLocationUpdates()
+                    notifyForeground("Interval=${updateIntervalMs}ms updated")
+                }
+                return START_NOT_STICKY
+            }
+            else -> {
+                Log.d(TAG, "onStartCommand: startLocationUpdates interval=$updateIntervalMs")
+                // 通常起動
+                startLocationUpdates()
+                return START_NOT_STICKY // 明示停止後は自動復活しない
+            }
+        }
     }
 
     override fun onDestroy() {
         stopLocationUpdates()
         serviceScope.cancel()
+        running.value = false
         super.onDestroy()
+    }
+
+    private fun restartLocationUpdates() {
+        stopLocationUpdates()
+        startLocationUpdates()
     }
 
     private fun startLocationUpdates() {
@@ -70,30 +116,37 @@ class GeoLocationService : Service() {
             return
         }
 
-        // まずは lastLocation を通知して“即時表示”
-        fused.lastLocation.addOnSuccessListener { loc ->
-            loc?.let { onNewLocation(it) }
-        }
+        // 即時表示
+        fused.lastLocation.addOnSuccessListener { it?.let(::onNewLocation) }
 
-        // 継続更新のリクエスト
+        // リクエスト生成（可変間隔）
         val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, // 高精度が不要なら PRIORITY_BALANCED_POWER_ACCURACY
-            5_000L                           // 要件に応じて調整
+            Priority.PRIORITY_HIGH_ACCURACY,
+            updateIntervalMs
         )
-            .setMinUpdateIntervalMillis(2_000L)  // 端末が早く取れた時の最短間隔
-            .setMaxUpdateDelayMillis(10_000L)    // バッチ遅延上限
+            // 「最短」を基準間隔と同じにして、速すぎる丸めを避ける
+            .setMinUpdateIntervalMillis(updateIntervalMs)
+            // バッチング（遅延まとめ配信）をしない
+            // .setMaxUpdateDelayMillis(0) ← 省略 or 0 を指定（0 と同等）
+            // 移動距離しきい値をゼロ（時間ベースで配信）
+            .setMinUpdateDistanceMeters(0f)
+            // 許可レベルに応じたグラニュラリティ
+            .setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
+            // 初回から“高精度 fix まで待たない”（必要なら true に）
+            .setWaitForAccurateLocation(false)
             .build()
+
 
         callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { onNewLocation(it) }
+                result.lastLocation?.let(::onNewLocation)
             }
         }
 
         fused.requestLocationUpdates(
             request,
             callback as LocationCallback,
-            mainLooper // コールバックスレッド
+            mainLooper
         )
     }
 
@@ -102,15 +155,20 @@ class GeoLocationService : Service() {
         callback = null
     }
 
+    private var lastTs = 0L
     private fun onNewLocation(loc: Location) {
-        // ★ バッテリー取得（即時）
+        val now = System.currentTimeMillis()
+        val dt = if (lastTs == 0L) -1 else now - lastTs
+        lastTs = now
+        Log.d(TAG, "tick dt=${dt}ms (request=${updateIntervalMs}ms) provider=${loc.provider}")
+
         val batt = getBatteryInfo()
 
-        // 1) Flow を更新（UI が bind していれば即時反映）
+        // 1) Flow 更新
         _locationFlow.value = loc
-        _batteryFlow.value = batt // ★ 追加
+        _batteryFlow.value = batt
 
-        // 2) 通知の本文を更新（位置 + バッテリーを表示）
+        // 2) 通知更新
         val text = buildString {
             append("lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}m")
             if (batt.pct >= 0) {
@@ -120,7 +178,21 @@ class GeoLocationService : Service() {
         }
         notifyForeground(text)
 
-        // 3) ログ（“tick...”の代わり）
+        // 3) DB 保存（無制限で蓄積）
+        serviceScope.launch(Dispatchers.IO) {
+            db.locationSampleDao().insert(
+                LocationSample(
+                    lat = loc.latitude,
+                    lon = loc.longitude,
+                    accuracy = loc.accuracy,
+                    provider = loc.provider,
+                    batteryPct = batt.pct,
+                    isCharging = batt.isCharging,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
         Log.d(TAG, "location: $text")
     }
 
@@ -138,16 +210,15 @@ class GeoLocationService : Service() {
         }
     }
 
-    private fun buildNotification(text: String): Notification {
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GeoLocationProvider")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()
-    }
 
-    // ★ バッテリー情報の即時取得（追加の権限は不要）
+    // バッテリー情報の即時取得（追加権限不要）
     private fun getBatteryInfo(): BatteryInfo {
         val intent = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
         val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
@@ -158,11 +229,5 @@ class GeoLocationService : Service() {
         val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
                 status == BatteryManager.BATTERY_STATUS_FULL
         return BatteryInfo(pct, isCharging)
-    }
-
-    companion object {
-        private const val TAG = "GeoLocationService"
-        private const val CHANNEL_ID = "geo_location_service"
-        private const val NOTIF_ID = 1001
     }
 }
