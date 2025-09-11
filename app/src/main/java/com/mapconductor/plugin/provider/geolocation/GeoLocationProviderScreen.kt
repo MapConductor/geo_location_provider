@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.MaterialTheme
@@ -26,7 +24,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -35,8 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.launch
-
+import androidx.lifecycle.viewmodel.compose.viewModel
 /**
  * 画面エントリ。
  * - トグル（起動/停止）
@@ -74,7 +70,7 @@ fun GeoLocationProviderScreen(
                 Spacer(Modifier.height(8.dp))
                 Divider()
                 Spacer(Modifier.height(2.dp))
-                Text(text = "保存場所 :\n/data/data/com.mapconductor.plugin.provider.geolocation/databases/app.db")
+                ExportButton(limit = 1000)
                 Spacer(Modifier.height(2.dp))
                 Divider()
                 Spacer(Modifier.height(8.dp))
@@ -201,5 +197,17 @@ fun UpdateIntervalControl() {
             },
             enabled = running
         ) { Text("適用") }
+    }
+}
+@Composable
+fun ExportButton(
+    modifier: Modifier = Modifier,
+    limit: Int? = 1000 // null なら全件
+) {
+    val context = LocalContext.current
+    val vm: ManualExportViewModel = viewModel(factory = ManualExportViewModel.factory(context))
+
+    Button(onClick = { vm.exportAll(limit) }, modifier = modifier) {
+        Text("Export to Downloads")
     }
 }

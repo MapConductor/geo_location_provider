@@ -8,92 +8,69 @@ import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.File
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
 object GeoJsonExporter {
 
-    /** GeoJSONの中身を生成（FeatureCollection） */
-    private fun buildGeoJson(samples: List<LocationSample>): String {
-        val features = JSONArray()
-        samples.forEach { s ->
-            val point = JSONObject().apply {
-                put("type", "Point")
-                put("coordinates", JSONArray(listOf(s.lon, s.lat))) // [lon, lat] がGeoJSON標準
-            }
-            val props = JSONObject().apply {
-                put("accuracy", s.accuracy)
-                put("provider", s.provider ?: JSONObject.NULL)
-                put("batteryPct", s.batteryPct)
-                put("isCharging", s.isCharging)
-                put("timestamp", s.createdAt) // epoch millis
-            }
-            val feature = JSONObject().apply {
-                put("type", "Feature")
-                put("geometry", point)
-                put("properties", props)
-            }
-            features.put(feature)
+    private val nameFmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+
+    /** LocationSample -> GeoJSON(FeatureCollection) */
+    private fun toGeoJson(records: List<LocationSample>): String {
+        val sb = StringBuilder(1024)
+        sb.append("{\"type\":\"FeatureCollection\",\"features\":[")
+        records.forEachIndexed { i, r ->
+            if (i > 0) sb.append(',')
+            sb.append("{\"type\":\"Feature\",\"geometry\":{")
+            sb.append("\"type\":\"Point\",\"coordinates\":[")
+            sb.append(r.lon).append(',').append(r.lat) // GeoJSONは [lon, lat]
+            sb.append("]},\"properties\":{")
+            sb.append("\"timestamp\":").append(r.createdAt)
+            sb.append(",\"accuracy\":").append(r.accuracy)
+            sb.append(",\"batteryPct\":").append(r.batteryPct)
+            sb.append(",\"isCharging\":").append(if (r.isCharging) "true" else "false")
+            sb.append(",\"provider\":")
+            if (r.provider != null) sb.append("\"").append(r.provider).append("\"") else sb.append("null")
+            sb.append("}}")
         }
-        return JSONObject().apply {
-            put("type", "FeatureCollection")
-            put("features", features)
-        }.toString()
+        sb.append("]}")
+        return sb.toString()
     }
 
-    private fun nowStamp(): String =
-        SimpleDateFormat("yyyyMMdd-HHmmss", Locale.getDefault()).format(Date())
+    /** Downloads/GeoLocationProvider に保存。成功時 Uri、データ無し/失敗時 null */
+    suspend fun exportToDownloads(context: Context, records: List<LocationSample>): Uri? =
+        withContext(Dispatchers.IO) {
+            if (records.isEmpty()) return@withContext null
 
-    /** 2-1) アプリ専用の外部領域: /Android/data/<pkg>/files/exports/ に出力（固定ディレクトリ） */
-    suspend fun exportToAppExternal(context: Context, limit: Int = 1000): Uri = withContext(Dispatchers.IO) {
-        val db = AppDatabase.get(context)
-        val items = db.locationSampleDao().latestList(limit)
+            val fileName = "locations-${nameFmt.format(Date())}.geojson"
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "application/geo+json")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/GeoLocationProvider"
+                    )
+                }
+            }
 
-        val dir = File(context.getExternalFilesDir(null), "exports").apply { mkdirs() }
-        val file = File(dir, "locations-${nowStamp()}.geojson")
-        file.outputStream().use { os -> os.write(buildGeoJson(items).toByteArray()) }
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            }
 
-        Uri.fromFile(file) // アプリ内で使う想定（共有するならFileProviderを使う）
-    }
-
-    /**
-     * 2-2) Downloads に出力（ユーザーが見える固定ディレクトリ）
-     * Android 10+ は MediaStore で権限不要。Android 9 以下は WRITE_EXTERNAL_STORAGE が必要。
-     */
-    suspend fun exportToDownloads(context: Context, limit: Int = 1000): Uri = withContext(Dispatchers.IO) {
-        val db = AppDatabase.get(context)
-        val items = db.locationSampleDao().latestList(limit)
-        val json = buildGeoJson(items)
-
-        val resolver = context.contentResolver
-        val name = "locations-${nowStamp()}.geojson"
-        val relative = Environment.DIRECTORY_DOWNLOADS + "/GeoLocationProvider"
-
-        val values = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, name)
-            put(MediaStore.MediaColumns.MIME_TYPE, "application/geo+json")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relative)
+            val resolver = context.contentResolver
+            val uri = resolver.insert(collection, values) ?: return@withContext null
+            try {
+                resolver.openOutputStream(uri)?.use { out: OutputStream ->
+                    out.bufferedWriter(Charsets.UTF_8).use { it.write(toGeoJson(records)) }
+                }
+                uri
+            } catch (_: Throwable) {
+                runCatching { resolver.delete(uri, null, null) }
+                null
             }
         }
-
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        }
-
-        val uri = resolver.insert(collection, values)
-            ?: throw IllegalStateException("Failed to create download entry")
-        resolver.openOutputStream(uri).use { os: OutputStream? ->
-            requireNotNull(os) { "OutputStream is null" }
-            os.write(json.toByteArray())
-            os.flush()
-        }
-        uri
-    }
 }
