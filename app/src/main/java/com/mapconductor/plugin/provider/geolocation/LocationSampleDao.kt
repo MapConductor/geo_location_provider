@@ -25,4 +25,11 @@ interface LocationSampleDao {
         LIMIT 1
     """)
     fun latestOne(): Flow<LocationSample?>
+
+    @Query("""
+    SELECT * FROM location_samples
+    ORDER BY createdAt DESC
+    LIMIT :limit
+""")
+    suspend fun latestList(limit: Int): List<LocationSample>
 }
