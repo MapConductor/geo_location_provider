@@ -19,6 +19,15 @@ class MidnightExportWorker(
     private val zone = ZoneId.of("Asia/Tokyo")
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        // 最大5回までリトライ（attempt は 0 始まり）
+        if (runAttemptCount >= 5) {
+            // 失敗通知
+            ExportNotify.notifyPermanentFailure(applicationContext, "GeoJSON backup failed after 5 retries")
+            // 次回 0:00 を再予約（ここで止めず、日次は回す）
+            MidnightExportScheduler.scheduleNext(applicationContext)
+            return@withContext Result.failure()
+        }
+
         // 「実行時刻が何時でも」当日0:00基準で切る
         val cutoff = ZonedDateTime.now(zone)
             .truncatedTo(ChronoUnit.DAYS) // 当日 0:00（JST）
