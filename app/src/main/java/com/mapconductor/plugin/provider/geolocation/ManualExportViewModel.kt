@@ -20,7 +20,7 @@ class ManualExportViewModel(private val appContext: Context) : ViewModel() {
             val take = limit ?: Int.MAX_VALUE
             val data = dao.latestList(take)   // 新しい順で最大 take 件
 
-            val uri = GeoJsonExporter.exportToDownloads(appContext, data)
+            val uri = GeoJsonExporter.exportToDownloads(appContext, data, compressAsZip = true)
 
             withContext(Dispatchers.Main) {
                 val msg = when {

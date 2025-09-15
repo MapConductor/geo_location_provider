@@ -49,7 +49,7 @@ class MidnightExportWorker(
         }
 
         // GeoJSON 出力
-        val uri = GeoJsonExporter.exportToDownloads(applicationContext, targets)
+        val uri = GeoJsonExporter.exportToDownloads(applicationContext, targets, compressAsZip = true)
         if (uri == null) {
             // 失敗 → Step.3 のリトライは Backoff で自動(1分)。ここでは retry。
             return@withContext Result.retry()
