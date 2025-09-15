@@ -42,4 +42,5 @@ interface LocationSampleDao {
     suspend fun findBefore(cutoffEpochMillis: Long): List<LocationSample>
 
     @Query("DELETE FROM location_samples WHERE id IN (:ids)")
+
     suspend fun deleteByIds(ids: List<Long>): Int}

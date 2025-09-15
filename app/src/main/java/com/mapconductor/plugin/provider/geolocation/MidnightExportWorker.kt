@@ -10,6 +10,7 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 import androidx.room.withTransaction
+import java.time.Duration
 
 class MidnightExportWorker(
     appContext: Context,
@@ -23,6 +24,7 @@ class MidnightExportWorker(
         if (runAttemptCount >= 5) {
             // 失敗通知
             ExportNotify.notifyPermanentFailure(applicationContext, "GeoJSON backup failed after 5 retries")
+
             // 次回 0:00 を再予約（ここで止めず、日次は回す）
             MidnightExportScheduler.scheduleNext(applicationContext)
             return@withContext Result.failure()
@@ -42,6 +44,7 @@ class MidnightExportWorker(
         if (targets.isEmpty()) {
             // 次回スケジュールだけ掛け直して成功扱い
             MidnightExportScheduler.scheduleNext(applicationContext)
+//            val delay = Duration.ofSeconds(15)
             return@withContext Result.success()
         }
 
@@ -62,6 +65,7 @@ class MidnightExportWorker(
 
         // 次回 0:00 を再スケジュール
         MidnightExportScheduler.scheduleNext(applicationContext)
+//        val delay = Duration.ofSeconds(15)
 
         Result.success()
     }
