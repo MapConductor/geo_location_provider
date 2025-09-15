@@ -30,6 +30,16 @@ interface LocationSampleDao {
     SELECT * FROM location_samples
     ORDER BY createdAt DESC
     LIMIT :limit
-""")
+    """)
+
     suspend fun latestList(limit: Int): List<LocationSample>
-}
+    @Query("""
+        SELECT * FROM location_samples
+        WHERE createdAt < :cutoffEpochMillis
+        ORDER BY createdAt ASC
+    """)
+
+    suspend fun findBefore(cutoffEpochMillis: Long): List<LocationSample>
+
+    @Query("DELETE FROM location_samples WHERE id IN (:ids)")
+    suspend fun deleteByIds(ids: List<Long>): Int}

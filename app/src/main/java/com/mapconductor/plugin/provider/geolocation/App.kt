@@ -10,5 +10,6 @@ class App : Application() {
         // アプリ起動時に前景サービスを開始
         val intent = Intent(this, GeoLocationService::class.java)
         ContextCompat.startForegroundService(this, intent)
+        MidnightExportScheduler.scheduleNext(this)
     }
 }
