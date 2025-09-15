@@ -69,27 +69,47 @@ class GeoLocationService : Service() {
         db = AppDatabase.get(this)
         running.value = true
         _batteryFlow.value = getBatteryInfo()
+        startLocationUpdates() // ★ これを追加
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_UPDATE_INTERVAL -> {
-                val ms = intent.getLongExtra(EXTRA_UPDATE_MS, -1)
-                Log.d(TAG, "ACTION_UPDATE_INTERVAL received: ms=$ms (old=$updateIntervalMs)")
-                if (ms > 0) {
-                    updateIntervalMs = ms
-                    restartLocationUpdates()
-                    notifyForeground("Interval=${updateIntervalMs}ms updated")
-                }
-                return START_NOT_STICKY
-            }
-            else -> {
-                Log.d(TAG, "onStartCommand: startLocationUpdates interval=$updateIntervalMs")
-                // 通常起動
-                startLocationUpdates()
-                return START_NOT_STICKY // 明示停止後は自動復活しない
-            }
-        }
+//    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+//        when (intent?.action) {
+//            ACTION_UPDATE_INTERVAL -> {
+//                val ms = intent.getLongExtra(EXTRA_UPDATE_MS, -1)
+//                Log.d(TAG, "ACTION_UPDATE_INTERVAL received: ms=$ms (old=$updateIntervalMs)")
+//                if (ms > 0) {
+//                    updateIntervalMs = ms
+//                    restartLocationUpdates()
+//                    notifyForeground("Interval=${updateIntervalMs}ms updated")
+//                }
+//                return START_NOT_STICKY
+//            }
+//            else -> {
+//                Log.d(TAG, "onStartCommand: startLocationUpdates interval=$updateIntervalMs")
+//                // 通常起動
+//                startLocationUpdates()
+//                return START_NOT_STICKY // 明示停止後は自動復活しない
+//            }
+//        }
+//    }
+override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    // 通知チャンネル作成 → Notification を setOngoing(true) で生成
+    startForeground(NOTIF_ID, buildOngoingNotification())
+
+    // システムに殺されても、可能な限り再起動させる
+    return START_STICKY
+}
+
+    private fun buildOngoingNotification(): Notification {
+        // 既存のチャンネルID/タイトル/アイコンを流用しつつ、
+        // builder.setOngoing(true) を必ず指定。
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("GeoLocation tracking")
+            .setContentText("Service is running")
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setOngoing(true)                  // ★ スワイプで消せない
+            .setOnlyAlertOnce(true)
+            .build()
     }
 
     override fun onDestroy() {

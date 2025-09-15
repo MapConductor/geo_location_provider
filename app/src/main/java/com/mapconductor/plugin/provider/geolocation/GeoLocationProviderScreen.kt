@@ -54,11 +54,11 @@ fun GeoLocationProviderScreen(
             ) {
                 Spacer(Modifier.height(64.dp))
 
-                // 起動/停止トグル（権限付き）
-                ServiceControlToggleWithPermission()
-
-                Spacer(Modifier.height(12.dp))
-
+//                // 起動/停止トグル（権限付き）
+//                ServiceControlToggleWithPermission()
+//
+//                Spacer(Modifier.height(12.dp))
+//
                 // 更新間隔（秒）入力 → サービスに反映
                 UpdateIntervalControl()
 
