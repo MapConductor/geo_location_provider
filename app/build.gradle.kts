@@ -2,7 +2,8 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
+    alias(libs.plugins.ksp)   // ★ これが無いと ksp { ... } が未解決になります
+    alias(libs.plugins.room)  // Room プラグインも alias で
 }
 
 android {
@@ -40,14 +41,15 @@ android {
     }
 }
 
-dependencies {
-    val room = "2.6.1" // 手元の環境に合わせてOK
-    implementation("androidx.room:room-runtime:$room")
-    implementation("androidx.room:room-ktx:$room")
-    ksp("androidx.room:room-compiler:$room") // KSP を使う場合
-    // kapt("androidx.room:room-compiler:$room") // KAPT を使うならこちら
-    implementation("com.google.android.gms:play-services-location:21.3.0")
+room {
+    schemaDirectory("$projectDir/schemas")
+}
 
+dependencies {
+    implementation(libs.androidx.work.runtime.ktx)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -64,4 +66,5 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    ksp(libs.androidx.room.compiler)  // ★ これが必要
 }
