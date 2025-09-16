@@ -17,49 +17,54 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import android.os.Binder
+import kotlinx.coroutines.flow.firstOrNull
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import kotlinx.coroutines.flow.MutableStateFlow
+
+private const val CHANNEL_ID = "geo_location_service"   // 通知チャネルID
+private const val NOTIF_ID   = 1001                     // 通知ID（任意の固定整数）
+private const val TAG = "GeoLocationService"
 
 class GeoLocationService : Service() {
-
-    // 実行状態（UIトグルと厳密同期）
-    companion object {
-        private const val TAG = "GeoLocationService"
-        private const val CHANNEL_ID = "geo_location_service"
-        private const val NOTIF_ID = 1001
-
-        const val ACTION_UPDATE_INTERVAL = "GeoLocationService.ACTION_UPDATE_INTERVAL"
-        const val EXTRA_UPDATE_MS = "extra_update_ms"
-
-        val running = MutableStateFlow(false)
-    }
-
-    // バッテリー情報
-    data class BatteryInfo(val pct: Int, val isCharging: Boolean)
-
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-    // UI から bind して観測できるフロー
-    private val _locationFlow = MutableStateFlow<Location?>(null)
-    val locationFlow: StateFlow<Location?> get() = _locationFlow
-
-    private val _batteryFlow = MutableStateFlow<BatteryInfo?>(null)
-    val batteryFlow: StateFlow<BatteryInfo?> get() = _batteryFlow
-
+    // Fused Location 関連
     private lateinit var fused: FusedLocationProviderClient
     private var callback: LocationCallback? = null
-    private var updateIntervalMs: Long = 5_000L
 
     // DB
     private lateinit var db: AppDatabase
 
-    // bind 用
-    inner class LocalBinder : android.os.Binder() {
+    // ライブ状態
+    private val _locationFlow: MutableStateFlow<Location?> = MutableStateFlow(null)
+    private val _batteryFlow: MutableStateFlow<BatteryInfo> = MutableStateFlow(BatteryInfo(-1, false))
+
+    companion object {
+        const val ACTION_UPDATE_INTERVAL = "com.mapconductor.UPDATE_INTERVAL"
+        const val EXTRA_UPDATE_MS        = "extra_update_ms"
+
+        private const val MIN_UPDATE_MS  = 5_000L       // ★ 最短5秒
+        private const val MAX_UPDATE_MS  = 3_600_000L   //   最長1時間
+        val running: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    }
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val settingsStore by lazy { SettingsStore(applicationContext) }
+
+    /** 現在の更新間隔（ms）。起動時は 5秒 で初期化 */
+    private var updateIntervalMs: Long = MIN_UPDATE_MS
+
+    /** Binder: UI から現在値を参照させる */
+    inner class LocalBinder : Binder() {
         fun getService(): GeoLocationService = this@GeoLocationService
     }
     private val binder = LocalBinder()
+
     override fun onBind(intent: Intent?): IBinder = binder
+
+    /** UI から参照される Getter（秒ではなく ms を返す） */
+    fun getUpdateIntervalMs(): Long = updateIntervalMs
 
     override fun onCreate() {
         super.onCreate()
@@ -73,38 +78,42 @@ class GeoLocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // 常駐通知（スワイプで消せない）
-        startForeground(NOTIF_ID, buildOngoingNotification())
-
-        // ← ここを追記：更新間隔の反映
-        if (intent?.action == ACTION_UPDATE_INTERVAL) {
-            val requested = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
-            val clamped = requested.coerceIn(1_000L, 3_600_000L) // 1秒〜1時間
-            if (clamped != updateIntervalMs) {
-                updateIntervalMs = clamped
-                restartLocationUpdates()
-
-                // 表示テキストを更新しておく（任意）
-                val nm = getSystemService(NotificationManager::class.java)
-                nm?.notify(NOTIF_ID, buildOngoingNotification())
+        // ① 起動時：DataStore の保存値があれば反映
+        if (intent == null) {
+            serviceScope.launch {
+                val saved = settingsStore.updateIntervalMsFlow.firstOrNull()
+                if (saved != null && saved != updateIntervalMs) {
+                    updateIntervalMs = saved.coerceIn(MIN_UPDATE_MS, MAX_UPDATE_MS)
+                    restartLocationUpdates()
+                }
+                // SSOT を常に正に（起動時の現在値を書き戻し）
+                settingsStore.setUpdateIntervalMs(updateIntervalMs)
             }
         }
 
-        // 可能な限り再起動させる
+        // ② 更新要求（UIから）
+        if (intent?.action == ACTION_UPDATE_INTERVAL) {
+            val requested = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
+            val clamped = requested.coerceIn(MIN_UPDATE_MS, MAX_UPDATE_MS)
+            if (clamped != updateIntervalMs) {
+                updateIntervalMs = clamped
+                restartLocationUpdates()
+                // 書き戻し（SSOT）
+                serviceScope.launch { settingsStore.setUpdateIntervalMs(updateIntervalMs) }
+            }
+        }
+
         return START_STICKY
     }
 
-    private fun buildOngoingNotification(): Notification {
-        // 既存のチャンネルID/タイトル/アイコンを流用しつつ、
-        // builder.setOngoing(true) を必ず指定。
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+    private fun buildOngoingNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GeoLocation tracking")
             .setContentText("Service is running")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setOngoing(true)                  // ★ スワイプで消せない
+            .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
-    }
 
     override fun onDestroy() {
         stopLocationUpdates()
@@ -138,18 +147,11 @@ class GeoLocationService : Service() {
             Priority.PRIORITY_HIGH_ACCURACY,
             updateIntervalMs
         )
-            // 「最短」を基準間隔と同じにして、速すぎる丸めを避ける
             .setMinUpdateIntervalMillis(updateIntervalMs)
-            // バッチング（遅延まとめ配信）をしない
-            // .setMaxUpdateDelayMillis(0) ← 省略 or 0 を指定（0 と同等）
-            // 移動距離しきい値をゼロ（時間ベースで配信）
             .setMinUpdateDistanceMeters(0f)
-            // 許可レベルに応じたグラニュラリティ
             .setGranularity(Granularity.GRANULARITY_PERMISSION_LEVEL)
-            // 初回から“高精度 fix まで待たない”（必要なら true に）
             .setWaitForAccurateLocation(false)
             .build()
-
 
         callback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
@@ -245,3 +247,5 @@ class GeoLocationService : Service() {
         return BatteryInfo(pct, isCharging)
     }
 }
+
+data class BatteryInfo(val pct: Int, val isCharging: Boolean)

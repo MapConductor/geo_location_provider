@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DividerDefaults
@@ -26,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -57,7 +60,12 @@ fun GeoLocationProviderScreen(
                 Spacer(Modifier.height(64.dp))
 
                 // 更新間隔（秒）入力 → サービスに反映
-                UpdateIntervalControl()
+//                UpdateIntervalControl()
+                val context = LocalContext.current
+                val viewModel = remember {
+                    IntervalSettingsViewModel(context.applicationContext)
+                }
+                IntervalSettingsSection(viewModel)
 
                 Spacer(Modifier.height(8.dp))
 
@@ -95,107 +103,32 @@ fun GeoLocationProviderScreen(
 }
 
 /* --- 以下、画面内で使う補助Composableたち --- */
-
-/** 権限付き 起動/停止トグル（UIと実体を GeoLocationService.running で同期） */
 @Composable
-fun ServiceControlToggleWithPermission() {
-    val context = LocalContext.current
-    val running by GeoLocationService.running.collectAsState()
-    val scope = rememberCoroutineScope()
-
-    val permsLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val hasLocation =
-            (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) ||
-                    (result[Manifest.permission.ACCESS_COARSE_LOCATION] == true)
-        val hasNotif = if (Build.VERSION.SDK_INT >= 33) {
-            result[Manifest.permission.POST_NOTIFICATIONS] == true
-        } else true
-
-        if (hasLocation && hasNotif) {
-            ContextCompat.startForegroundService(
-                context, Intent(context, GeoLocationService::class.java)
-            )
-        } else {
-            Toast.makeText(context, "必要な権限が許可されていません。", Toast.LENGTH_SHORT).show()
-        }
-    }
+fun IntervalSettingsSection(viewModel: IntervalSettingsViewModel) {
+    val secondsState = viewModel.secondsText.collectAsState()
+    val seconds = secondsState.value
 
     Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(if (running) "GeoLocationService: ON" else "GeoLocationService: OFF")
-        Switch(
-            checked = running,
-            onCheckedChange = { turnOn ->
-                if (turnOn) {
-                    val needs = buildList {
-                        val hasFine = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.ACCESS_FINE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                        val hasCoarse = ContextCompat.checkSelfPermission(
-                            context, Manifest.permission.ACCESS_COARSE_LOCATION
-                        ) == PackageManager.PERMISSION_GRANTED
-                        if (!hasFine && !hasCoarse) add(Manifest.permission.ACCESS_FINE_LOCATION)
-                        if (Build.VERSION.SDK_INT >= 33) {
-                            val hasNotif = ContextCompat.checkSelfPermission(
-                                context, Manifest.permission.POST_NOTIFICATIONS
-                            ) == PackageManager.PERMISSION_GRANTED
-                            if (!hasNotif) add(Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    }
-                    if (needs.isEmpty()) {
-                        ContextCompat.startForegroundService(
-                            context, Intent(context, GeoLocationService::class.java)
-                        )
-                    } else {
-                        permsLauncher.launch(needs.toTypedArray())
-                    }
-                } else {
-                    context.stopService(Intent(context, GeoLocationService::class.java))
-                }
-            }
-        )
-    }
-}
-
-/** 更新間隔（秒）を入力してサービスに反映 */
-@Composable
-fun UpdateIntervalControl() {
-    val context = LocalContext.current
-    val running by GeoLocationService.running.collectAsState()
-    var text by rememberSaveable { mutableStateOf("5") } // 既定 5秒
-    val scope = rememberCoroutineScope()
-
-    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         OutlinedTextField(
-            value = text,
-            onValueChange = { text = it.filter { c -> c.isDigit() } },
-            label = { Text("更新間隔(秒) ※最短5秒") },
-            singleLine = true
+            value = seconds,
+            onValueChange = viewModel::onSecondsChanged,
+            label = { Text("Update Interval (sec) · Min 5s") },
+            singleLine = true,
+            modifier = Modifier
+                .weight(1f)      // TextField を可変幅に
         )
-        Button(
-            onClick = {
-                val sec = text.toLongOrNull() ?: 5L
-                val ms = sec.coerceIn(1L, 3600L) * 1000L
-                // 既にサービスが動いている前提で、間隔更新アクションを送る
-                val intent = Intent(context, GeoLocationService::class.java).apply {
-                    action = GeoLocationService.ACTION_UPDATE_INTERVAL
-                    putExtra(GeoLocationService.EXTRA_UPDATE_MS, ms)
-                }
-                // 起動中なら startService で onStartCommand が呼ばれ、間隔が更新される
-                context.startService(intent)
-                Toast.makeText(context, "更新間隔を ${sec}s に適用", Toast.LENGTH_SHORT).show()
-            },
-            enabled = running
-        ) { Text("適用") }
+        Button(onClick = { viewModel.saveAndApply() }) {
+            Text("Save & Apply")
+        }
     }
 }
+
 @Composable
 fun ExportButton(
     modifier: Modifier = Modifier,
