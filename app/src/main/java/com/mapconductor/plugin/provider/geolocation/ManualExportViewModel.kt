@@ -10,17 +10,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class ManualExportViewModel(private val appContext: Context) : ViewModel() {
-
-    /** ボタン押下で呼ぶ：末尾 limit 件（nullなら全件相当）をエクスポート */
+    /** ボタン押下で呼ぶ：末尾 limit 件（nullなら全件）をエクスポート（ZIPで保存） */
     fun exportAll(limit: Int? = 1000) {
         viewModelScope.launch(Dispatchers.IO) {
             val dao = AppDatabase.get(appContext).locationSampleDao()
 
-            // DAOに latestList(limit) がある前提。null の場合は十分大きい値を渡して“実質全件”
-            val take = limit ?: Int.MAX_VALUE
-            val data = dao.latestList(take)   // 新しい順で最大 take 件
+            val data: List<LocationSample> = if (limit != null) {
+                // latestList は降順なので、GeoJSONを時系列にしたければ反転
+                dao.latestList(limit).asReversed()
+            } else {
+                // 全件昇順
+                dao.findAllAsc()
+            }
 
-            val uri = GeoJsonExporter.exportToDownloads(appContext, data, compressAsZip = true)
+            val uri = GeoJsonExporter.exportToDownloads(
+                context = appContext,
+                records = data,
+                compressAsZip = true
+            )
 
             withContext(Dispatchers.Main) {
                 val msg = when {

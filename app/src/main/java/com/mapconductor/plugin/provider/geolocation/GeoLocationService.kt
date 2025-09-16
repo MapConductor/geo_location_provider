@@ -72,13 +72,27 @@ class GeoLocationService : Service() {
         startLocationUpdates()
     }
 
-override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    // 通知チャンネル作成 → Notification を setOngoing(true) で生成
-    startForeground(NOTIF_ID, buildOngoingNotification())
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 常駐通知（スワイプで消せない）
+        startForeground(NOTIF_ID, buildOngoingNotification())
 
-    // システムに殺されても、可能な限り再起動させる
-    return START_STICKY
-}
+        // ← ここを追記：更新間隔の反映
+        if (intent?.action == ACTION_UPDATE_INTERVAL) {
+            val requested = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
+            val clamped = requested.coerceIn(1_000L, 3_600_000L) // 1秒〜1時間
+            if (clamped != updateIntervalMs) {
+                updateIntervalMs = clamped
+                restartLocationUpdates()
+
+                // 表示テキストを更新しておく（任意）
+                val nm = getSystemService(NotificationManager::class.java)
+                nm?.notify(NOTIF_ID, buildOngoingNotification())
+            }
+        }
+
+        // 可能な限り再起動させる
+        return START_STICKY
+    }
 
     private fun buildOngoingNotification(): Notification {
         // 既存のチャンネルID/タイトル/アイコンを流用しつつ、
