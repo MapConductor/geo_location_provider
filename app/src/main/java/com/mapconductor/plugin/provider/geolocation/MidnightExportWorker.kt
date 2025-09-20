@@ -20,50 +20,50 @@ class MidnightExportWorker(
     private val zone = ZoneId.of("Asia/Tokyo")
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        // æœ€å¤§5å›ã¾ã§ãƒªãƒˆãƒ©ã‚¤ï¼ˆattempt ã¯ 0 å§‹ã¾ã‚Šï¼‰
+        // Å‘å5‰ñ‚Ü‚ÅƒŠƒgƒ‰ƒCiattempt ‚Í 0 n‚Ü‚èj
         if (runAttemptCount >= 5) {
-            // å¤±æ•—é€šçŸ¥
+            // ¸”s’Ê’m
             ExportNotify.notifyPermanentFailure(applicationContext, "GeoJSON backup failed after 5 retries")
 
-            // æ¬¡å› 0:00 ã‚’å†äºˆç´„ï¼ˆã“ã“ã§æ­¢ã‚ãšã€æ—¥æ¬¡ã¯å›ã™ï¼‰
+            // Ÿ‰ñ 0:00 ‚ğÄ—\–ñi‚±‚±‚Å~‚ß‚¸A“úŸ‚Í‰ñ‚·j
             MidnightExportScheduler.scheduleNext(applicationContext)
             return@withContext Result.failure()
         }
 
-        // ã€Œå®Ÿè¡Œæ™‚åˆ»ãŒä½•æ™‚ã§ã‚‚ã€å½“æ—¥0:00åŸºæº–ã§åˆ‡ã‚‹
+        // uÀs‚ª‰½‚Å‚àv“–“ú0:00Šî€‚ÅØ‚é
         val cutoff = ZonedDateTime.now(zone)
-            .truncatedTo(ChronoUnit.DAYS) // å½“æ—¥ 0:00ï¼ˆJSTï¼‰
+            .truncatedTo(ChronoUnit.DAYS) // “–“ú 0:00iJSTj
             .toInstant().toEpochMilli()
 
         val db = AppDatabase.get(applicationContext)
         val dao = db.locationSampleDao()
 
-        // 0:00 ã‚ˆã‚Šå‰ã®ãƒ‡ãƒ¼ã‚¿ã‚’æŠ½å‡º
+        // 0:00 ‚æ‚è‘O‚Ìƒf[ƒ^‚ğ’Šo
         val targets = dao.findBefore(cutoff)
 
         if (targets.isEmpty()) {
-            // æ¬¡å›ã‚¹ã‚±ã‚¸ãƒ¥ãƒ¼ãƒ«ã ã‘æ›ã‘ç›´ã—ã¦æˆåŠŸæ‰±ã„
+            // Ÿ‰ñƒXƒPƒWƒ…[ƒ‹‚¾‚¯Š|‚¯’¼‚µ‚Ä¬Œ÷ˆµ‚¢
             MidnightExportScheduler.scheduleNext(applicationContext)
 //            val delay = Duration.ofSeconds(15)
             return@withContext Result.success()
         }
 
-        // GeoJSON å‡ºåŠ›
+        // GeoJSON o—Í
         val uri = GeoJsonExporter.exportToDownloads(applicationContext, targets, compressAsZip = true)
         if (uri == null) {
-            // å¤±æ•— â†’ Step.3 ã®ãƒªãƒˆãƒ©ã‚¤ã¯ Backoff ã§è‡ªå‹•(1åˆ†)ã€‚ã“ã“ã§ã¯ retryã€‚
+            // ¸”s ¨ Step.3 ‚ÌƒŠƒgƒ‰ƒC‚Í Backoff ‚Å©“®(1•ª)B‚±‚±‚Å‚Í retryB
             return@withContext Result.retry()
         }
 
-        // å‡ºåŠ›æˆåŠŸ â†’ å¯¾è±¡ãƒ¬ã‚³ãƒ¼ãƒ‰å‰Šé™¤ï¼ˆãƒˆãƒ©ãƒ³ã‚¶ã‚¯ã‚·ãƒ§ãƒ³æ¨å¥¨ï¼‰
+        // o—Í¬Œ÷ ¨ ‘ÎÛƒŒƒR[ƒhíœiƒgƒ‰ƒ“ƒUƒNƒVƒ‡ƒ“„§j
         db.withTransaction {
             val ids = targets.mapNotNull { it.id }
             if (ids.isNotEmpty()) {
-                dao.deleteByIds(ids)   // â† OKï¼ˆwithTransaction ã¯ suspendï¼‰
+                dao.deleteByIds(ids)   // © OKiwithTransaction ‚Í suspendj
             }
         }
 
-        // æ¬¡å› 0:00 ã‚’å†ã‚¹ã‚±ã‚¸ãƒ¥ãƒ¼ãƒ«
+        // Ÿ‰ñ 0:00 ‚ğÄƒXƒPƒWƒ…[ƒ‹
         MidnightExportScheduler.scheduleNext(applicationContext)
 //        val delay = Duration.ofSeconds(15)
 
