@@ -1,32 +1,46 @@
 package com.mapconductor.plugin.provider.geolocation
 
 import android.content.Context
+import android.util.Log
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.work.BackoffPolicy
 import java.time.Duration
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 
+/**
+ * 次の 0:00(JST) に 1回だけ実行される OneTimeWork を登録するスケジューラ。
+ * - 何度呼んでも UniqueWork で上書き(REPLACE)されるため、二重起動しない。
+ * - ネットワーク制約は付けない（P3では通信しない）。
+ */
 object MidnightExportScheduler {
 
-    private const val UNIQUE_NAME = "daily_geojson_backup"
+    private const val UNIQUE_WORK_NAME = "midnight_export"
+    private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
 
     fun scheduleNext(context: Context) {
-        val zone = ZoneId.of("Asia/Tokyo")
-        val now = ZonedDateTime.now(zone)
-        val nextMidnight = now.truncatedTo(ChronoUnit.DAYS).plusDays(1)
-        val delay = Duration.between(now, nextMidnight).coerceAtLeast(Duration.ofSeconds(10))
+        val now: ZonedDateTime = ZonedDateTime.now(zone)
+        val nextMidnight: ZonedDateTime = now.toLocalDate().plusDays(1).atStartOfDay(zone)
+        val delay: Duration = Duration.between(now, nextMidnight).coerceAtLeast(Duration.ofSeconds(0))
 
         val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
-            // Step.3 のためのバックオフ（失敗時 1分後に自動リトライ）
-            .setBackoffCriteria(BackoffPolicy.LINEAR, Duration.ofMinutes(1))
             .setInitialDelay(delay)
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.MINUTES)
             .build()
 
-        WorkManager.getInstance(context)
-            .enqueueUniqueWork(UNIQUE_NAME, ExistingWorkPolicy.REPLACE, req)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            req
+        )
+
+        Log.i(
+            LogTags.WORKER,
+            "Scheduled MidnightExportWorker at ${nextMidnight.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)} (delay=${delay.toMinutes()} min)"
+        )
     }
 }

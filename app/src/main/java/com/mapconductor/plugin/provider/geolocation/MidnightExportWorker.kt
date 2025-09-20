@@ -1,72 +1,73 @@
 package com.mapconductor.plugin.provider.geolocation
 
 import android.content.Context
+import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.mapconductor.plugin.provider.geolocation.GeoJsonExporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
-import androidx.room.withTransaction
-import java.time.Duration
 
+/**
+ * P3: æ˜¨æ—¥ã¶ã‚“ã®ã¿å†…éƒ¨ä¸€æ™‚ã¸ã‚¨ã‚¯ã‚¹ãƒãƒ¼ãƒˆã™ã‚‹ Workerã€‚
+ * - ã‚¢ãƒƒãƒ—ãƒ­ãƒ¼ãƒ‰ã¯ã—ãªã„
+ * - DB å‰Šé™¤ã¯ã—ãªã„
+ * - å®Ÿè¡Œå¾Œã«æ¬¡å› 0:00 ã‚’å†ã‚¹ã‚±ã‚¸ãƒ¥ãƒ¼ãƒ«
+ */
 class MidnightExportWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    private val zone = ZoneId.of("Asia/Tokyo")
+    private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        // Å‘å5‰ñ‚Ü‚ÅƒŠƒgƒ‰ƒCiattempt ‚Í 0 n‚Ü‚èj
-        if (runAttemptCount >= 5) {
-            // ¸”s’Ê’m
-            ExportNotify.notifyPermanentFailure(applicationContext, "GeoJSON backup failed after 5 retries")
+        try {
+            val ctx = applicationContext
+            val dao = AppDatabase.get(ctx).locationSampleDao()
 
-            // Ÿ‰ñ 0:00 ‚ğÄ—\–ñi‚±‚±‚Å~‚ß‚¸A“úŸ‚Í‰ñ‚·j
-            MidnightExportScheduler.scheduleNext(applicationContext)
-            return@withContext Result.failure()
-        }
+            // åŸºæº–æ™‚åˆ»ï¼šJSTã®â€œä»Šæ—¥ã®0:00â€
+            val now = ZonedDateTime.now(zone)
+            val today0 = now.toLocalDate().atStartOfDay(zone)
+            val yesterday0 = today0.minusDays(1)
 
-        // uÀs‚ª‰½‚Å‚àv“–“ú0:00Šî€‚ÅØ‚é
-        val cutoff = ZonedDateTime.now(zone)
-            .truncatedTo(ChronoUnit.DAYS) // “–“ú 0:00iJSTj
-            .toInstant().toEpochMilli()
+            val from = yesterday0.toInstant().toEpochMilli()   // inclusive
+            val to   = today0.toInstant().toEpochMilli()       // exclusive
 
-        val db = AppDatabase.get(applicationContext)
-        val dao = db.locationSampleDao()
+            Log.i(LogTags.WORKER, "Export window [${from} .. ${to}) JST yesterday")
 
-        // 0:00 ‚æ‚è‘O‚Ìƒf[ƒ^‚ğ’Šo
-        val targets = dao.findBefore(cutoff)
+            val records: List<LocationSample> = dao.findBetween(from, to)
 
-        if (targets.isEmpty()) {
-            // Ÿ‰ñƒXƒPƒWƒ…[ƒ‹‚¾‚¯Š|‚¯’¼‚µ‚Ä¬Œ÷ˆµ‚¢
-            MidnightExportScheduler.scheduleNext(applicationContext)
-//            val delay = Duration.ofSeconds(15)
-            return@withContext Result.success()
-        }
-
-        // GeoJSON o—Í
-        val uri = GeoJsonExporter.exportToDownloads(applicationContext, targets, compressAsZip = true)
-        if (uri == null) {
-            // ¸”s ¨ Step.3 ‚ÌƒŠƒgƒ‰ƒC‚Í Backoff ‚Å©“®(1•ª)B‚±‚±‚Å‚Í retryB
-            return@withContext Result.retry()
-        }
-
-        // o—Í¬Œ÷ ¨ ‘ÎÛƒŒƒR[ƒhíœiƒgƒ‰ƒ“ƒUƒNƒVƒ‡ƒ“„§j
-        db.withTransaction {
-            val ids = targets.mapNotNull { it.id }
-            if (ids.isNotEmpty()) {
-                dao.deleteByIds(ids)   // © OKiwithTransaction ‚Í suspendj
+            if (records.isEmpty()) {
+                Log.i(LogTags.WORKER, "No records in window. Skipping export.")
+                // æ¬¡å›åˆ†ã‚’äºˆç´„
+                runCatching { MidnightExportScheduler.scheduleNext(ctx) }
+                return@withContext Result.success()
             }
+
+            val out = InternalGeoJsonExporter.writeGeoJsonToCache(ctx, records, compress = true)
+            if (out == null || !out.exists()) {
+                Log.e(LogTags.WORKER, "Export failed: output file not created.")
+                // æ¬¡å›åˆ†ã‚’äºˆç´„ï¼ˆå¤±æ•—æ™‚ã‚‚å¿µã®ãŸã‚ï¼‰
+                runCatching { MidnightExportScheduler.scheduleNext(ctx) }
+                return@withContext Result.retry()
+            }
+
+            // å¤ã„ä¸€æ™‚ã®æƒé™¤ï¼ˆä»»æ„ï¼‰
+            runCatching { InternalGeoJsonExporter.cleanupOldTempFiles(ctx, days = 7) }
+
+            Log.i(LogTags.WORKER, "P3 export completed: ${out.absolutePath}")
+
+            // æ­£å¸¸çµ‚äº†å¾Œã«â€œæ¬¡å›0:00â€ã‚’äºˆç´„
+            runCatching { MidnightExportScheduler.scheduleNext(ctx) }
+
+            Result.success()
+        } catch (e: Throwable) {
+            Log.e(LogTags.WORKER, "P3 export crashed", e)
+            // ã‚¯ãƒ©ãƒƒã‚·ãƒ¥æ™‚ã‚‚æ¬¡å›åˆ†ã‚’äºˆç´„
+            runCatching { MidnightExportScheduler.scheduleNext(applicationContext) }
+            Result.retry()
         }
-
-        // Ÿ‰ñ 0:00 ‚ğÄƒXƒPƒWƒ…[ƒ‹
-        MidnightExportScheduler.scheduleNext(applicationContext)
-//        val delay = Duration.ofSeconds(15)
-
-        Result.success()
     }
 }

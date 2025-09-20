@@ -9,6 +9,8 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        MidnightExportScheduler.scheduleNext(this)
+
         // アプリ起動時に前景サービスを開始
         val intent = Intent(this, GeoLocationService::class.java)
         ContextCompat.startForegroundService(this, intent)

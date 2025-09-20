@@ -53,4 +53,19 @@ interface LocationSampleDao {
     // エクスポート済みIDの一括削除
     @Query("DELETE FROM location_samples WHERE id IN (:ids)")
     suspend fun deleteByIds(ids: List<Long>): Int
+
+    @Query("SELECT * FROM location_samples ORDER BY id ASC")
+    suspend fun findAll(): List<LocationSample>
+
+    /**
+     * JSTの 0:00 基準での時間帯抽出に使う。
+     * @param from inclusive (epoch millis)
+     * @param to   exclusive (epoch millis)
+     */
+    @Query("""
+        SELECT * FROM location_samples
+        WHERE createdAt >= :from AND createdAt < :to
+        ORDER BY id ASC
+    """)
+    suspend fun findBetween(from: Long, to: Long): List<LocationSample>
 }
