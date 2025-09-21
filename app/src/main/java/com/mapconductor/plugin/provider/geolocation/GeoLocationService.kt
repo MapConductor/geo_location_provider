@@ -43,6 +43,8 @@ class GeoLocationService : Service() {
     companion object {
         const val ACTION_UPDATE_INTERVAL = "com.mapconductor.UPDATE_INTERVAL"
         const val EXTRA_UPDATE_MS        = "extra_update_ms"
+        const val ACTION_START           = "com.mapconductor.plugin.provider.geolocation.action.START"
+        const val ACTION_STOP            = "com.mapconductor.plugin.provider.geolocation.action.STOP"
 
         private const val MIN_UPDATE_MS  = 5_000L       // ★ 最短5秒
         private const val MAX_UPDATE_MS  = 3_600_000L   //   最長1時間
@@ -69,15 +71,14 @@ class GeoLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannelIfNeeded()
-        startForeground(NOTIF_ID, buildNotification("Waiting for location…"))
         fused = LocationServices.getFusedLocationProviderClient(this)
         db = AppDatabase.get(this)
         running.value = true
         _batteryFlow.value = getBatteryInfo()
-        startLocationUpdates()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i("GeoLocationService", "onStartCommand action=${intent?.action}")
         // ① 起動時：DataStore の保存値があれば反映
         if (intent == null) {
             serviceScope.launch {
@@ -101,6 +102,11 @@ class GeoLocationService : Service() {
                 // 書き戻し（SSOT）
                 serviceScope.launch { settingsStore.setUpdateIntervalMs(updateIntervalMs) }
             }
+        }
+
+        if (intent?.action == ACTION_START) {
+            startForeground(NOTIF_ID, buildNotification("Waiting for location…"))
+            startLocationUpdates()
         }
 
         return START_STICKY

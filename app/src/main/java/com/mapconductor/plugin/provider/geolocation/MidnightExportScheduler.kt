@@ -38,9 +38,7 @@ object MidnightExportScheduler {
             req
         )
 
-        Log.i(
-            LogTags.WORKER,
-            "Scheduled MidnightExportWorker at ${nextMidnight.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME)} (delay=${delay.toMinutes()} min)"
-        )
+        val fmt = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+        Log.i(LogTags.WORKER, "Scheduled MidnightExportWorker at ${nextMidnight.format(fmt)} (delay=${delay.toMinutes()} min)")
     }
 }
