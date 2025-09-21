@@ -33,6 +33,10 @@ class GeoLocationService : Service() {
     private lateinit var fused: FusedLocationProviderClient
     private var callback: LocationCallback? = null
 
+    // 前景化・測位の状態
+    private var isForegroundStarted = false
+    private var locationStarted = false
+
     // DB
     private lateinit var db: AppDatabase
 
@@ -75,38 +79,52 @@ class GeoLocationService : Service() {
         db = AppDatabase.get(this)
         running.value = true
         _batteryFlow.value = getBatteryInfo()
+        Log.i(TAG, "onCreate")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.i("GeoLocationService", "onStartCommand action=${intent?.action}")
-        // ① 起動時：DataStore の保存値があれば反映
-        if (intent == null) {
-            serviceScope.launch {
-                val saved = settingsStore.updateIntervalMsFlow.firstOrNull()
-                if (saved != null && saved != updateIntervalMs) {
-                    updateIntervalMs = saved.coerceIn(MIN_UPDATE_MS, MAX_UPDATE_MS)
-                    restartLocationUpdates()
+        Log.i(TAG, "onStartCommand action=${intent?.action}")
+
+        when (intent?.action) {
+            ACTION_START -> {
+                // 1) 5秒ルール厳守：まず前景化
+                if (!isForegroundStarted) {
+                    startForeground(NOTIF_ID, buildNotification("Starting…"))
+                    isForegroundStarted = true
+                    Log.i(TAG, "startForeground done")
                 }
-                // SSOT を常に正に（起動時の現在値を書き戻し）
-                settingsStore.setUpdateIntervalMs(updateIntervalMs)
+                // 2) 測位開始（冪等）
+                if (!locationStarted) {
+                    startLocationUpdates()
+                    Log.i(TAG, "location start requested")
+                }
+                running.value = true
             }
-        }
 
-        // ② 更新要求（UIから）
-        if (intent?.action == ACTION_UPDATE_INTERVAL) {
-            val requested = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
-            val clamped = requested.coerceIn(MIN_UPDATE_MS, MAX_UPDATE_MS)
-            if (clamped != updateIntervalMs) {
-                updateIntervalMs = clamped
-                restartLocationUpdates()
-                // 書き戻し（SSOT）
-                serviceScope.launch { settingsStore.setUpdateIntervalMs(updateIntervalMs) }
+            ACTION_UPDATE_INTERVAL -> {
+                val requested = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
+                val clamped = requested.coerceIn(MIN_UPDATE_MS, MAX_UPDATE_MS)
+                if (clamped != updateIntervalMs) {
+                    updateIntervalMs = clamped
+                    restartLocationUpdates()
+                    serviceScope.launch { settingsStore.setUpdateIntervalMs(updateIntervalMs) }
+                }
             }
-        }
 
-        if (intent?.action == ACTION_START) {
-            startForeground(NOTIF_ID, buildNotification("Waiting for location…"))
-            startLocationUpdates()
+            ACTION_STOP -> {
+                Log.i(TAG, "ACTION_STOP received; stopping")
+                stopLocationUpdates()
+                stopSelf()
+            }
+
+            else -> {
+                // 端末やプロセスの再生成で null のことがある。保険で前景化→開始
+                if (!isForegroundStarted) {
+                    startForeground(NOTIF_ID, buildNotification("Resuming…"))
+                    isForegroundStarted = true
+                }
+                if (!locationStarted) startLocationUpdates()
+            }
         }
 
         return START_STICKY
@@ -122,6 +140,7 @@ class GeoLocationService : Service() {
             .build()
 
     override fun onDestroy() {
+        Log.i(TAG, "onDestroy")
         stopLocationUpdates()
         serviceScope.cancel()
         running.value = false
@@ -134,21 +153,25 @@ class GeoLocationService : Service() {
     }
 
     private fun startLocationUpdates() {
-        // 権限は UI で取得済み想定だが、念のため安全チェック
+        Log.i(TAG, "startLocationUpdates begin")
+
+        // 1) 権限チェック
         val hasFine = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
         val hasCoarse = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
+        Log.i(TAG, "perm fine=$hasFine coarse=$hasCoarse")
         if (!hasFine && !hasCoarse) {
-            Log.w(TAG, "Location permission missing. Stopping service.")
+            Log.w(TAG, "No location permission; stopSelf()")
+            notifyForeground("位置権限がありません")
             stopSelf()
             return
         }
 
-        // 即時表示
+        // 2) 直近位置を即時反映（成功可否に関係なくできる範囲で）
         fused.lastLocation.addOnSuccessListener { it?.let(::onNewLocation) }
 
-        // リクエスト生成（可変間隔）
+        // 3) リクエスト生成（可変間隔）
         val request = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
             updateIntervalMs
@@ -159,22 +182,51 @@ class GeoLocationService : Service() {
             .setWaitForAccurateLocation(false)
             .build()
 
-        callback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let(::onNewLocation)
-            }
-        }
+        // 4) 端末の位置設定（GPS/位置情報）が有効かを事前チェック
+        val settingsReq = LocationSettingsRequest.Builder()
+            .addLocationRequest(request)
+            .build()
+        val settingsClient = LocationServices.getSettingsClient(this)
 
-        fused.requestLocationUpdates(
-            request,
-            callback as LocationCallback,
-            mainLooper
-        )
+        settingsClient.checkLocationSettings(settingsReq)
+            .addOnSuccessListener {
+                // 5) 設定が満たされている → 更新開始
+                if (callback == null) {
+                    callback = object : LocationCallback() {
+                        override fun onLocationResult(result: LocationResult) {
+                            result.lastLocation?.let(::onNewLocation)
+                        }
+                    }
+                }
+                try {
+                    fused.requestLocationUpdates(
+                        request,
+                        callback as LocationCallback,
+                        mainLooper
+                    )
+                    locationStarted = true
+                    Log.i(TAG, "requestLocationUpdates issued")
+                } catch (se: SecurityException) {
+                    Log.e(TAG, "SecurityException in requestLocationUpdates", se)
+                    notifyForeground("位置権限エラー")
+                    stopSelf()
+                }
+            }
+            .addOnFailureListener { e ->
+                // 位置設定が無効（GPS OFF 等）のケース
+                Log.w(TAG, "Location settings not satisfied: ${e.message}")
+                notifyForeground("端末の位置設定が無効です（GPS/位置情報をONにしてください）")
+                // 開始しない＝locationStarted は false のまま
+            }
     }
 
     private fun stopLocationUpdates() {
-        callback?.let { fused.removeLocationUpdates(it) }
+        if (locationStarted && callback != null) {
+            runCatching { fused.removeLocationUpdates(callback as LocationCallback) }
+                .onFailure { Log.w(TAG, "removeLocationUpdates failed", it) }
+        }
         callback = null
+        locationStarted = false
     }
 
     private var lastTs = 0L

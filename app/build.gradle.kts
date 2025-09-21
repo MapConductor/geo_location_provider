@@ -56,7 +56,8 @@ room {
 }
 
 dependencies {
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation(libs.play.services.auth)
+    implementation(libs.androidx.datastore.preferences.v111)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.location)

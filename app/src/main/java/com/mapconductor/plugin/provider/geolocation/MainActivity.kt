@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -115,6 +116,8 @@ private fun AppRoot(
             TopAppBar(
                 title = { Text("GeoLocation") },
                 actions = {
+                    DriveAuthActions()
+
                     IconButton(onClick = onStartTracking) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = "Start")
                     }
