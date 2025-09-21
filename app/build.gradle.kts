@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization) // 未設定なら追加
     alias(libs.plugins.ksp)   // ★ これが無いと ksp { ... } が未解決になります
     alias(libs.plugins.room)  // Room プラグインも alias で
 }
@@ -56,6 +57,9 @@ room {
 }
 
 dependencies {
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation(libs.play.services.auth)
     implementation(libs.androidx.datastore.preferences.v111)
     implementation(libs.androidx.work.runtime.ktx)
@@ -80,4 +84,8 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
     ksp(libs.androidx.room.compiler)  // ★ これが必要
+    implementation(libs.play.services.auth) // Google サインイン
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation(libs.kotlinx.serialization.json) // JSON
 }

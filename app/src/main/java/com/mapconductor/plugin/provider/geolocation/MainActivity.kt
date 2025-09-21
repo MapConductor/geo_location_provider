@@ -7,12 +7,15 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +30,29 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.layout.fillMaxWidth
+
+// Drive フォルダURL or ID を受け取り、IDを取り出す（/folders/<ID> or ?id=<ID> を想定）
+private fun extractDriveFolderId(input: String): String {
+    val t = input.trim()
+    val re1 = Regex("""/folders/([a-zA-Z0-9_-]+)""")
+    val re2 = Regex("""[?&]id=([a-zA-Z0-9_-]+)""")
+    return re1.find(t)?.groupValues?.get(1)
+        ?: re2.find(t)?.groupValues?.get(1)
+        ?: t // どれでもなければそのままIDとして扱う
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -111,23 +137,114 @@ private fun AppRoot(
     onStopTracking: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    val snackbarHostState = remember { SnackbarHostState() }
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    val repo = remember { GoogleAuthRepository(ctx.applicationContext) }
+    val api  = remember { DriveApiClient() }
+
+    val showMsg: (String) -> Unit = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
+
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        scope.launch {
+            val acct = repo.handleSignInResult(res.data)
+            showMsg(acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed")
+        }
+    }
+
+    var driveMenu by remember { mutableStateOf(false) }
+
+    // ★ フォルダID入力ダイアログ用の状態
+    var showFolderDialog by remember { mutableStateOf(false) }
+    var folderInput by remember { mutableStateOf("") }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("GeoLocation") },
                 actions = {
-                    DriveAuthActions()
-
-                    IconButton(onClick = onStartTracking) {
-                        Icon(Icons.Filled.PlayArrow, contentDescription = "Start")
+                    TextButton(onClick = { driveMenu = true }) { Text("Drive") }
+                    DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Sign in") },
+                            onClick = {
+                                driveMenu = false
+                                launcher.launch(repo.buildSignInIntent())
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Get Token") },
+                            onClick = {
+                                driveMenu = false
+                                scope.launch {
+                                    val t = repo.getAccessTokenOrNull()
+                                    showMsg(t?.let { "Token OK: ${it.take(12)}…" } ?: "Token failed")
+                                }
+                            }
+                        )
+                        // ★ ここが新規：Folder ID 入力
+                        DropdownMenuItem(
+                            text = { Text("Set Folder ID…") },
+                            onClick = {
+                                driveMenu = false
+                                scope.launch {
+                                    val prefs = DrivePrefsRepository(ctx.applicationContext)
+                                    folderInput = prefs.folderIdFlow.first() // 既存値を初期表示
+                                    showFolderDialog = true
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("About.get") },
+                            onClick = {
+                                driveMenu = false
+                                scope.launch {
+                                    val token = repo.getAccessTokenOrNull()
+                                    val msg = if (token == null) {
+                                        "No token"
+                                    } else {
+                                        when (val r = api.aboutGet(token)) {
+                                            is ApiResult.Success -> "About 200: ${r.data.user?.emailAddress ?: "-"}"
+                                            is ApiResult.HttpError -> "About ${r.code}: ${r.body?.take(160) ?: "(no body)"}"
+                                            is ApiResult.NetworkError -> "About network: ${r.exception.javaClass.simpleName}: ${r.exception.message}"
+                                        }
+                                    }
+                                    showMsg(msg)
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Validate Folder") },
+                            onClick = {
+                                driveMenu = false
+                                scope.launch {
+                                    val token = repo.getAccessTokenOrNull()
+                                    val prefs = DrivePrefsRepository(ctx.applicationContext)
+                                    val id = prefs.folderIdFlow.first()
+                                    val msg = when {
+                                        token == null -> "No token"
+                                        id.isBlank()  -> "Folder ID empty"
+                                        else -> when (val r = api.validateFolder(token, id)) {
+                                            is ApiResult.Success ->
+                                                if (r.data.isFolder) "Folder OK: ${r.data.name} (${r.data.id})"
+                                                else "Not a folder: ${r.data.mimeType}"
+                                            is ApiResult.HttpError -> "Folder ${r.code}: ${r.body?.take(160) ?: "(no body)"}"
+                                            is ApiResult.NetworkError -> "Folder network: ${r.exception.message}"
+                                        }
+                                    }
+                                    showMsg(msg)
+                                }
+                            }
+                        )
                     }
-                    // Stop は TextButton にして icons-extended 依存を回避
-                    TextButton(onClick = onStopTracking) {
-                        Text("Stop")
-                    }
+                    TextButton(onClick = onStopTracking) { Text("Stop") }
                 }
             )
         },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = onStartTracking,
@@ -139,5 +256,36 @@ private fun AppRoot(
         androidx.compose.foundation.layout.Box(Modifier.padding(inner)) {
             content()
         }
+    }
+
+    // ★ ダイアログ本体（AppBarの外でOK）
+    if (showFolderDialog) {
+        AlertDialog(
+            onDismissRequest = { showFolderDialog = false },
+            title = { Text("Set Google Drive Folder ID") },
+            text = {
+                OutlinedTextField(
+                    value = folderInput,
+                    onValueChange = { folderInput = it },
+                    label = { Text("Folder ID or URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        val prefs = DrivePrefsRepository(ctx.applicationContext)
+                        val id = extractDriveFolderId(folderInput)
+                        prefs.setFolderId(id)
+                        showFolderDialog = false
+                        showMsg("Saved Folder ID: $id")
+                    }
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showFolderDialog = false }) { Text("Cancel") }
+            }
+        )
     }
 }

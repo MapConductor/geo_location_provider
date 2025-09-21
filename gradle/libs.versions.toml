@@ -16,9 +16,14 @@ playServicesAuthVersion = "21.4.0"
 playServicesLocation = "21.3.0"
 room = "2.7.2"
 work = "2.9.1"   # 例。プロジェクトに合わせてOK（2.9.x系で十分）
+okhttp = "4.12.0"
+kotlinx-serialization = "1.7.3"
 playServicesAuth = "21.2.0"  # 例：安定版
 
 [libraries]
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 androidx-activity-compose-v192 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 androidx-datastore-preferences-v111 = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferencesVersion" }
@@ -46,6 +51,7 @@ play-services-location = { module = "com.google.android.gms:play-services-locati
 
 [plugins]
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp            = { id = "com.google.devtools.ksp",       version.ref = "ksp" }
 room           = { id = "androidx.room",                 version.ref = "room" }
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -1,66 +1,48 @@
-// app/src/main/java/com/mapconductor/plugin/provider/geolocation/DriveAuthActions.kt
 package com.mapconductor.plugin.provider.geolocation
 
-import android.app.Activity
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
-import com.google.android.gms.common.api.ApiException
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import androidx.compose.runtime.rememberCoroutineScope
 
 @Composable
 fun DriveAuthActions() {
     val ctx = LocalContext.current
-    val activity = ctx as? Activity ?: return
-    val scope: CoroutineScope = rememberCoroutineScope()
-    val gms = remember { GoogleApiAvailability.getInstance() }
+    // applicationContext を渡してリーク回避
+    val repo = remember { GoogleAuthRepository(ctx.applicationContext) }
+    val scope = rememberCoroutineScope()
 
-    val signInLauncher = rememberLauncherForActivityResult(
+    var status by remember { mutableStateOf("") }
+
+    val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val acc = task.getResult(ApiException::class.java)
-            Toast.makeText(ctx, "Signed in: ${acc.email}", Toast.LENGTH_SHORT).show()
-            if (!GoogleAuthRepository.hasDriveScope(acc)) {
-                GoogleAuthRepository.requestDriveScope(activity, acc)
-            }
-        } catch (e: ApiException) {
-            val code = e.statusCode
-            val readable = GoogleSignInStatusCodes.getStatusCodeString(code)
-            android.util.Log.e("DriveAuth", "Sign-in failed: code=$code ($readable)", e)
-            Toast.makeText(ctx, "Sign-in failed: $code ($readable)", Toast.LENGTH_LONG).show()
+    ) { res ->
+        scope.launch {
+            val acct = repo.handleSignInResult(res.data)
+            status = acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed"
         }
     }
 
-    TextButton(onClick = {
-        val code = gms.isGooglePlayServicesAvailable(ctx)
-        if (code != ConnectionResult.SUCCESS) {
-            gms.getErrorDialog(activity, code, 1001)?.show()
-        } else {
-            signInLauncher.launch(GoogleAuthRepository.signInIntent(ctx))
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Button(onClick = { launcher.launch(repo.buildSignInIntent()) }) {
+            Text("Sign in")
         }
-    }) { Text("Sign in") }
-
-    TextButton(onClick = {
-        scope.launch(Dispatchers.IO) {
-            val token = GoogleAuthRepository.getAccessToken(ctx)
-            val msg = if (token != null) "Token: ${token.take(14)}…" else "Token: null"
-            activity.runOnUiThread {
-                Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+        Button(onClick = {
+            scope.launch {
+                val token = repo.getAccessTokenOrNull()
+                status = token?.let { "Token OK: ${it.take(12)}…" } ?: "Token failed"
             }
+        }) {
+            Text("Get Token")
         }
-    }) { Text("Get Token") }
+    }
+
+    // ステータス表示（必要なら場所に合わせて移動）
+    androidx.compose.material3.Text(text = status)
 }
