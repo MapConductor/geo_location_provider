@@ -9,9 +9,7 @@ package com.mapconductor.plugin.provider.geolocation
  */
 enum class UploadEngine(val wire: String) {
     NONE("none"),
-    KOTLIN("kotlin"),
-    JNI("jni"),
-    NATIVE("native");
+    KOTLIN("kotlin");
 
     companion object {
         fun fromString(s: String?): UploadEngine =
