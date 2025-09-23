@@ -4,24 +4,27 @@ import android.app.Application
 import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = DrivePrefsRepository(app)
     private val auth = GoogleAuthRepository(app)
-    private val api = DriveApiClient()
+    // ★ TODO() を解消：Application コンテキストで初期化
+    private val api = DriveApiClient(context = app.applicationContext)
 
-    val folderId: StateFlow<String> = prefs.folderIdFlow.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val accountEmail: StateFlow<String> = prefs.accountEmailFlow.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val tokenLastRefresh: StateFlow<Long> = prefs.tokenLastRefreshFlow.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    val folderId: StateFlow<String> =
+        prefs.folderIdFlow.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val accountEmail: StateFlow<String> =
+        prefs.accountEmailFlow.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val tokenLastRefresh: StateFlow<Long> =
+        prefs.tokenLastRefreshFlow.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
@@ -36,16 +39,18 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateFolderId(id: String) { viewModelScope.launch { prefs.setFolderId(id) } }
+    fun updateFolderId(id: String) {
+        viewModelScope.launch { prefs.setFolderId(id) }
+    }
 
     fun getToken() {
         viewModelScope.launch(Dispatchers.IO) {
             val token = auth.getAccessTokenOrNull()
-            if (token != null) {
+            _status.value = if (token != null) {
                 prefs.markTokenRefreshed(System.currentTimeMillis())
-                _status.value = "Token OK: ${'$'}{token.take(12)}…"
+                "Token OK: ${token.take(12)}…"
             } else {
-                _status.value = "Token failed"
+                "Token failed"
             }
         }
     }
@@ -55,9 +60,10 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             val token = auth.getAccessTokenOrNull()
             if (token == null) { _status.value = "No token"; return@launch }
             when (val r = api.aboutGet(token)) {
-                is ApiResult.Success -> _status.value = "About 200: ${'$'}{r.data.user?.emailAddress}"
-                is ApiResult.HttpError -> _status.value = "About ${'$'}{r.code}: ${'$'}{r.body}"
-                is ApiResult.NetworkError -> _status.value = "About network: ${'$'}{r.exception.message}"
+                is ApiResult.Success -> _status.value =
+                    "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
+                is ApiResult.HttpError -> _status.value = "About ${r.code}: ${r.body}"
+                is ApiResult.NetworkError -> _status.value = "About network: ${r.exception.message}"
             }
         }
     }
@@ -71,10 +77,13 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             when (val r = api.validateFolder(token, id)) {
                 is ApiResult.Success -> {
                     val f = r.data
-                    _status.value = if (f.isFolder) "Folder OK: ${'$'}{f.name} (${ '$' }{f.id})" else "Not a folder: ${'$'}{f.mimeType}"
+                    _status.value = if (f.isFolder)
+                        "Folder OK: ${f.name} (${f.id})"
+                    else
+                        "Not a folder: ${f.mimeType}"
                 }
-                is ApiResult.HttpError -> _status.value = "Folder ${'$'}{r.code}: ${'$'}{r.body}"
-                is ApiResult.NetworkError -> _status.value = "Folder network: ${'$'}{r.exception.message}"
+                is ApiResult.HttpError -> _status.value = "Folder ${r.code}: ${r.body}"
+                is ApiResult.NetworkError -> _status.value = "Folder network: ${r.exception.message}"
             }
         }
     }

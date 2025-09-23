@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -43,6 +44,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
+import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 
 // Drive フォルダURL or ID を受け取り、IDを取り出す（/folders/<ID> or ?id=<ID> を想定）
 private fun extractDriveFolderId(input: String): String {
@@ -142,7 +145,8 @@ private fun AppRoot(
     val scope = rememberCoroutineScope()
 
     val repo = remember { GoogleAuthRepository(ctx.applicationContext) }
-    val api  = remember { DriveApiClient() }
+    // ★ TODO() を削除してデフォルトOkHttpを使う
+    val api  = remember { DriveApiClient(context = ctx) }
 
     val showMsg: (String) -> Unit = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
 
@@ -157,7 +161,7 @@ private fun AppRoot(
 
     var driveMenu by remember { mutableStateOf(false) }
 
-    // ★ フォルダID入力ダイアログ用の状態
+    // フォルダID入力ダイアログ用の状態
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderInput by remember { mutableStateOf("") }
 
@@ -185,7 +189,6 @@ private fun AppRoot(
                                 }
                             }
                         )
-                        // ★ ここが新規：Folder ID 入力
                         DropdownMenuItem(
                             text = { Text("Set Folder ID…") },
                             onClick = {
@@ -197,6 +200,7 @@ private fun AppRoot(
                                 }
                             }
                         )
+                        // --- About.get ---
                         DropdownMenuItem(
                             text = { Text("About.get") },
                             onClick = {
@@ -207,15 +211,21 @@ private fun AppRoot(
                                         "No token"
                                     } else {
                                         when (val r = api.aboutGet(token)) {
-                                            is ApiResult.Success -> "About 200: ${r.data.user?.emailAddress ?: "-"}"
-                                            is ApiResult.HttpError -> "About ${r.code}: ${r.body?.take(160) ?: "(no body)"}"
-                                            is ApiResult.NetworkError -> "About network: ${r.exception.javaClass.simpleName}: ${r.exception.message}"
+                                            is ApiResult.Success ->
+                                                "About 200: ${r.data.user?.emailAddress ?: "-"}"
+                                            is ApiResult.HttpError ->
+                                                "About ${r.code}: ${r.body.take(160)}"
+                                            is ApiResult.NetworkError ->
+                                                "About network: ${r.exception.message}"
+                                            else ->
+                                                "About: unexpected result"
                                         }
                                     }
                                     showMsg(msg)
                                 }
                             }
                         )
+                        // --- Validate Folder ---
                         DropdownMenuItem(
                             text = { Text("Validate Folder") },
                             onClick = {
@@ -227,12 +237,20 @@ private fun AppRoot(
                                     val msg = when {
                                         token == null -> "No token"
                                         id.isBlank()  -> "Folder ID empty"
-                                        else -> when (val r = api.validateFolder(token, id)) {
-                                            is ApiResult.Success ->
-                                                if (r.data.isFolder) "Folder OK: ${r.data.name} (${r.data.id})"
-                                                else "Not a folder: ${r.data.mimeType}"
-                                            is ApiResult.HttpError -> "Folder ${r.code}: ${r.body?.take(160) ?: "(no body)"}"
-                                            is ApiResult.NetworkError -> "Folder network: ${r.exception.message}"
+                                        else -> {
+                                            when (val r = api.validateFolder(token, id)) {
+                                                is ApiResult.Success ->
+                                                    if (r.data.isFolder)
+                                                        "Folder OK: ${r.data.name} (${r.data.id})"
+                                                    else
+                                                        "Not a folder: ${r.data.mimeType}"
+                                                is ApiResult.HttpError ->
+                                                    "Folder ${r.code}: ${r.body.take(160)}"
+                                                is ApiResult.NetworkError ->
+                                                    "Folder network: ${r.exception.message}"
+                                                else ->
+                                                    "Folder: unexpected result"
+                                            }
                                         }
                                     }
                                     showMsg(msg)
@@ -253,12 +271,12 @@ private fun AppRoot(
             )
         }
     ) { inner ->
-        androidx.compose.foundation.layout.Box(Modifier.padding(inner)) {
+        Box(Modifier.padding(inner)) {
             content()
         }
     }
 
-    // ★ ダイアログ本体（AppBarの外でOK）
+    // フォルダID入力ダイアログ
     if (showFolderDialog) {
         AlertDialog(
             onDismissRequest = { showFolderDialog = false },

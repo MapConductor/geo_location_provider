@@ -1,121 +1,168 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.drive
 
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import okhttp3.MediaType.Companion.toMediaType
+import android.content.ContentResolver
+import android.content.Context
+import android.net.Uri
+import okhttp3.Headers
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.logging.HttpLoggingInterceptor
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
+import org.json.JSONObject
 import java.io.IOException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 
-sealed class ApiResult<out T> {
-    data class Success<T>(val data: T, val code: Int) : ApiResult<T>()
-    data class HttpError(val code: Int, val body: String?) : ApiResult<Nothing>()
-    data class NetworkError(val exception: IOException) : ApiResult<Nothing>()
-}
-
-private fun sanitizeToken(raw: String): String {
-    // 最初の1行だけ採用 & trim、"Bearer " が付いてたら剥がす
-    val oneLine = raw.trim().lineSequence().firstOrNull()?.trim().orEmpty()
-    val noBearer = oneLine.removePrefix("Bearer ").trim()
-    return noBearer
-}
-
-// 既出の sanitizeToken() とクラス定義はそのまま
-
+/** Google Drive REST (v3) の軽量クライアント（モデルは別ファイル定義） */
 class DriveApiClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-            redactHeader("Authorization")
-        })
-        .build(),
-    private val json: Json = Json { ignoreUnknownKeys = true }
+    private val context: Context,
+    private val http: OkHttpClient = defaultClient()
 ) {
-    private val base = "https://www.googleapis.com/drive/v3"
+    companion object {
+        private const val BASE = "https://www.googleapis.com/drive/v3"
+        private const val BASE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
+        private val JSON = "application/json; charset=UTF-8".toMediaType()
 
-    // ★ ここを IO に切り替え
-    suspend fun aboutGet(token: String): ApiResult<AboutResponse> = withContext(Dispatchers.IO) {
-        try {
-            val tok = sanitizeToken(token)
-            val req = Request.Builder()
-                .url("$base/about?fields=user,storageQuota")
-                .header("Authorization", "Bearer $tok")
-                .header("Accept", "application/json")
+        private fun defaultClient(): OkHttpClient =
+            OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(90, TimeUnit.SECONDS)
+                .writeTimeout(90, TimeUnit.SECONDS)
                 .build()
-            client.newCall(req).execute().use { resp ->
-                val body = resp.body?.string()
-                if (resp.isSuccessful && body != null) {
-                    ApiResult.Success(json.decodeFromString(AboutResponse.serializer(), body), resp.code)
-                } else {
-                    ApiResult.HttpError(resp.code, body)
-                }
+    }
+
+    /** GET /about?fields=user(displayName,emailAddress) */
+    fun aboutGet(token: String): ApiResult<AboutResponse> = try {
+        val url = "$BASE/about?fields=user(displayName,emailAddress)"
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/json")
+            .get()
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) return ApiResult.HttpError(resp.code, body)
+            val obj = JSONObject(body)
+            val u = obj.optJSONObject("user")
+            val user = if (u != null) {
+                AboutResponse.User(
+                    displayName = u.optString("displayName", null),
+                    emailAddress = u.optString("emailAddress", null)
+                )
+            } else null
+            ApiResult.Success(AboutResponse(user))
+        }
+    } catch (e: IOException) {
+        ApiResult.NetworkError(e)
+    }
+
+    /**
+     * GET /files/{id}?fields=id,name,mimeType&supportsAllDrives=true
+     * 指定IDがフォルダか判定。
+     */
+    fun validateFolder(token: String, fileId: String): ApiResult<FolderInfo> = try {
+        val url = "$BASE/files/$fileId?fields=id,name,mimeType&supportsAllDrives=true"
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/json")
+            .get()
+            .build()
+
+        http.newCall(req).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (!resp.isSuccessful) return ApiResult.HttpError(resp.code, body)
+            val obj = JSONObject(body)
+            ApiResult.Success(
+                FolderInfo(
+                    id = obj.optString("id", ""),
+                    name = obj.optString("name", ""),
+                    mimeType = obj.optString("mimeType", "")
+                )
+            )
+        }
+    } catch (e: IOException) {
+        ApiResult.NetworkError(e)
+    }
+
+    /** multipart/related で Drive へアップロード（P6用）。 */
+    fun uploadMultipart(
+        token: String,
+        uri: Uri,
+        fileName: String? = null,
+        folderId: String? = null
+    ): UploadResult {
+        val cr: ContentResolver = context.contentResolver
+        val name = fileName ?: queryDisplayName(cr, uri) ?: "export.dat"
+        val mime = detectMime(cr, uri, name)
+        val len  = querySize(cr, uri) ?: -1L
+
+        // part1: metadata (application/json)
+        val metaJson = JSONObject().apply {
+            put("name", name)
+            if (!folderId.isNullOrBlank()) put("parents", listOf(folderId))
+        }.toString()
+        val metaPart = MultipartBody.Part.create(
+            Headers.headersOf("Content-Type", "application/json; charset=UTF-8"),
+            metaJson.toRequestBody(JSON)
+        )
+
+        // part2: media (file stream)
+        val mediaType = mime.toMediaType()
+        val mediaBody = InputStreamRequestBody(mediaType, cr, uri, len)
+        val mediaPart = MultipartBody.Part.create(
+            Headers.headersOf("Content-Type", mime),
+            mediaBody
+        )
+
+        val multipart = MultipartBody.Builder()
+            .setType("multipart/related".toMediaType())
+            .addPart(metaPart)
+            .addPart(mediaPart)
+            .build()
+
+        val url = "$BASE_UPLOAD?uploadType=multipart&fields=id,name,parents,webViewLink"
+        val req = Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $token")
+            .addHeader("Accept", "application/json")
+            .post(multipart)
+            .build()
+
+        return try {
+            http.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) return UploadResult.Failure(resp.code, body)
+                val obj = JSONObject(body)
+                UploadResult.Success(
+                    id = obj.optString("id", ""),
+                    name = obj.optString("name", name),
+                    webViewLink = obj.optString("webViewLink", "")
+                )
             }
         } catch (e: IOException) {
-            ApiResult.NetworkError(e)
-        } catch (t: Throwable) {
-            ApiResult.HttpError(-1, "${t::class.java.simpleName}: ${t.message}")
+            UploadResult.Failure(-1, e.message ?: "network error")
         }
     }
 
-    // ★ こちらも IO に切り替え
-    suspend fun validateFolder(token: String, folderId: String): ApiResult<DriveFile> = withContext(Dispatchers.IO) {
-        try {
-            val tok = sanitizeToken(token)
-            val fields = "id,name,mimeType,capabilities(canAddChildren)"
-            val req = Request.Builder()
-                .url("$base/files/$folderId?fields=$fields")
-                .header("Authorization", "Bearer $tok")
-                .header("Accept", "application/json")
-                .build()
-            client.newCall(req).execute().use { resp ->
-                val body = resp.body?.string()
-                if (resp.isSuccessful && body != null) {
-                    ApiResult.Success(json.decodeFromString(DriveFile.serializer(), body), resp.code)
-                } else {
-                    ApiResult.HttpError(resp.code, body)
-                }
-            }
-        } catch (e: IOException) {
-            ApiResult.NetworkError(e)
-        } catch (t: Throwable) {
-            ApiResult.HttpError(-1, "${t::class.java.simpleName}: ${t.message}")
+    // ---- helpers ----
+    private fun queryDisplayName(cr: ContentResolver, uri: Uri): String? =
+        cr.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+
+    private fun querySize(cr: ContentResolver, uri: Uri): Long? =
+        cr.query(uri, arrayOf(android.provider.MediaStore.MediaColumns.SIZE), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+
+    private fun detectMime(cr: ContentResolver, uri: Uri, fileName: String): String {
+        cr.getType(uri)?.let { return it }
+        return when {
+            fileName.endsWith(".zip", true)     -> "application/zip"
+            fileName.endsWith(".geojson", true) -> "application/geo+json"
+            fileName.endsWith(".json", true)    -> "application/json"
+            else                                -> "application/octet-stream"
         }
     }
 }
-
-@Serializable
-data class AboutResponse(
-    val user: AboutUser? = null,
-    val storageQuota: StorageQuota? = null
-)
-
-@Serializable
-data class AboutUser(
-    val displayName: String? = null,
-    val emailAddress: String? = null
-)
-
-@Serializable
-data class StorageQuota(
-    val limit: String? = null,
-    val usage: String? = null
-)
-
-@Serializable
-data class DriveFile(
-    val id: String,
-    val name: String? = null,
-    val mimeType: String? = null,
-    val capabilities: Capabilities? = null
-) {
-    val isFolder: Boolean get() = mimeType == "application/vnd.google-apps.folder"
-}
-
-@Serializable
-data class Capabilities(
-    @SerialName("canAddChildren") val canAddChildren: Boolean? = null
-)
