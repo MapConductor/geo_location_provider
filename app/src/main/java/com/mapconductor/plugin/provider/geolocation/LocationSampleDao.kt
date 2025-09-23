@@ -11,61 +11,63 @@ interface LocationSampleDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(sample: LocationSample): Long
 
-    // 最新N件（降順）をFlowで配信（履歴表示）
-    @Query("""
+    /** 最新 N 件（降順）を Flow で購読（履歴用） */
+    @Query(
+        """
         SELECT * FROM location_samples
-        ORDER BY createdAt DESC
+        ORDER BY id DESC
         LIMIT :limit
-    """)
-    fun latest(limit: Int): Flow<List<LocationSample>>
+        """
+    )
+    fun latestFlow(limit: Int): Flow<List<LocationSample>>
 
-    // 最新1件（降順）をFlowで配信（サービス状態表示）
-    @Query("""
+    /** 最新 1 件（降順） */
+    @Query(
+        """
         SELECT * FROM location_samples
-        ORDER BY createdAt DESC
+        ORDER BY id DESC
         LIMIT 1
-    """)
-    fun latestOne(): Flow<LocationSample?>
+        """
+    )
+    suspend fun latestOne(): LocationSample?
 
-    // 手動エクスポート等の同期取得：最新N件（降順）
-    @Query("""
+    /** 全件（昇順；GeoJSON整形など時系列用途） */
+    @Query(
+        """
         SELECT * FROM location_samples
-        ORDER BY createdAt DESC
-        LIMIT :limit
-    """)
-    suspend fun latestList(limit: Int): List<LocationSample>
-
-    // 全件（昇順）を同期取得（limitなしの手動エクスポート用）
-    @Query("""
-        SELECT * FROM location_samples
-        ORDER BY createdAt ASC
-    """)
-    suspend fun findAllAsc(): List<LocationSample>
-
-    // 指定エポックより前（昇順）…日次0:00で切る
-    @Query("""
-        SELECT * FROM location_samples
-        WHERE createdAt < :cutoffEpochMillis
-        ORDER BY createdAt ASC
-    """)
-    suspend fun findBefore(cutoffEpochMillis: Long): List<LocationSample>
-
-    // エクスポート済みIDの一括削除
-    @Query("DELETE FROM location_samples WHERE id IN (:ids)")
-    suspend fun deleteByIds(ids: List<Long>): Int
-
-    @Query("SELECT * FROM location_samples ORDER BY id ASC")
+        ORDER BY id ASC
+        """
+    )
     suspend fun findAll(): List<LocationSample>
 
     /**
-     * JSTの 0:00 基準での時間帯抽出に使う。
-     * @param from inclusive (epoch millis)
-     * @param to   exclusive (epoch millis)
+     * 期間抽出（[from, to) ; createdAt は epoch millis）
+     * JST の 0:00 切りで使用
      */
-    @Query("""
+    @Query(
+        """
         SELECT * FROM location_samples
         WHERE createdAt >= :from AND createdAt < :to
         ORDER BY id ASC
-    """)
+        """
+    )
     suspend fun findBetween(from: Long, to: Long): List<LocationSample>
+
+    /** ID リストで削除（アップロード成功時のクリーンアップ用） */
+    @Query(
+        """
+        DELETE FROM location_samples
+        WHERE id IN (:ids)
+        """
+    )
+    suspend fun deleteByIds(ids: List<Long>): Int
+
+    @Query(
+        """
+    SELECT * FROM location_samples
+    ORDER BY id DESC
+    LIMIT 1
+    """
+    )
+    fun latestOneFlow(): kotlinx.coroutines.flow.Flow<LocationSample?>
 }

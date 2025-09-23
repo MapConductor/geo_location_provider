@@ -1,9 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation
 
 import android.app.Application
-import android.content.Intent
-import android.widget.Toast
-import androidx.core.content.ContextCompat
 
 class App : Application() {
     override fun onCreate() {
@@ -11,7 +8,6 @@ class App : Application() {
 
         MidnightExportScheduler.scheduleNext(this)
 
-        // アプリ起動時に前景サービスを開始
-        val intent = Intent(this, GeoLocationService::class.java)
+        // サービスの起動は UI 側（権限許諾後）で行う
     }
 }

@@ -16,14 +16,14 @@ playServicesAuthVersion = "21.4.0"
 playServicesLocation = "21.3.0"
 room = "2.7.2"
 work = "2.9.1"   # 例。プロジェクトに合わせてOK（2.9.x系で十分）
-okhttp = "5.1.0"
+okhttp = "4.12.0"
 kotlinx-serialization = "1.7.3"
 playServicesAuth = "21.2.0"  # 例：安定版
 
 [libraries]
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-logging = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
-okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
 androidx-activity-compose-v192 = { module = "androidx.activity:activity-compose", version.ref = "activityComposeVersion" }
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferences" }
 androidx-datastore-preferences-v111 = { module = "androidx.datastore:datastore-preferences", version.ref = "datastorePreferencesVersion" }

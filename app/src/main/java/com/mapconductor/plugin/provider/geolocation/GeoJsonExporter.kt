@@ -2,22 +2,103 @@ package com.mapconductor.plugin.provider.geolocation
 
 import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import java.io.BufferedOutputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
-import java.util.*
-import java.io.BufferedOutputStream
+import java.util.Date
+import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 object GeoJsonExporter {
 
     private val nameFmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
+
+    /**
+     * 既存互換：ファイル名は内部で自動生成（.geojson、非ZIP）
+     */
+    fun exportToDownloads(
+        context: Context,
+        records: List<LocationSample>
+    ): android.net.Uri? {
+        return exportToDownloads(
+            context = context,
+            records = records,
+            baseName = null,
+            compressAsZip = false
+        )
+    }
+
+    /**
+     * Downloads/GeoLocationProvider へエクスポート。
+     *
+     * @param baseName    null の場合は "yyyyMMdd-HHmmss" で自動生成
+     * @param compressAsZip true で ZIP（中身は .geojson 1ファイル）、false で .geojson 直書き
+     * @return MediaStore の Uri（作成失敗時は null）
+     */
+    fun exportToDownloads(
+        context: Context,
+        records: List<LocationSample>,
+        baseName: String? = null,
+        compressAsZip: Boolean = false
+    ): android.net.Uri? {
+        val json = toGeoJson(records).toByteArray(Charsets.UTF_8)
+        val resolvedBase = baseName ?: nameFmt.format(Date())
+        val displayName = if (compressAsZip) "$resolvedBase.zip" else "$resolvedBase.geojson"
+        val mimeType = if (compressAsZip) "application/zip" else "application/geo+json"
+
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            if (Build.VERSION.SDK_INT >= 29) {
+                // Downloads/GeoLocationProvider に配置
+                put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    Environment.DIRECTORY_DOWNLOADS + "/GeoLocationProvider"
+                )
+            }
+        }
+
+        // API29+ は Downloads、旧API は Files(external) に挿入
+        val collection = if (Build.VERSION.SDK_INT >= 29) {
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Files.getContentUri("external")
+        }
+
+        val uri = resolver.insert(collection, values) ?: return null
+
+        resolver.openOutputStream(uri)?.use { os ->
+            writePayload(os, json, resolvedBase, compressAsZip)
+        } ?: return null
+
+        return uri
+    }
+
+    private fun writePayload(
+        os: OutputStream,
+        jsonBytes: ByteArray,
+        baseName: String,
+        compressAsZip: Boolean
+    ) {
+        if (!compressAsZip) {
+            os.write(jsonBytes)
+            os.flush()
+            return
+        }
+
+        // ZIP 内に baseName.geojson という1ファイルで格納
+        ZipOutputStream(BufferedOutputStream(os)).use { zos ->
+            val entry = ZipEntry("$baseName.geojson")
+            zos.putNextEntry(entry)
+            zos.write(jsonBytes)
+            zos.closeEntry()
+        }
+    }
 
     /** LocationSample -> GeoJSON(FeatureCollection) */
     private fun toGeoJson(records: List<LocationSample>): String {
@@ -27,76 +108,15 @@ object GeoJsonExporter {
             if (i > 0) sb.append(',')
             sb.append("{\"type\":\"Feature\",\"geometry\":{")
             sb.append("\"type\":\"Point\",\"coordinates\":[")
-            sb.append(r.lon).append(',').append(r.lat) // GeoJSONは [lon, lat]
+            // GeoJSON は [lon, lat]
+            sb.append(r.lon).append(',').append(r.lat)
             sb.append("]},\"properties\":{")
-            sb.append("\"timestamp\":").append(r.createdAt)
-            sb.append(",\"accuracy\":").append(r.accuracy)
-            sb.append(",\"batteryPct\":").append(r.batteryPct)
-            sb.append(",\"isCharging\":").append(if (r.isCharging) "true" else "false")
-            sb.append(",\"provider\":")
-            if (r.provider != null) sb.append("\"").append(r.provider).append("\"") else sb.append("null")
+            // 必須最小限のみ（スキーマに依存しすぎない）
+            sb.append("\"id\":").append(r.id)
+            sb.append(",\"t\":").append(r.createdAt) // epoch millis
             sb.append("}}")
         }
         sb.append("]}")
         return sb.toString()
     }
-
-        /**
-        * Downloads/GeoLocationProvider に保存。成功時 Uri、データ無し/失敗時 null
-        * @param compressAsZip true なら *.zip（中身は *.geojson）で保存
-        */
-        suspend fun exportToDownloads(context: Context, records: List<LocationSample>, compressAsZip: Boolean = false): Uri? =
-        withContext(Dispatchers.IO) {
-            if (records.isEmpty()) return@withContext null
-
-            val baseName = "locations-${nameFmt.format(Date())}"
-            val fileName = if (compressAsZip) "$baseName.zip" else "$baseName.geojson"
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, "application/geo+json")
-                put(
-                    MediaStore.MediaColumns.MIME_TYPE,
-                    if (compressAsZip) "application/zip" else "application/geo+json"
-                )
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        Environment.DIRECTORY_DOWNLOADS + "/GeoLocationProvider"
-                    )
-                }
-            }
-
-            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            } else {
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            }
-
-            val resolver = context.contentResolver
-            val uri = resolver.insert(collection, values) ?: return@withContext null
-            try {
-                resolver.openOutputStream(uri)?.use { out: OutputStream ->
-                    if (compressAsZip) {
-                        ZipOutputStream(BufferedOutputStream(out)).use { zos ->
-                            val entry = ZipEntry("$baseName.geojson").apply {
-                                time = System.currentTimeMillis()
-                            }
-                            zos.putNextEntry(entry)
-                            val bytes = toGeoJson(records).toByteArray(Charsets.UTF_8)
-                            zos.write(bytes)
-                            zos.closeEntry()
-                        }
-                    } else {
-                        out.bufferedWriter(Charsets.UTF_8).use { it.write(toGeoJson(records)) }
-                    }
-                }
-                uri
-            } catch (_: Throwable) {
-                runCatching { resolver.delete(uri, null, null) }
-                null
-            }
-        }
-        /** 便利ラッパ（ZIP固定）— 既存APIを壊さずに使い分けたい場合に */
-        suspend fun exportToDownloadsZip(context: Context, records: List<LocationSample>): Uri? =
-            exportToDownloads(context, records, compressAsZip = true)
 }

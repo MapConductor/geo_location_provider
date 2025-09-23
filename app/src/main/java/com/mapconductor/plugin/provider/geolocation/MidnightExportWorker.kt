@@ -9,16 +9,15 @@ import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /**
  * 「当日0:00」を基準に切り、「昨日分のみ」をエクスポート対象にする Worker。
- * エクスポート成功時は、Drive 設定が有効であればアップロードも行う。
- * （アップロード成功時のみ DB/ローカルファイルの削除を行う）
+ * エクスポート成功時は、Drive 設定が有効かつアップロード成功の場合のみ DB/ローカル削除を行う。
  */
 class MidnightExportWorker(
     appContext: Context,
@@ -29,138 +28,105 @@ class MidnightExportWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
-            // 1) 昨日 0:00 ～ 今日 0:00 のミリ秒範囲を求める
-            val (fromMs, toMs) = yesterdayWindowMillis()
-
-            // 2) DB から対象レコードを範囲取得（createdAt 基準）
             val dao = AppDatabase.get(applicationContext).locationSampleDao()
-            val targets = dao.findBetween(fromMs, toMs) // ← findAll() + filter ではなく範囲クエリを使用
 
-            if (targets.isEmpty()) {
-                Log.i("GLP-Worker", "No records to export. window=[$fromMs, $toMs)")
+            // JSTの「昨日」区間 [y0, t0)
+            val nowJst: ZonedDateTime = ZonedDateTime.now(zone)
+            val today0: ZonedDateTime = nowJst.truncatedTo(ChronoUnit.DAYS)
+            val y0 = today0.minusDays(1).toInstant().toEpochMilli()
+            val t0 = today0.toInstant().toEpochMilli()
+
+            val records = dao.findBetween(y0, t0)
+            if (records.isEmpty()) {
+                Log.i(LogTags.WORKER, "No records for yesterday; scheduling next and exiting.")
                 scheduleNext0am()
                 return@withContext Result.success()
             }
 
-            // 3) GeoJSON（またはZIP）にエクスポート
-            val uri: Uri? = GeoJsonExporter.exportToDownloads(applicationContext, targets)
-            if (uri == null) {
-                Log.w("GLP-Worker", "Export failed: window=[$fromMs, $toMs)")
+            // ファイル名（例：glp-20250922.geojson/zip）
+            val baseName = DateTimeFormatter.ofPattern("yyyyMMdd")
+                .withZone(zone)
+                .format(today0.minusDays(1).toInstant())
+                .let { "glp-$it" }
+
+            // Downloads/GeoLocationProvider へ出力（ZIPで格納）
+            val outUri: Uri = GeoJsonExporter
+                .exportToDownloads(applicationContext, records, baseName = baseName, compressAsZip = true)
+                ?: run {
+                    ExportNotify.notifyPermanentFailure(applicationContext, "Export failed: cannot create file.")
+                    scheduleNext0am()
+                    return@withContext Result.success()
+                }
+
+            // アップロード設定（NONE の場合はアップロードしない）
+            val prefs = UploadPrefs.snapshot(applicationContext)
+            if (prefs.engine == UploadEngine.NONE) {
+                Log.i(LogTags.WORKER, "UploadEngine=NONE; keep local file and DB as-is.")
                 scheduleNext0am()
                 return@withContext Result.success()
             }
-            Log.i("GLP-Worker", "Export saved: uri=$uri, count=${targets.size}")
 
-            // 4) Drive へアップロード（設定が揃っている場合のみ）
-            val uploaded: Boolean = uploadIfConfigured(uri) == true
-
-            // 5) 後処理ポリシー：
-            //    - アップロード成功時のみ、DB の該当レコード削除＆ローカルファイル削除
-            if (uploaded) {
-                runCatching {
-                    val ids = targets.mapNotNull { it.id }
-                    if (ids.isNotEmpty()) {
-                        dao.deleteByIds(ids)
-                        Log.i("GLP-Worker", "DB rows deleted: ${ids.size}")
-                    }
-                }.onFailure { e ->
-                    Log.w("GLP-Worker", "DB delete failed: ${e.message}")
-                }
-
-                runCatching {
-                    applicationContext.contentResolver.delete(uri, null, null)
-                    Log.i("GLP-Worker", "Local exported file deleted: $uri")
-                }.onFailure { e ->
-                    Log.w("GLP-Worker", "Local file delete failed: ${e.message}")
-                }
-            } else {
-                Log.i("GLP-Worker", "Upload skipped or failed. Keep DB/local for retry.")
+            // Drive へアップロード
+            val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
+            if (folderId.isNullOrBlank()) {
+                ExportNotify.notifyPermanentFailure(applicationContext, "Drive Folder ID is not configured.")
+                scheduleNext0am()
+                return@withContext Result.success()
             }
 
-            // 6) 次回 0:00 を予約
-            scheduleNext0am()
-            Result.success()
-        } catch (t: Throwable) {
-            Log.e("GLP-Worker", "Unexpected error: ${t.message}", t)
-            // 重大障害時も次回を予約して終了（必要なら Result.retry() に切替）
-            scheduleNext0am()
-            Result.success()
-        }
-    }
-
-    /** 昨日 0:00 ～ 今日 0:00 のミリ秒範囲（半開区間 [from, to)）を返す */
-    private fun yesterdayWindowMillis(): Pair<Long, Long> {
-        val now = ZonedDateTime.now(zone)
-        val today0 = now.truncatedTo(ChronoUnit.DAYS) // 今日の 0:00
-        val yesterday0 = today0.minusDays(1)          // 昨日の 0:00
-        val fromMs = yesterday0.toInstant().toEpochMilli()
-        val toMs = today0.toInstant().toEpochMilli()
-        Log.i(
-            "GLP-Worker",
-            "Export window [from..to) = [${yesterday0}, ${today0}) ms=[$fromMs,$toMs)"
-        )
-        return fromMs to toMs
-    }
-
-    /**
-     * Drive へアップロード（設定が揃っていれば実行）。
-     * - UploadPrefs からエンジン/フォルダIDを取得（Flow→firstOrNull）
-     * - GoogleAuthRepository からアクセストークンを取得（suspend）
-     * - DriveApiClient.uploadMultipart(...) を実行
-     * @return 成功なら true / 失敗 false / 実行不可 null
-     */
-    private suspend fun uploadIfConfigured(uri: Uri): Boolean? {
-        return runCatching {
-            // 設定（DataStore）を取得
-            val engine = UploadPrefs.engineFlow(applicationContext).firstOrNull() ?: UploadEngine.NONE
-            val folderRaw = UploadPrefs.folderIdFlow(applicationContext).firstOrNull()
-            val folder = DriveFolderId.extractFromUrlOrId(folderRaw)
-
-            if (engine != UploadEngine.KOTLIN) {
-                Log.i("GLP-Drive", "Upload engine is not KOTLIN. Skip.")
-                return@runCatching null
-            }
-            if (folder.isNullOrBlank()) {
-                Log.i("GLP-Drive", "Drive folderId not configured. Skip.")
-                return@runCatching null
-            }
-
-            // アクセストークン（suspend）
-            val token = GoogleAuthRepository(applicationContext).getAccessTokenOrNull()
+            val auth = GoogleAuthRepository(applicationContext)
+            val token = auth.getAccessTokenOrNull()
             if (token.isNullOrBlank()) {
-                Log.w("GLP-Drive", "No access token. Skip.")
-                return@runCatching null
+                ExportNotify.notifyPermanentFailure(applicationContext, "Failed to get Google access token.")
+                scheduleNext0am()
+                return@withContext Result.success()
             }
 
             val client = DriveApiClient(applicationContext)
-            when (val res = client.uploadMultipart(token = token, uri = uri, folderId = folder)) {
+            val result = client.uploadMultipart(
+                token = token,
+                uri = outUri,
+                fileName = null,      // Export 側の DISPLAY_NAME を使用
+                folderId = folderId
+            )
+
+            when (result) {
                 is UploadResult.Success -> {
+                    // 成功時のみ DB とローカルを削除
+                    val ids = records.map { it.id }
+                    runCatching { applicationContext.contentResolver.delete(outUri, null, null) }
+                    runCatching { dao.deleteByIds(ids) }
                     Log.i(
-                        "GLP-Drive",
-                        "Upload OK: id=${res.id}, name=${res.name}, link=${res.webViewLink}"
+                        LogTags.WORKER,
+                        "Upload success; local file and DB rows deleted. ids=${ids.size}, fileId=${result.id}"
                     )
-                    true
                 }
                 is UploadResult.Failure -> {
-                    Log.w("GLP-Drive", "Upload NG: code=${res.code}, body=${res.body}")
-                    false
+                    val bodyPreview = result.body.take(200)
+                    ExportNotify.notifyPermanentFailure(
+                        applicationContext,
+                        "Drive upload failed (HTTP ${result.code}): $bodyPreview"
+                    )
+                    Log.w(LogTags.WORKER, "Upload failed; keep local file and DB. code=${result.code}")
                 }
             }
-        }.getOrElse { e ->
-            Log.e("GLP-Drive", "Upload exception: ${e.message}", e)
-            false
+
+            scheduleNext0am()
+            Result.success()
+        } catch (t: Throwable) {
+            Log.e(LogTags.WORKER, "Midnight export failed", t)
+            // 次回 0:00 の予約は常に行う
+            scheduleNext0am()
+            Result.success()
         }
     }
 
-    /**
-     * 次回 0:00 の OneTimeWork を予約。
-     * 既存のスケジューラがある場合はそちらに委譲してください。
-     */
+    /** 次回 0:00 の OneTimeWork を予約（スケジューラへ委譲） */
     private fun scheduleNext0am() {
         try {
             MidnightExportScheduler.scheduleNext(applicationContext)
         } catch (t: Throwable) {
-            Log.w("GLP-Worker", "Failed to delegate scheduleNext(): ${t.message}")
+            Log.w(LogTags.WORKER, "Failed to delegate scheduleNext(): ${t.message}")
         }
     }
 }
