@@ -1,65 +1,33 @@
 package com.mapconductor.plugin.provider.geolocation
 
 import android.content.Context
-import android.net.Uri
-import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
+import androidx.lifecycle.viewmodel.CreationExtras
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 
-/**
- * 手動エクスポート用 ViewModel。
- * - exportAll(limit): Downloads へ GeoJSON/ZIP を保存
- * - exportAndUpload(...): 保存後に Drive へアップロード（任意）
- */
 class ManualExportViewModel(private val appContext: Context) : ViewModel() {
 
     /**
-     * 既存の手動エクスポート。
-     * 末尾 limit 件（null なら全件）をエクスポート（Downloadsへ保存）。
+     * ボタン押下で呼ぶ：末尾 limit 件（nullなら全件）をエクスポート（ZIPで保存）
+     * alsoUpload=true の場合は、設定が有効なら Drive にも送る（DBは削除しない）
      */
-    fun exportAll(limit: Int? = 1000) {
+    fun exportAll(limit: Int? = 1000, alsoUpload: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val dao = AppDatabase.get(appContext).locationSampleDao()
+
             val all = dao.findAll() // 昇順
             val data = if (limit != null) all.takeLast(limit) else all
-
-            val uri: Uri? = if (data.isNotEmpty()) {
-                GeoJsonExporter.exportToDownloads(appContext, data)
-            } else null
-
-            withContext(Dispatchers.Main) {
-                val msg = when {
-                    data.isEmpty() -> "エクスポート対象のデータがありません"
-                    uri != null    -> "保存しました: $uri"
-                    else           -> "保存に失敗しました"
-                }
-                Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    /**
-     * 手動エクスポート＋Driveアップロード（任意機能）
-     */
-    fun exportAndUpload(
-        limit: Int? = 1000,
-        deleteOnSuccess: Boolean = false,
-        deleteDbOnSuccess: Boolean = false
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val dao = AppDatabase.get(appContext).locationSampleDao()
-            val all = dao.findAll() // 昇順
-            val data = if (limit != null) all.takeLast(limit) else all
-
             if (data.isEmpty()) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(appContext, "エクスポート対象のデータがありません", Toast.LENGTH_SHORT).show()
@@ -67,96 +35,66 @@ class ManualExportViewModel(private val appContext: Context) : ViewModel() {
                 return@launch
             }
 
-            val uri: Uri? = GeoJsonExporter.exportToDownloads(appContext, data)
-            if (uri == null) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "保存に失敗しました", Toast.LENGTH_SHORT).show()
-                }
-                return@launch
-            }
-            Log.i("GLP-Manual", "Export saved: uri=$uri, count=${data.size}")
+            // ファイル名（例：glp-20250923-2130.geojson/zip）
+            val nowJst: ZonedDateTime = ZonedDateTime.now(ZoneId.of("Asia/Tokyo"))
+            val baseName = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+                .withZone(ZoneId.of("Asia/Tokyo"))
+                .format(nowJst.truncatedTo(ChronoUnit.SECONDS))
+                .let { "glp-$it" }
 
-            val uploadResult = uploadIfConfigured(uri)
+            val uri = GeoJsonExporter.exportToDownloads(
+                context = appContext,
+                records = data,
+                baseName = baseName,
+                compressAsZip = true
+            )
 
-            // 成功時の後処理（ポリシーに応じて）
-            if (uploadResult == true) {
-                if (deleteDbOnSuccess) {
-                    runCatching {
-                        val ids = data.mapNotNull { it.id }
-                        if (ids.isNotEmpty()) {
-                            // 例: @Query("DELETE FROM location_samples WHERE id IN (:ids)") fun deleteByIds(ids: List<Long>)
-                            dao.deleteByIds(ids)
-                            Log.i("GLP-Manual", "DB rows deleted: ${ids.size}")
+            val msg = if (uri != null) {
+                // オプションで Drive にもアップロード（DBは削除しない）
+                if (alsoUpload) {
+                    val prefs = UploadPrefs.snapshot(appContext)
+                    val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
+                    val uploader = UploaderFactory.create(appContext, prefs.engine)
+                    if (uploader != null && !folderId.isNullOrBlank()) {
+                        val result = uploader.upload(uri, folderId)
+                        // 成否はトーストに反映（詳細は通知に出さず簡潔に）
+                        if (result is com.mapconductor.plugin.provider.geolocation.drive.UploadResult.Success) {
+                            "保存＆Driveにアップロードしました: $uri"
+                        } else {
+                            "保存しました（Driveアップロード失敗）: $uri"
                         }
-                    }.onFailure { e ->
-                        Log.w("GLP-Manual", "DB delete failed: ${e.message}")
+                    } else {
+                        "保存しました（アップロード設定なし）: $uri"
                     }
+                } else {
+                    "保存しました: $uri"
                 }
-                if (deleteOnSuccess) {
-                    runCatching {
-                        appContext.contentResolver.delete(uri, null, null)
-                        Log.i("GLP-Manual", "Local exported file deleted: $uri")
-                    }.onFailure { e ->
-                        Log.w("GLP-Manual", "Local file delete failed: ${e.message}")
-                    }
-                }
+            } else {
+                "保存に失敗しました"
             }
 
             withContext(Dispatchers.Main) {
-                val msg = when (uploadResult) {
-                    true  -> "保存＋アップロード完了"
-                    false -> "保存は完了。アップロードはスキップ／失敗"
-                    null  -> "保存に失敗しました"
-                }
-                Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
+                Toast.makeText(appContext, msg, Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    /**
-     * Drive 設定が揃っている場合にアップロードを実施。
-     * @return 成功:true / 失敗:false / 実行不可(null)
-     */
-    private suspend fun uploadIfConfigured(uri: Uri): Boolean? {
-        return runCatching {
-            // DataStore から同期取得（IOスレッド）
-            val prefs = DrivePrefsRepository(appContext)
-            val folderRaw = prefs.folderIdFlow.first()
-            val folder = DriveFolderId.extractFromUrlOrId(folderRaw)
-
-            if (folder.isNullOrBlank()) return@runCatching null
-
-            // 認証トークンはインスタンス経由で取得
-            val token = GoogleAuthRepository(appContext).getAccessTokenOrNull() ?: return@runCatching null
-
-            val client = DriveApiClient(appContext)
-            when (val res = client.uploadMultipart(token = token, uri = uri, folderId = folder)) {
-                is UploadResult.Success -> {
-                    Log.i("GLP-Drive", "Upload OK: id=${res.id}, name=${res.name}, link=${res.webViewLink}")
-                    true
-                }
-                is UploadResult.Failure -> {
-                    Log.w("GLP-Drive", "Upload NG: code=${res.code}, body=${res.body}")
-                    false
-                }
-            }
-        }.getOrElse { e ->
-            Log.e("GLP-Drive", "Upload exception: ${e.message}", e)
-            false
-        }
-    }
-
-    /** ViewModelProvider.Factory（DI未使用の簡易版） */
-    class Factory(private val appContext: Context) : ViewModelProvider.Factory {
-        @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return ManualExportViewModel(appContext) as T
-        }
-    }
-
-    /** Compose の viewModel(factory = ManualExportViewModel.factory(ctx)) 用のショートカット */
     companion object {
+        /** Compose の viewModel(factory = ...) から呼ぶための Factory */
         fun factory(context: Context): ViewModelProvider.Factory =
-            Factory(context.applicationContext)
+            object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    return ManualExportViewModel(context.applicationContext) as T
+                }
+                // 新しいシグネチャ（CreationExtras付き）にも対応
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(
+                    modelClass: Class<T>,
+                    extras: CreationExtras
+                ): T {
+                    return ManualExportViewModel(context.applicationContext) as T
+                }
+            }
     }
 }

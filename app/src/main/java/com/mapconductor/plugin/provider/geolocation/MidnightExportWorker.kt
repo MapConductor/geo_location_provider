@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.ZoneId
@@ -74,20 +75,17 @@ class MidnightExportWorker(
                 return@withContext Result.success()
             }
 
-            val auth = GoogleAuthRepository(applicationContext)
-            val token = auth.getAccessTokenOrNull()
-            if (token.isNullOrBlank()) {
-                ExportNotify.notifyPermanentFailure(applicationContext, "Failed to get Google access token.")
+            // Uploader 経由に一本化
+            val uploader = UploaderFactory.create(applicationContext, prefs.engine)
+            if (uploader == null) {
+                Log.i(LogTags.WORKER, "No uploader for engine=${prefs.engine}; skip upload.")
                 scheduleNext0am()
                 return@withContext Result.success()
             }
-
-            val client = DriveApiClient(applicationContext)
-            val result = client.uploadMultipart(
-                token = token,
+            val result = uploader.upload(
                 uri = outUri,
-                fileName = null,      // Export 側の DISPLAY_NAME を使用
-                folderId = folderId
+                folderId = folderId,
+                fileName = null // Export 側 DISPLAY_NAME を利用
             )
 
             when (result) {
