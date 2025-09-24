@@ -39,11 +39,3 @@ object NotificationHelper {
         NotificationManagerCompat.from(context).notify(1001, notif)
     }
 }
-
-/** 既存互換：古い呼び出しはそのまま動く */
-@Deprecated("Use NotificationHelper instead")
-object ExportNotify {
-    fun notifyPermanentFailure(context: Context, message: String) {
-        NotificationHelper.notifyPermanentFailure(context, message)
-    }
-}

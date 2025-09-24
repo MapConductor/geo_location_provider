@@ -5,7 +5,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.mapconductor.plugin.provider.geolocation.ExportNotify
+import com.mapconductor.plugin.provider.geolocation.util.NotificationHelper
 import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
@@ -59,7 +59,7 @@ class MidnightExportWorker(
             val outUri: Uri = GeoJsonExporter
                 .exportToDownloads(applicationContext, records, baseName = baseName, compressAsZip = true)
                 ?: run {
-                    ExportNotify.notifyPermanentFailure(applicationContext, "Export failed: cannot create file.")
+                    NotificationHelper.notifyPermanentFailure(applicationContext, "Export failed: cannot create file.")
                     scheduleNext0am()
                     return@withContext Result.success()
                 }
@@ -75,7 +75,7 @@ class MidnightExportWorker(
             // Drive へアップロード
             val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
             if (folderId.isNullOrBlank()) {
-                ExportNotify.notifyPermanentFailure(applicationContext, "Drive Folder ID is not configured.")
+                NotificationHelper.notifyPermanentFailure(applicationContext, "Drive Folder ID is not configured.")
                 scheduleNext0am()
                 return@withContext Result.success()
             }
@@ -106,7 +106,7 @@ class MidnightExportWorker(
                 }
                 is UploadResult.Failure -> {
                     val bodyPreview = result.body.take(200)
-                    ExportNotify.notifyPermanentFailure(
+                    NotificationHelper.notifyPermanentFailure(
                         applicationContext,
                         "Drive upload failed (HTTP ${result.code}): $bodyPreview"
                     )

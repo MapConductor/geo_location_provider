@@ -14,7 +14,5 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     val latest30: Flow<List<LocationSample>> = dao.latestFlow(30)
 
     // DAOの suspend 関数 latestOne() を Flow 化（単発emit・自動更新なし）
-    val latestOne: Flow<LocationSample?> = flow {
-        emit(dao.latestOne())
-    }
+    val latestOne: Flow<LocationSample?> = dao.latestOneFlow()
 }

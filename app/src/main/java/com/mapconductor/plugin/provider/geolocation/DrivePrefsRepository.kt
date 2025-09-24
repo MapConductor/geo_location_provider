@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
 
 private val Context.driveDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "drive_prefs"
@@ -30,6 +31,8 @@ class DrivePrefsRepository(private val context: Context) {
 
     suspend fun setFolderId(id: String) {
         context.driveDataStore.edit { it[Keys.FOLDER_ID] = id.trim() }
+        // Worker 等が参照する UploadPrefs にもミラー
+        UploadPrefs.setFolderId(context, id)
     }
 
     suspend fun setAccountEmail(email: String) {

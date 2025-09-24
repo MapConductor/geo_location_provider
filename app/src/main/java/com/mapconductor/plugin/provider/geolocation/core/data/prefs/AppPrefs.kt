@@ -31,6 +31,16 @@ object UploadPrefs {
 
     fun snapshot(context: Context): Snapshot = readFromSharedPrefs(context)
 
+    fun setFolderId(context: Context, id: String) {
+        val sp = context.getSharedPreferences(SP_NAME, Context.MODE_PRIVATE)
+        sp.edit().putString(KEY_FOLDER_ID, id.trim()).apply()
+    }
+
+    fun setEngine(context: Context, engine: UploadEngine) {
+        val sp = context.getSharedPreferences(SP_NAME, Context.MODE_PRIVATE)
+        sp.edit().putString(KEY_ENGINE, engine.name).apply()
+    }
+
     // ---- 実体：SharedPreferences ----
     private const val SP_NAME = "upload_prefs"
     private const val KEY_ENGINE = "engine"        // "NONE" / "KOTLIN"
