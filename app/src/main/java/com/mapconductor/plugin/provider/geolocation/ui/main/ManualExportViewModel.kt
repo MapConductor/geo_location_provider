@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import android.content.Context
 import android.widget.Toast
@@ -6,7 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
+import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.core.domain.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -58,7 +62,7 @@ class ManualExportViewModel(private val appContext: Context) : ViewModel() {
                     if (uploader != null && !folderId.isNullOrBlank()) {
                         val result = uploader.upload(uri, folderId)
                         // 成否はトーストに反映（詳細は通知に出さず簡潔に）
-                        if (result is com.mapconductor.plugin.provider.geolocation.drive.UploadResult.Success) {
+                        if (result is UploadResult.Success) {
                             "保存＆Driveにアップロードしました: $uri"
                         } else {
                             "保存しました（Driveアップロード失敗）: $uri"

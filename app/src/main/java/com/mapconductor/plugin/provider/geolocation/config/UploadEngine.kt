@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.config
 
 /**
  * アップロードの実行エンジンを切り替えるトグル。

@@ -1,11 +1,10 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -19,7 +18,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -44,8 +42,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.layout.fillMaxWidth
+import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 
 // Drive フォルダURL or ID を受け取り、IDを取り出す（/folders/<ID> or ?id=<ID> を想定）
 private fun extractDriveFolderId(input: String): String {

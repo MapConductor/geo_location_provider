@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.core.data.room
 
 import androidx.room.Dao
 import androidx.room.Insert
@@ -69,5 +69,5 @@ interface LocationSampleDao {
     LIMIT 1
     """
     )
-    fun latestOneFlow(): kotlinx.coroutines.flow.Flow<LocationSample?>
+    fun latestOneFlow(): Flow<LocationSample?>
 }

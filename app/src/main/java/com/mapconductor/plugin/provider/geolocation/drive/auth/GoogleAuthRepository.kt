@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.drive.auth
 
 import android.accounts.Account
 import android.app.Activity

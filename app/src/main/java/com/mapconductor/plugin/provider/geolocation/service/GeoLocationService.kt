@@ -1,11 +1,14 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.service
 
+import android.Manifest
+import android.R
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.location.Location
 import android.os.BatteryManager
 import android.os.Build
@@ -19,9 +22,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import android.os.Binder
-import kotlinx.coroutines.flow.firstOrNull
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
+import com.mapconductor.plugin.provider.geolocation.SettingsStore
+import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample
 import kotlinx.coroutines.flow.MutableStateFlow
 
 private const val CHANNEL_ID = "geo_location_service"   // 通知チャネルID
@@ -134,7 +139,7 @@ class GeoLocationService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GeoLocation tracking")
             .setContentText("Service is running")
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .build()
@@ -156,10 +161,10 @@ class GeoLocationService : Service() {
         Log.i(TAG, "startLocationUpdates begin")
 
         // 1) 権限チェック
-        val hasFine = checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-        val hasCoarse = checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasFine = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val hasCoarse = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
         Log.i(TAG, "perm fine=$hasFine coarse=$hasCoarse")
         if (!hasFine && !hasCoarse) {
             Log.w(TAG, "No location permission; stopSelf()")
@@ -288,7 +293,7 @@ class GeoLocationService : Service() {
         NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("GeoLocationProvider")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setSmallIcon(R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .build()
 

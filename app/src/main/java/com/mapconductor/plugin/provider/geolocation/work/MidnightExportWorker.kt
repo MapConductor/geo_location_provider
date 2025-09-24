@@ -1,11 +1,16 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.work
 
 import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
+import com.mapconductor.plugin.provider.geolocation.ExportNotify
+import com.mapconductor.plugin.provider.geolocation.util.LogTags
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
+import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.core.domain.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory

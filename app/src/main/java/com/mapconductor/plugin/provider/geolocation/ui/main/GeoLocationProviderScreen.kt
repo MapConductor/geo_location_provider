@@ -1,6 +1,7 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
+import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceLocationReadout
+
 /**
  * 画面エントリ。
  * - トグル（起動/停止）
@@ -73,7 +77,7 @@ fun GeoLocationProviderScreen(
                 Spacer(Modifier.height(8.dp))
 
                 // ★ 履歴（LazyColumn）には残り領域を割り当てる
-                androidx.compose.foundation.layout.Box(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f)   // ← これがポイント

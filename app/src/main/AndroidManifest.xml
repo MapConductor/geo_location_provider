@@ -22,7 +22,7 @@
         tools:ignore="ForegroundServicePermission">
 
         <activity
-            android:name=".MainActivity"
+            android:name=".ui.main.MainActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.GeoLocationProvider">
@@ -33,7 +33,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name=".GeoLocationService"
+            android:name=".service.GeoLocationService"
             android:foregroundServiceType="location"
             android:exported="false" />
     </application>

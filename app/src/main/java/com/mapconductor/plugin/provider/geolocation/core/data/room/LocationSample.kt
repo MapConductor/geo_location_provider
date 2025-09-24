@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.core.data.room
 
 import androidx.room.Entity
 import androidx.room.Index

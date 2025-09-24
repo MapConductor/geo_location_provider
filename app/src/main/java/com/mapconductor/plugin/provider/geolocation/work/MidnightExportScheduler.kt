@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.work
 
 import android.content.Context
 import android.util.Log
@@ -6,6 +6,7 @@ import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import java.time.Duration
 import java.time.ZoneId
 import java.time.ZonedDateTime

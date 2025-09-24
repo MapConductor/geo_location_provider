@@ -1,10 +1,12 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.core.domain.export
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample
 import java.io.BufferedOutputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -23,7 +25,7 @@ object GeoJsonExporter {
     fun exportToDownloads(
         context: Context,
         records: List<LocationSample>
-    ): android.net.Uri? {
+    ): Uri? {
         return exportToDownloads(
             context = context,
             records = records,
@@ -44,7 +46,7 @@ object GeoJsonExporter {
         records: List<LocationSample>,
         baseName: String? = null,
         compressAsZip: Boolean = false
-    ): android.net.Uri? {
+    ): Uri? {
         val json = toGeoJson(records).toByteArray(Charsets.UTF_8)
         val resolvedBase = baseName ?: nameFmt.format(Date())
         val displayName = if (compressAsZip) "$resolvedBase.zip" else "$resolvedBase.geojson"

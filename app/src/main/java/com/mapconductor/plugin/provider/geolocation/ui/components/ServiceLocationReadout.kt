@@ -1,8 +1,10 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.ui.components
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
+import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 
 @Composable
 fun ServiceLocationReadout(

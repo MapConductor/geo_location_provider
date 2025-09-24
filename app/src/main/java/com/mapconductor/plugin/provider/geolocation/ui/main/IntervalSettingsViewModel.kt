@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation
+package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import android.content.ComponentName
 import android.content.Context
@@ -9,6 +9,8 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.mapconductor.plugin.provider.geolocation.SettingsStore
+import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
