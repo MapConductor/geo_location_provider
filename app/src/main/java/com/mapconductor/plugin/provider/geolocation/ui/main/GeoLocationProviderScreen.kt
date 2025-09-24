@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.ui.components.ExportButton
 import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceLocationReadout
 
@@ -114,18 +115,5 @@ fun IntervalSettingsSection(viewModel: IntervalSettingsViewModel) {
         Button(onClick = { viewModel.saveAndApply() }) {
             Text("Save & Apply")
         }
-    }
-}
-
-@Composable
-fun ExportButton(
-    modifier: Modifier = Modifier,
-    limit: Int? = 1000 // null なら全件
-) {
-    val context = LocalContext.current
-    val vm: ManualExportViewModel = viewModel(factory = ManualExportViewModel.factory(context))
-
-    Button(onClick = { vm.exportAll(limit) }, modifier = modifier) {
-        Text("Export to Downloads")
     }
 }
