@@ -45,18 +45,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
-
-// Drive フォルダURL or ID を受け取り、IDを取り出す（/folders/<ID> or ?id=<ID> を想定）
-private fun extractDriveFolderId(input: String): String {
-    val t = input.trim()
-    val re1 = Regex("""/folders/([a-zA-Z0-9_-]+)""")
-    val re2 = Regex("""[?&]id=([a-zA-Z0-9_-]+)""")
-    return re1.find(t)?.groupValues?.get(1)
-        ?: re2.find(t)?.groupValues?.get(1)
-        ?: t // どれでもなければそのままIDとして扱う
-}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -295,10 +286,14 @@ private fun AppRoot(
                 TextButton(onClick = {
                     scope.launch {
                         val prefs = DrivePrefsRepository(ctx.applicationContext)
-                        val id = extractDriveFolderId(folderInput)
-                        prefs.setFolderId(id)
+                        val extracted = extractFromUrlOrId(folderInput) // String?
+                        if (extracted.isNullOrBlank()) {
+                            showMsg("Invalid Folder ID or URL")
+                            return@launch
+                        }
+                        prefs.setFolderId(extracted) // String (non-null)
                         showFolderDialog = false
-                        showMsg("Saved Folder ID: $id")
+                        showMsg("Saved Folder ID: $extracted")
                     }
                 }) { Text("Save") }
             },

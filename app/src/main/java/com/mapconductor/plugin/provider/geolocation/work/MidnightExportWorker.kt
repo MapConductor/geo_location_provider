@@ -8,6 +8,7 @@ import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.util.NotificationHelper
 import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation.core.domain.export.GeoJsonExporter
@@ -65,7 +66,7 @@ class MidnightExportWorker(
                 }
 
             // アップロード設定（NONE の場合はアップロードしない）
-            val prefs = UploadPrefs.snapshot(applicationContext)
+            val prefs = AppPrefs.uploadSnapshot(applicationContext)
             if (prefs.engine == UploadEngine.NONE) {
                 Log.i(LogTags.WORKER, "UploadEngine=NONE; keep local file and DB as-is.")
                 scheduleNext0am()

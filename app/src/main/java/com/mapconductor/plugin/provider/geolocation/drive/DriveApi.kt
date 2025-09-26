@@ -5,7 +5,6 @@ package com.mapconductor.plugin.provider.geolocation.drive
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
-import androidx.datastore.core.IOException
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -13,8 +12,9 @@ import okio.BufferedSink
 import okio.source
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
-
-// ...既存の DriveApiClient / DriveFolderId / InputStreamRequestBody / UploadResult で使っていた import...
+import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
+import java.io.IOException
 
 /* ===========================================
    ここに “既存クラス本体をそのまま” 同居させます

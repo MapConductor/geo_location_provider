@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation.core.domain.export.GeoJsonExporter
@@ -56,7 +57,7 @@ class ManualExportViewModel(private val appContext: Context) : ViewModel() {
             val msg = if (uri != null) {
                 // オプションで Drive にもアップロード（DBは削除しない）
                 if (alsoUpload) {
-                    val prefs = UploadPrefs.snapshot(appContext)
+                    val prefs = AppPrefs.uploadSnapshot(appContext)
                     val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
                     val uploader = UploaderFactory.create(appContext, prefs.engine)
                     if (uploader != null && !folderId.isNullOrBlank()) {
