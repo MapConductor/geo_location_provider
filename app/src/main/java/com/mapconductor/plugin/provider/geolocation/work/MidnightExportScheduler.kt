@@ -3,7 +3,9 @@ package com.mapconductor.plugin.provider.geolocation.work
 import android.content.Context
 import android.util.Log
 import androidx.work.BackoffPolicy
+import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.mapconductor.plugin.provider.geolocation.util.LogTags
@@ -16,7 +18,7 @@ import java.util.concurrent.TimeUnit
 /**
  * 次の 0:00(JST) に 1回だけ実行される OneTimeWork を登録するスケジューラ。
  * - 何度呼んでも UniqueWork で上書き(REPLACE)されるため、二重起動しない。
- * - ネットワーク制約は付けない（P3では通信しない）。
+ * - ネットワーク必須（アップロードがあるため）。
  */
 object MidnightExportScheduler {
 
@@ -26,11 +28,17 @@ object MidnightExportScheduler {
     fun scheduleNext(context: Context) {
         val now: ZonedDateTime = ZonedDateTime.now(zone)
         val nextMidnight: ZonedDateTime = now.toLocalDate().plusDays(1).atStartOfDay(zone)
-        val delay: Duration = Duration.between(now, nextMidnight).coerceAtLeast(Duration.ofSeconds(0))
+        val delay: Duration = Duration.between(now, nextMidnight).coerceAtLeast(Duration.ZERO)
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
 
         val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
             .setInitialDelay(delay)
-            .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.MINUTES)
+            .setConstraints(constraints)
+            // 再試行ポリシーは任意。EXponentialの方が一般的。
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
@@ -40,6 +48,9 @@ object MidnightExportScheduler {
         )
 
         val fmt = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-        Log.i(LogTags.WORKER, "Scheduled MidnightExportWorker at ${nextMidnight.format(fmt)} (delay=${delay.toMinutes()} min)")
+        Log.i(
+            LogTags.WORKER,
+            "Scheduled MidnightExportWorker at ${nextMidnight.format(fmt)} (delay=${delay.toMinutes()} min)"
+        )
     }
 }
