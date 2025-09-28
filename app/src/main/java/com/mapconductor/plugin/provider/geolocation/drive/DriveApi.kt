@@ -57,14 +57,19 @@ sealed class UploadResult {
 
 // B) object DriveFolderId（既存の抽出ロジックをコピペ）
 object DriveFolderId {
+    private val patterns = listOf(
+        Regex("""/folders/([A-Za-z0-9_-]{10,})"""),
+        Regex("""[?&]id=([A-Za-z0-9_-]{10,})"""),
+        Regex("""/drive/folders/([A-Za-z0-9_-]{10,})""")
+    )
     fun extractFromUrlOrId(input: String?): String? {
-        if (input.isNullOrBlank()) return null
-        // すでにIDだけの場合を許容
-        if (!input.contains("http")) return input.trim()
-
-        val regex = Regex("""/folders/([a-zA-Z0-9_-]+)""")
-        val m = regex.find(input) ?: return null
-        return input?.trim()?.takeIf { it.isNotEmpty() } // ダミー：既存の本実装に置換
+        val s = input?.trim().orEmpty()
+        if (s.isEmpty()) return null
+        if (!s.contains("http")) return s
+        for (p in patterns) {
+            p.find(s)?.groupValues?.getOrNull(1)?.let { return it }
+        }
+        return null
     }
 }
 

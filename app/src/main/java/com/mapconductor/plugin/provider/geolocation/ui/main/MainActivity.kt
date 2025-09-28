@@ -189,7 +189,7 @@ private fun AppRoot(
                                 driveMenu = false
                                 scope.launch {
                                     val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    folderInput = prefs.folderIdFlow.first() // 既存値を初期表示
+                                    folderInput = prefs.folderIdFlow.first().orEmpty() // 既存値を初期表示
                                     showFolderDialog = true
                                 }
                             }
@@ -229,7 +229,7 @@ private fun AppRoot(
                                 scope.launch {
                                     val token = repo.getAccessTokenOrNull()
                                     val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    val id = prefs.folderIdFlow.first()
+                                    val id = prefs.folderIdFlow.first().orEmpty()
                                     val msg = when {
                                         token == null -> "No token"
                                         id.isBlank()  -> "Folder ID empty"
@@ -299,7 +299,7 @@ private fun AppRoot(
                             showMsg("Invalid Folder ID or URL")
                             return@launch
                         }
-                        prefs.setFolderId(extracted) // String (non-null)
+                        prefs.setFolderId(requireNotNull(extracted)) // String (non-null)
                         showFolderDialog = false
                         showMsg("Saved Folder ID: $extracted")
                     }

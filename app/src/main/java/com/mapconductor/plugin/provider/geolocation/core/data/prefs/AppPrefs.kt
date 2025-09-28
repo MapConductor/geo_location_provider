@@ -1,23 +1,23 @@
 package com.mapconductor.plugin.provider.geolocation.core.data.prefs
 
 import android.content.Context
+import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull  // ★ 追加（任意：null安全に使う場合）
 
 /**
  * 設定の“読み出し統合”用ファサード。
  * まずは Upload 関連だけ UploadPrefs から橋渡し。
  */
 object AppPrefs {
+    data class Snapshot(val engine: UploadEngine, val folderId: String)
 
-    data class Upload(
-        val engine: UploadEngine,
-        val folderId: String
-    )
-
-    /** 現状は UploadPrefs をそのまま委譲。後で DataStore 等へ差し替え可能。 */
-    fun uploadSnapshot(context: Context): Upload {
-        val up = UploadPrefs.snapshot(context)
-        return Upload(engine = up.engine, folderId = up.folderId)
+    suspend fun uploadSnapshot(context: Context): Snapshot {
+        val repo = DrivePrefsRepository(context)
+        val engine = repo.engineFlow.first()              // 未設定時は NONE
+        val folder = repo.folderIdFlow.firstOrNull() ?: "" // null を空文字に
+        return Snapshot(engine, folder)
     }
 }
 
@@ -43,7 +43,7 @@ object UploadPrefs {
 
     // ---- 実体：SharedPreferences ----
     private const val SP_NAME = "upload_prefs"
-    private const val KEY_ENGINE = "engine"        // "NONE" / "KOTLIN"
+    private const val KEY_ENGINE = "engine"        // "NONE" / "KOTLIN" / …
     private const val KEY_FOLDER_ID = "folder_id"  // "1a2B..." or URL
 
     private fun readFromSharedPrefs(context: Context): Snapshot {
