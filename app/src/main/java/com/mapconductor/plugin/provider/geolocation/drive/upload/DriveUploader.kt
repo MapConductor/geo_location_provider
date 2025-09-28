@@ -19,8 +19,11 @@ interface Uploader {
     ): UploadResult
 }
 
-/** 既存の DriveApiClient + GoogleAuthRepository を内部で利用する実装。*/
-class KotlinDriveUploader(
+/**
+ * 既存の DriveApiClient + GoogleAuthRepository を内部で利用する薄いラッパ。
+ * ※ Resumable対応の実体（OkHttp直叩き版）KotlinDriveUploader とクラス名が衝突するため改名。
+ */
+class ApiClientDriveUploader(
     private val appContext: Context,
     private val client: DriveApiClient = DriveApiClient(appContext),
     private val auth: GoogleAuthRepository = GoogleAuthRepository(appContext)
@@ -51,7 +54,9 @@ class KotlinDriveUploader(
 object UploaderFactory {
     fun create(context: Context, engine: UploadEngine): Uploader? =
         when (engine) {
-            UploadEngine.KOTLIN -> KotlinDriveUploader(context)
+            // 既定は Resumable 対応の KotlinDriveUploader（OkHttp直叩き版）を使いたい場合は、
+            // ここを KotlinDriveUploader(context) にしてください。
+            UploadEngine.KOTLIN -> ApiClientDriveUploader(context)
             UploadEngine.NONE   -> null
         }
 }
