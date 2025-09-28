@@ -10,6 +10,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun DriveSettingsScreen(vm: DriveSettingsViewModel = viewModel()) {
@@ -45,5 +50,35 @@ fun DriveSettingsScreen(vm: DriveSettingsViewModel = viewModel()) {
 
         HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
         Text(text = status, style = MaterialTheme.typography.bodyMedium)
+
+        BacklogPanel()
+    }
+}
+
+@Composable
+fun BacklogPanel() {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var oldest by remember { mutableStateOf<Long?>(null) }
+    var status by remember { mutableStateOf<String>("") }
+
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).exportedDayDao()
+            oldest = dao.oldestNotUploaded()?.epochDay
+        }
+    }
+
+    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+        Text("* Backlog", style = MaterialTheme.typography.titleMedium)
+        Text("oldest not uploaded: ${oldest ?: -1L}")
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = {
+            scope.launch(Dispatchers.IO) {
+                MidnightExportScheduler.scheduleNext(ctx) // 直近0:00予約。テスト用に即時ワーカー起動でもOK
+                status = "scheduled"
+            }
+        }) { Text("Run backlog") }
+        if (status.isNotEmpty()) Text(status)
     }
 }

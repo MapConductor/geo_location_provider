@@ -48,6 +48,8 @@ import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -202,7 +204,9 @@ private fun AppRoot(
                                     val msg = if (token == null) {
                                         "No token"
                                     } else {
-                                        when (val r = api.aboutGet(token)) {
+                                        // ★ ここで IO に切り替える
+                                        val r = api.aboutGet(token)
+                                        when (r) {
                                             is ApiResult.Success ->
                                                 "About 200: ${r.data.user?.emailAddress ?: "-"}"
                                             is ApiResult.HttpError ->
@@ -213,7 +217,7 @@ private fun AppRoot(
                                                 "About: unexpected result"
                                         }
                                     }
-                                    showMsg(msg)
+                                    showMsg(msg) // ← ここは Main のままでOK
                                 }
                             }
                         )
@@ -230,7 +234,11 @@ private fun AppRoot(
                                         token == null -> "No token"
                                         id.isBlank()  -> "Folder ID empty"
                                         else -> {
-                                            when (val r = api.validateFolder(token, id)) {
+                                            // ★ ここで IO に切り替える
+                                            val r = withContext(Dispatchers.IO) {
+                                                api.validateFolder(token, id)
+                                            }
+                                            when (r) {
                                                 is ApiResult.Success ->
                                                     if (r.data.isFolder)
                                                         "Folder OK: ${r.data.name} (${r.data.id})"

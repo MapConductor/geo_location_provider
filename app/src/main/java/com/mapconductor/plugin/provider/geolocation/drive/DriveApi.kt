@@ -14,6 +14,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /* ===========================================
@@ -101,30 +103,34 @@ class DriveApiClient(
     }
 
     /** GET /about?fields=user(displayName,emailAddress) */
-    fun aboutGet(token: String): ApiResult<AboutResponse> = try {
-        val url = "$BASE/about?fields=user(displayName,emailAddress)"
-        val req = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $token")
-            .addHeader("Accept", "application/json")
-            .get()
-            .build()
+    suspend fun aboutGet(token: String): ApiResult<AboutResponse> = withContext(Dispatchers.IO) {
+        try {
+            val url = "$BASE/about?fields=user(displayName,emailAddress)"
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Accept", "application/json")
+                .get()
+                .build()
 
-        http.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) return ApiResult.HttpError(resp.code, body)
-            val obj = JSONObject(body)
-            val u = obj.optJSONObject("user")
-            val user = if (u != null) {
-                AboutResponse.User(
-                    displayName = u.optString("displayName", null),
-                    emailAddress = u.optString("emailAddress", null)
-                )
-            } else null
-            ApiResult.Success(AboutResponse(user))
+            http.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    return@withContext ApiResult.HttpError(resp.code, body)
+                }
+                val obj = JSONObject(body)
+                val u = obj.optJSONObject("user")
+                val user = if (u != null) {
+                    AboutResponse.User(
+                        displayName = u.optString("displayName", null),
+                        emailAddress = u.optString("emailAddress", null)
+                    )
+                } else null
+                ApiResult.Success(AboutResponse(user))
+            }
+        } catch (e: IOException) {
+            ApiResult.NetworkError(e)
         }
-    } catch (e: IOException) {
-        ApiResult.NetworkError(e)
     }
 
     /**
