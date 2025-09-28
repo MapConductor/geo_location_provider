@@ -8,6 +8,7 @@ import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -83,10 +84,21 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                         "Folder OK: ${f.name} (${f.id})"
                     else
                         "Not a folder: ${f.mimeType}"
+
+                    // ★追加：Folder OK ならアップロードエンジンを自動有効化
+                    if (f.isFolder) {
+                        prefs.setEngine(com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN)
+                    }
                 }
                 is ApiResult.HttpError -> _status.value = "Folder ${r.code}: ${r.body}"
                 is ApiResult.NetworkError -> _status.value = "Folder network: ${r.exception.message}"
             }
+        }
+    }
+
+    fun runBacklogNow() {
+        viewModelScope.launch(Dispatchers.Default) {
+            MidnightExportScheduler.runNow(getApplication())
         }
     }
 }

@@ -50,6 +50,8 @@ room {
 }
 
 dependencies {
+    implementation("androidx.navigation:navigation-compose:2.8.0")
+    implementation("androidx.activity:activity-compose:1.9.2")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")

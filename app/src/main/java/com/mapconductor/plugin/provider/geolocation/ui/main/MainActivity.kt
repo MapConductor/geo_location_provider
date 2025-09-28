@@ -50,21 +50,37 @@ import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthReposit
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+// ★ 追加
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MaterialTheme {
-                AppRoot(
-                    onStartTracking = { requestPermissionsAndStartService() },
-                    onStopTracking  = { stopLocationService() }
-                ) {
-                    Surface(modifier = Modifier.fillMaxSize()) {
-                        val vm: GeoLocationProviderViewModel = viewModel()
-                        GeoLocationProviderScreen(
-                            state = vm.uiState.value,
-                            onButtonClick = { vm.onGeoLocationProviderClicked() }
+                val navController = rememberNavController()
+                NavHost(navController = navController, startDestination = "home") {
+                    composable("home") {
+                        AppRoot(
+                            onStartTracking = { requestPermissionsAndStartService() },
+                            onStopTracking  = { stopLocationService() },
+                            onOpenDriveSettings = { navController.navigate("drive_settings") }
+                        ) {
+                            Surface(modifier = Modifier.fillMaxSize()) {
+                                val vm: GeoLocationProviderViewModel = viewModel()
+                                GeoLocationProviderScreen(
+                                    state = vm.uiState.value,
+                                    onButtonClick = { vm.onGeoLocationProviderClicked() }
+                                )
+                            }
+                        }
+                    }
+                    composable("drive_settings") {
+                        DriveSettingsScreen(
+                            onBack = { navController.popBackStack() }
                         )
                     }
                 }
@@ -74,7 +90,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // 既に権限が揃っているなら”自動開始”
         val locOk =
             ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                     ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -83,21 +98,19 @@ class MainActivity : ComponentActivity() {
         else true
 
         if (locOk && notifOk) {
-            startLocationService()           // ← これで起動直後に自動開始
+            startLocationService()
         }
-        // ※ 初回から自動で許可ダイアログも出したいなら、下の行に置き換え可
-        // else requestPermissionsAndStartService()
     }
 
     private fun startLocationService() {
         val intent = Intent(this, GeoLocationService::class.java)
-            .setAction(GeoLocationService.ACTION_START) // ACTION_START未定義ならこの行を削除
+            .setAction(GeoLocationService.ACTION_START)
         ContextCompat.startForegroundService(this, intent)
     }
 
     private fun stopLocationService() {
         val intent = Intent(this, GeoLocationService::class.java)
-            .setAction(GeoLocationService.ACTION_STOP) // 未定義なら setAction を削除
+            .setAction(GeoLocationService.ACTION_STOP)
         stopService(intent)
     }
 
@@ -132,6 +145,7 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot(
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
+    onOpenDriveSettings: () -> Unit, // ★ 追加
     content: @Composable () -> Unit
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -139,7 +153,6 @@ private fun AppRoot(
     val scope = rememberCoroutineScope()
 
     val repo = remember { GoogleAuthRepository(ctx.applicationContext) }
-    // ★ TODO() を削除してデフォルトOkHttpを使う
     val api  = remember { DriveApiClient(context = ctx) }
 
     val showMsg: (String) -> Unit = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
@@ -154,8 +167,6 @@ private fun AppRoot(
     }
 
     var driveMenu by remember { mutableStateOf(false) }
-
-    // フォルダID入力ダイアログ用の状態
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderInput by remember { mutableStateOf("") }
 
@@ -189,12 +200,11 @@ private fun AppRoot(
                                 driveMenu = false
                                 scope.launch {
                                     val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    folderInput = prefs.folderIdFlow.first().orEmpty() // 既存値を初期表示
+                                    folderInput = prefs.folderIdFlow.first().orEmpty()
                                     showFolderDialog = true
                                 }
                             }
                         )
-                        // --- About.get ---
                         DropdownMenuItem(
                             text = { Text("About.get") },
                             onClick = {
@@ -204,8 +214,9 @@ private fun AppRoot(
                                     val msg = if (token == null) {
                                         "No token"
                                     } else {
-                                        // ★ ここで IO に切り替える
-                                        val r = api.aboutGet(token)
+                                        val r = withContext(Dispatchers.IO) {
+                                            api.aboutGet(token)
+                                        }
                                         when (r) {
                                             is ApiResult.Success ->
                                                 "About 200: ${r.data.user?.emailAddress ?: "-"}"
@@ -213,15 +224,13 @@ private fun AppRoot(
                                                 "About ${r.code}: ${r.body.take(160)}"
                                             is ApiResult.NetworkError ->
                                                 "About network: ${r.exception.message}"
-                                            else ->
-                                                "About: unexpected result"
+                                            else -> "About: unexpected result"
                                         }
                                     }
-                                    showMsg(msg) // ← ここは Main のままでOK
+                                    showMsg(msg)
                                 }
                             }
                         )
-                        // --- Validate Folder ---
                         DropdownMenuItem(
                             text = { Text("Validate Folder") },
                             onClick = {
@@ -234,7 +243,6 @@ private fun AppRoot(
                                         token == null -> "No token"
                                         id.isBlank()  -> "Folder ID empty"
                                         else -> {
-                                            // ★ ここで IO に切り替える
                                             val r = withContext(Dispatchers.IO) {
                                                 api.validateFolder(token, id)
                                             }
@@ -257,6 +265,14 @@ private fun AppRoot(
                                 }
                             }
                         )
+                        androidx.compose.material3.Divider()
+                        DropdownMenuItem(
+                            text = { Text("Drive 設定（詳細）") },
+                            onClick = {
+                                driveMenu = false
+                                onOpenDriveSettings()
+                            }
+                        )
                     }
                     TextButton(onClick = onStopTracking) { Text("Stop") }
                 }
@@ -276,7 +292,6 @@ private fun AppRoot(
         }
     }
 
-    // フォルダID入力ダイアログ
     if (showFolderDialog) {
         AlertDialog(
             onDismissRequest = { showFolderDialog = false },
@@ -294,12 +309,12 @@ private fun AppRoot(
                 TextButton(onClick = {
                     scope.launch {
                         val prefs = DrivePrefsRepository(ctx.applicationContext)
-                        val extracted = extractFromUrlOrId(folderInput) // String?
+                        val extracted = extractFromUrlOrId(folderInput)
                         if (extracted.isNullOrBlank()) {
                             showMsg("Invalid Folder ID or URL")
                             return@launch
                         }
-                        prefs.setFolderId(requireNotNull(extracted)) // String (non-null)
+                        prefs.setFolderId(requireNotNull(extracted))
                         showFolderDialog = false
                         showMsg("Saved Folder ID: $extracted")
                     }

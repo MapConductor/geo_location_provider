@@ -24,10 +24,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.ui.components.ExportButton
 import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceLocationReadout
+// ★ 統一：work パッケージの Scheduler を使用
+import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 
 /**
  * 画面エントリ。
@@ -35,16 +36,19 @@ import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceLocatio
  * - 更新間隔の適用
  * - 現在の位置・バッテリー表示
  * - 履歴（最新30件）表示
+ * - （P8）運用系：今すぐ実行／Drive設定へ
  */
 @Composable
 fun GeoLocationProviderScreen(
     state: UiState,
     onButtonClick: () -> Unit,
+    // P8: Drive設定画面へ遷移するための任意コールバック（未配線でもビルド可能）
+    onOpenDriveSettings: () -> Unit = {}
 ) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
-                modifier = Modifier.fillMaxSize(), // ← verticalScroll() を外す
+                modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
@@ -62,14 +66,17 @@ fun GeoLocationProviderScreen(
                 // 現在の位置・バッテリーの読み出し（bindで購読）
                 ServiceLocationReadout()
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
-                Spacer(Modifier.height(2.dp))
-                ExportButton(limit = null)
-                Spacer(Modifier.height(2.dp))
-                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
-                Spacer(Modifier.height(8.dp))
 
+//                // 主画面に出したい場合はコメントアウト解除
+//                BacklogMaintenanceSection(
+//                    onRunNow = { MidnightExportScheduler.runNow(context) },
+//                    onOpenDriveSettings = onOpenDriveSettings
+//                )
+
+                HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+                Spacer(Modifier.height(8.dp))
 
                 Text(
                     text = "Latest 30 records",
@@ -81,7 +88,7 @@ fun GeoLocationProviderScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .weight(1f)   // ← これがポイント
+                        .weight(1f)
                 ) {
                     LocationHistoryList() // ← 中は LazyColumn のままでOK
                 }
@@ -115,5 +122,41 @@ fun IntervalSettingsSection(viewModel: IntervalSettingsViewModel) {
         Button(onClick = { viewModel.saveAndApply() }) {
             Text("Save & Apply")
         }
+    }
+}
+
+/**
+ * P8: 運用系の最小導線。
+ * - 今すぐ実行（MidnightExportWorkerを即時enqueue）
+ * - Drive設定へ（別画面遷移、未配線でもOK）
+ */
+@Composable
+private fun BacklogMaintenanceSection(
+    onRunNow: () -> Unit,
+    onOpenDriveSettings: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = "Maintenance",
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Button(onClick = onRunNow) { Text("今すぐ実行") }
+            Button(onClick = onOpenDriveSettings) { Text("Drive設定へ") }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "最古の未アップロード日を優先処理します（ネットワーク要件あり）。",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }

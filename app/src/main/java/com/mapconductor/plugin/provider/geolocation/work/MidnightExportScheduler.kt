@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit
 object MidnightExportScheduler {
 
     private const val UNIQUE_WORK_NAME = "midnight_export"
+    private const val UNIQUE_NAME_RUN_NOW = "midnight_export_now" // ★ 追加
     private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
 
     fun scheduleNext(context: Context) {
@@ -52,5 +53,26 @@ object MidnightExportScheduler {
             LogTags.WORKER,
             "Scheduled MidnightExportWorker at ${nextMidnight.format(fmt)} (delay=${delay.toMinutes()} min)"
         )
+    }
+
+
+    /** ★追加：検証・手動実行用に「今すぐ」起動 */
+    fun runNow(context: Context) {
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED) // ネットワーク有りで実行
+            .build()
+
+        val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
+            .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 1, TimeUnit.MINUTES)
+            .build()
+
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            UNIQUE_NAME_RUN_NOW,
+            ExistingWorkPolicy.REPLACE,
+            req
+        )
+
+        Log.i(LogTags.WORKER, "Enqueued MidnightExportWorker to run now")
     }
 }
