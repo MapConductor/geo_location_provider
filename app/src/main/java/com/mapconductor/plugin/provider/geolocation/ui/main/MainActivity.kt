@@ -239,17 +239,16 @@ private fun AppRoot(
                                     val token = repo.getAccessTokenOrNull()
                                     val prefs = DrivePrefsRepository(ctx.applicationContext)
                                     val saved = prefs.folderIdFlow.first().orEmpty()
+                                    val rk    = prefs.folderResourceKeyFlow.first() // ★ 追加（null 可）
 
                                     val msg = when {
                                         token == null -> "No token"
                                         saved.isBlank() -> "Folder ID empty"
                                         else -> {
-                                            // 可能なら URL から resourceKey を抽出。IDだけなら null になるのでそのまま渡す
-                                            val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractResourceKey(saved)
                                             val pureId = extractFromUrlOrId(saved) ?: saved
 
                                             val r = withContext(Dispatchers.IO) {
-                                                api.validateFolder(token, pureId, rk)
+                                                api.validateFolder(token, pureId, rk) // ★ rk を渡す
                                             }
                                             when (r) {
                                                 is ApiResult.Success ->
@@ -314,14 +313,20 @@ private fun AppRoot(
                 TextButton(onClick = {
                     scope.launch {
                         val prefs = DrivePrefsRepository(ctx.applicationContext)
-                        val extracted = extractFromUrlOrId(folderInput)
-                        if (extracted.isNullOrBlank()) {
+                        val extractedId = extractFromUrlOrId(folderInput)
+                        if (extractedId.isNullOrBlank()) {
                             showMsg("Invalid Folder ID or URL")
                             return@launch
                         }
-                        prefs.setFolderId(requireNotNull(extracted))
+                        // ★ 追加: URL から resourceKey も抽出して保存
+                        val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+                            .extractResourceKey(folderInput)
+
+                        prefs.setFolderId(extractedId)
+                        prefs.setFolderResourceKey(rk) // ← 新規
+
                         showFolderDialog = false
-                        showMsg("Saved Folder ID: $extracted")
+                        showMsg("Saved Folder ID: $extractedId" + if (!rk.isNullOrBlank()) " (rk saved)" else "")
                     }
                 }) { Text("Save") }
             },

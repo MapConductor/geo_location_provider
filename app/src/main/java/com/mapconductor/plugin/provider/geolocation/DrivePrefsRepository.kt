@@ -2,81 +2,70 @@ package com.mapconductor.plugin.provider.geolocation
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 
-/**
- * Google Drive 関連設定の単一ソース（DataStore）。
- * - engineFlow:         NONE / KOTLIN / ...
- * - folderIdFlow:       空文字で未設定を表現（null を使わない）
- * - accountEmailFlow:   空文字で未設定
- * - tokenLastRefreshFlow: 0L で未設定
- *
- * DataStore を SoT にして、UI/Worker どちらからも同一 API で参照・更新。
- */
+// DataStore 名は既存と合わせてください（重複定義があれば片方に寄せる）
+private val Context.dataStore by preferencesDataStore("drive_prefs")
+
 class DrivePrefsRepository(private val context: Context) {
+    // ---- Keys ----
+    private val KEY_FOLDER_ID           = stringPreferencesKey("drive_folder_id")
+    private val KEY_FOLDER_RESOURCE_KEY = stringPreferencesKey("drive_folder_resource_key")
+    private val KEY_ACCOUNT_EMAIL       = stringPreferencesKey("drive_account_email")        // ★ 追加
+    private val KEY_TOKEN_LAST_REFRESH  = longPreferencesKey("drive_token_last_refresh")     // ★ 追加
+    private val KEY_ENGINE              = stringPreferencesKey("upload_engine")              // 任意（EngineをDataStoreで扱う場合）
 
-    // -------- Flows (常に非nullで返す) --------
-    val engineFlow: Flow<UploadEngine> =
-        context.driveData.data
-            .map { p ->
-                p[KEY_ENGINE]?.let { runCatching { UploadEngine.valueOf(it) }.getOrElse { UploadEngine.NONE } }
-                    ?: UploadEngine.NONE
-            }
-            .distinctUntilChanged()
-
+    // ---- Flows ----
     val folderIdFlow: Flow<String> =
-        context.driveData.data
-            .map { p -> p[KEY_FOLDER_ID].orEmpty() }
-            .distinctUntilChanged()
+        context.dataStore.data.map { prefs -> prefs[KEY_FOLDER_ID].orEmpty() }
 
+    val folderResourceKeyFlow: Flow<String?> =
+        context.dataStore.data.map { prefs -> prefs[KEY_FOLDER_RESOURCE_KEY] }
+
+    // ★ 追加：ViewModelが参照しているフロー
     val accountEmailFlow: Flow<String> =
-        context.driveData.data
-            .map { p -> p[KEY_ACCOUNT_EMAIL].orEmpty() }
-            .distinctUntilChanged()
+        context.dataStore.data.map { prefs -> prefs[KEY_ACCOUNT_EMAIL].orEmpty() }
 
     val tokenLastRefreshFlow: Flow<Long> =
-        context.driveData.data
-            .map { p -> p[KEY_TOKEN_LAST_REFRESH] ?: 0L }
-            .distinctUntilChanged()
+        context.dataStore.data.map { prefs -> prefs[KEY_TOKEN_LAST_REFRESH] ?: 0L }
 
-    // -------- Setters --------
-    suspend fun setEngine(engine: UploadEngine) {
-        context.driveData.edit { it[KEY_ENGINE] = engine.name }
+    // （任意）Engine を DataStore で読みたい場合
+    val engineFlow: Flow<UploadEngine> =
+        context.dataStore.data.map { prefs ->
+            when (prefs[KEY_ENGINE]) {
+                UploadEngine.KOTLIN.name -> UploadEngine.KOTLIN
+                else -> UploadEngine.NONE
+            }
+        }
+
+    // ---- Setters ----
+    suspend fun setFolderId(id: String) {
+        context.dataStore.edit { it[KEY_FOLDER_ID] = id.trim() }
     }
 
-    /** 空/空白なら削除（= 空文字で流れてくる） */
-    suspend fun setFolderId(id: String?) {
-        context.driveData.edit { p ->
-            val v = id?.trim().orEmpty()
-            if (v.isEmpty()) p.remove(KEY_FOLDER_ID) else p[KEY_FOLDER_ID] = v
+    suspend fun setFolderResourceKey(rk: String?) {
+        context.dataStore.edit {
+            if (rk.isNullOrBlank()) it.remove(KEY_FOLDER_RESOURCE_KEY)
+            else it[KEY_FOLDER_RESOURCE_KEY] = rk
         }
     }
 
+    // ★ 追加：ViewModel が呼ぶ setter
     suspend fun setAccountEmail(email: String) {
-        context.driveData.edit { p ->
-            val v = email.trim()
-            if (v.isEmpty()) p.remove(KEY_ACCOUNT_EMAIL) else p[KEY_ACCOUNT_EMAIL] = v
-        }
+        context.dataStore.edit { it[KEY_ACCOUNT_EMAIL] = email }
     }
 
-    /** アクセストークンを更新できた時刻を保存（ミリ秒）。既定は現在時刻。 */
-    suspend fun markTokenRefreshed(tsMillis: Long = System.currentTimeMillis()) {
-        context.driveData.edit { it[KEY_TOKEN_LAST_REFRESH] = tsMillis }
+    suspend fun markTokenRefreshed(nowMillis: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { it[KEY_TOKEN_LAST_REFRESH] = nowMillis }
     }
 
-    // -------- DataStore 設定 --------
-    private companion object {
-        private val Context.driveData by preferencesDataStore(name = "drive_prefs")
-
-        private val KEY_ENGINE = stringPreferencesKey("engine")                 // NONE / KOTLIN / ...
-        private val KEY_FOLDER_ID = stringPreferencesKey("folder_id")           // "1a2B..."（空なら未設定）
-        private val KEY_ACCOUNT_EMAIL = stringPreferencesKey("account_email")   // ""=未設定
-        private val KEY_TOKEN_LAST_REFRESH = longPreferencesKey("token_last_refresh") // 0L=未設定
+    // （任意）Engine を DataStore で管理する場合
+    suspend fun setEngine(engine: UploadEngine) {
+        context.dataStore.edit { it[KEY_ENGINE] = engine.name }
     }
 }

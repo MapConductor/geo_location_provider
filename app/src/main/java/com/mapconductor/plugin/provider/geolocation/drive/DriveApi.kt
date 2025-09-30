@@ -112,18 +112,12 @@ class DriveApiClient(
     private val http: OkHttpClient = DriveHttp.client() // ← defaultClient() から差し替え
 ) {
     companion object {
-        const val BASE: String = "https://www.googleapis.com/drive/v3"   // ★追加
-        const val BASE_FILES: String = "$BASE/files"           // ← これを追加
+        const val BASE: String = "https://www.googleapis.com/drive/v3"
+        const val BASE_FILES: String = "$BASE/files" // ★ 忘れずに
         const val BASE_UPLOAD: String = "https://www.googleapis.com/upload/drive/v3/files"
         val JSON: MediaType = "application/json; charset=UTF-8".toMediaType()
-
-        fun defaultClient(): OkHttpClient =
-            OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(90, TimeUnit.SECONDS)
-                .writeTimeout(90, TimeUnit.SECONDS)
-                .build()
     }
+
 
     /** GET /about?fields=user(displayName,emailAddress) */
     suspend fun aboutGet(token: String): ApiResult<AboutResponse> = withContext(Dispatchers.IO) {
@@ -191,9 +185,8 @@ class DriveApiClient(
 
             http.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    return@withContext ApiResult.HttpError(resp.code, body)
-                }
+                if (!resp.isSuccessful) return@withContext ApiResult.HttpError(resp.code, body)
+
                 val obj = JSONObject(body)
                 val mime = obj.optString("mimeType", "")
                 val isFolder = (mime == "application/vnd.google-apps.folder")
@@ -213,6 +206,39 @@ class DriveApiClient(
             }
         } catch (e: IOException) {
             ApiResult.NetworkError(e)
+        }
+    }
+
+    // ★ アップロード先フォルダの最終解決（ショートカット→実体、権限チェックまで）
+    suspend fun resolveFolderIdForUpload(
+        token: String,
+        idOrUrl: String,
+        resourceKey: String?
+    ): ApiResult<String> {
+        val firstId = DriveFolderId.extractFromUrlOrId(idOrUrl) ?: idOrUrl
+        // 1st: 直接検証（必要なら resourceKey 付き）
+        when (val r = validateFolder(token, firstId, resourceKey)) {
+            is ApiResult.Success -> {
+                val v = r.data
+                // ショートカットなら targetId で再検証
+                val final = if (v.mimeType == "application/vnd.google-apps.shortcut" && !v.shortcutTargetId.isNullOrBlank()) {
+                    when (val r2 = validateFolder(token, v.shortcutTargetId!!, null)) {
+                        is ApiResult.Success -> r2.data
+                        is ApiResult.HttpError -> return r2
+                        is ApiResult.NetworkError -> return r2
+                    }
+                } else v
+
+                if (!final.isFolder) {
+                    return ApiResult.HttpError(400, "Not a folder: ${final.mimeType}")
+                }
+                if (!final.canAddChildren) {
+                    return ApiResult.HttpError(403, "No write permission for this folder")
+                }
+                return ApiResult.Success(final.id)
+            }
+            is ApiResult.HttpError -> return r
+            is ApiResult.NetworkError -> return r
         }
     }
 

@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.core.data.prefs.UploadPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 import kotlinx.coroutines.Dispatchers
@@ -147,12 +149,9 @@ private fun BacklogPanel() {
                 onCheckedChange = { on ->
                     enabled = on
                     scope.launch {
-                        val repo = com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository(ctx)
-                        val engine = if (on)
-                            com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN
-                        else
-                            com.mapconductor.plugin.provider.geolocation.config.UploadEngine.NONE
-                        repo.setEngine(engine)
+                        // ★ DataStore ではなく SharedPreferences 版へ保存（AppPrefs と整合）
+                        val engine = if (on) UploadEngine.KOTLIN else UploadEngine.NONE
+                        UploadPrefs.setEngine(ctx, engine)
                     }
                 }
             )

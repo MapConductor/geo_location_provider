@@ -10,13 +10,15 @@ import kotlinx.coroutines.flow.firstOrNull  // ★ 追加（任意：null安全�
  * 設定の“読み出し統合”用ファサード。
  * まずは Upload 関連だけ UploadPrefs から橋渡し。
  */
+// AppPrefs.kt（最小差分）
 object AppPrefs {
     data class Snapshot(val engine: UploadEngine, val folderId: String)
 
     suspend fun uploadSnapshot(context: Context): Snapshot {
         val repo = DrivePrefsRepository(context)
-        val engine = repo.engineFlow.first()              // 未設定時は NONE
-        val folder = repo.folderIdFlow.firstOrNull() ?: "" // null を空文字に
+        val folder = repo.folderIdFlow.firstOrNull() ?: ""
+        // ★ ここを修正：engine は SharedPreferences 版から読む
+        val engine = UploadPrefs.snapshot(context).engine
         return Snapshot(engine, folder)
     }
 }
