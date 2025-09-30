@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 
 class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = DrivePrefsRepository(app)
@@ -74,23 +76,54 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun validateFolder() {
         viewModelScope.launch(Dispatchers.IO) {
             val token = auth.getAccessTokenOrNull()
-            val id = folderId.value
             if (token == null) { _status.value = "No token"; return@launch }
-            if (id.isBlank()) { _status.value = "Folder ID empty"; return@launch }
-            when (val r = api.validateFolder(token, id)) {
-                is ApiResult.Success -> {
-                    val f = r.data
-                    _status.value = if (f.isFolder)
-                        "Folder OK: ${f.name} (${f.id})"
-                    else
-                        "Not a folder: ${f.mimeType}"
 
-                    // ★追加：Folder OK ならアップロードエンジンを自動有効化
-                    if (f.isFolder) {
-                        prefs.setEngine(com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN)
+            val raw = folderId.value
+            val id = DriveFolderId.extractFromUrlOrId(raw)
+            val rk = DriveFolderId.extractResourceKey(raw)
+            if (id.isNullOrBlank()) { _status.value = "Invalid folder URL/ID"; return@launch }
+
+            // 1回目: 生ID + resourceKey 付きで検証
+            when (val r = api.validateFolder(token, id, rk)) {
+                is ApiResult.Success -> {
+                    var resolvedId = r.data.id
+                    var detail = r.data
+
+                    // ショートカットなら、ターゲットへ追従して再検証
+                    if (detail.mimeType == "application/vnd.google-apps.shortcut" && !detail.shortcutTargetId.isNullOrBlank()) {
+                        when (val r2 = api.validateFolder(token, detail.shortcutTargetId!!, null)) {
+                            is ApiResult.Success -> {
+                                resolvedId = r2.data.id
+                                detail = r2.data
+                            }
+                            is ApiResult.HttpError -> {
+                                _status.value = "Shortcut target ${r2.code}: ${r2.body}"
+                                return@launch
+                            }
+                            is ApiResult.NetworkError -> {
+                                _status.value = "Shortcut target network: ${r2.exception.message}"
+                                return@launch
+                            }
+                        }
                     }
+
+                    if (!detail.isFolder) {
+                        _status.value = "Not a folder: ${detail.mimeType}"
+                        return@launch
+                    }
+                    if (!detail.canAddChildren) {
+                        _status.value = "No write permission for this folder"
+                        return@launch
+                    }
+
+                    // 正規化IDを保存（ショートカット→実体へ）
+                    prefs.setFolderId(resolvedId)
+                    _status.value = "Folder OK: ${detail.name} ($resolvedId)"
+
+                    // ここでエンジンをONにするなら：
+                    // prefs.setEngine(UploadEngine.KOTLIN)
                 }
-                is ApiResult.HttpError -> _status.value = "Folder ${r.code}: ${r.body}"
+                is ApiResult.HttpError    -> _status.value = "Folder ${r.code}: ${r.body}"
                 is ApiResult.NetworkError -> _status.value = "Folder network: ${r.exception.message}"
             }
         }

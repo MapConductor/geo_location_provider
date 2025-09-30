@@ -238,13 +238,18 @@ private fun AppRoot(
                                 scope.launch {
                                     val token = repo.getAccessTokenOrNull()
                                     val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    val id = prefs.folderIdFlow.first().orEmpty()
+                                    val saved = prefs.folderIdFlow.first().orEmpty()
+
                                     val msg = when {
                                         token == null -> "No token"
-                                        id.isBlank()  -> "Folder ID empty"
+                                        saved.isBlank() -> "Folder ID empty"
                                         else -> {
+                                            // 可能なら URL から resourceKey を抽出。IDだけなら null になるのでそのまま渡す
+                                            val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractResourceKey(saved)
+                                            val pureId = extractFromUrlOrId(saved) ?: saved
+
                                             val r = withContext(Dispatchers.IO) {
-                                                api.validateFolder(token, id)
+                                                api.validateFolder(token, pureId, rk)
                                             }
                                             when (r) {
                                                 is ApiResult.Success ->

@@ -17,6 +17,7 @@ import android.webkit.MimeTypeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import com.mapconductor.plugin.provider.geolocation.drive.net.DriveHttp
 
 /* ===========================================
    ここに “既存クラス本体をそのまま” 同居させます
@@ -62,14 +63,30 @@ object DriveFolderId {
         Regex("""[?&]id=([A-Za-z0-9_-]{10,})"""),
         Regex("""/drive/folders/([A-Za-z0-9_-]{10,})""")
     )
-    fun extractFromUrlOrId(input: String?): String? {
-        val s = input?.trim().orEmpty()
+
+    fun extractFromUrlOrId(src: String): String? {
+        val s = src.trim().orEmpty()
         if (s.isEmpty()) return null
         if (!s.contains("http")) return s
         for (p in patterns) {
             p.find(s)?.groupValues?.getOrNull(1)?.let { return it }
         }
         return null
+    }
+
+    fun extractResourceKey(src: String): String? {
+        val lower = src.lowercase()
+        val keyParam = "resourcekey="
+        val i = lower.indexOf(keyParam)
+        if (i < 0) return null
+        val start = i + keyParam.length
+        // & や # で区切る
+        val sb = StringBuilder()
+        for (c in src.substring(start)) {
+            if (c == '&' || c == '#') break
+            sb.append(c)
+        }
+        return sb.toString().ifBlank { null }
     }
 }
 
@@ -92,10 +109,11 @@ class InputStreamRequestBody(
 /** Google Drive REST (v3) の軽量クライアント（multipart/related アップロードのみ使用） */
 class DriveApiClient(
     private val context: Context,
-    private val http: OkHttpClient = defaultClient()
+    private val http: OkHttpClient = DriveHttp.client() // ← defaultClient() から差し替え
 ) {
     companion object {
         const val BASE: String = "https://www.googleapis.com/drive/v3"   // ★追加
+        const val BASE_FILES: String = "$BASE/files"           // ← これを追加
         const val BASE_UPLOAD: String = "https://www.googleapis.com/upload/drive/v3/files"
         val JSON: MediaType = "application/json; charset=UTF-8".toMediaType()
 
@@ -142,30 +160,62 @@ class DriveApiClient(
      * GET /files/{id}?fields=id,name,mimeType&supportsAllDrives=true
      * 指定IDがフォルダか判定。
      */
-    fun validateFolder(token: String, fileId: String): ApiResult<FolderInfo> = try {
-        val url = "$BASE/files/$fileId?fields=id,name,mimeType&supportsAllDrives=true"
-        val req = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $token")
-            .addHeader("Accept", "application/json")
-            .get()
-            .build()
+    data class ValidateResult(
+        val id: String,
+        val name: String,
+        val mimeType: String,
+        val isFolder: Boolean,
+        val canAddChildren: Boolean,
+        val shortcutTargetId: String?
+    )
 
-        http.newCall(req).execute().use { resp ->
-            val body = resp.body?.string().orEmpty()
-            if (!resp.isSuccessful) return ApiResult.HttpError(resp.code, body)
-            val obj = JSONObject(body)
-            ApiResult.Success(
-                FolderInfo(
-                    id = obj.optString("id", ""),
-                    name = obj.optString("name", ""),
-                    mimeType = obj.optString("mimeType", "")
+    // supportsAllDrives=true は必須。
+    // resourceKey があればクエリに付与する。
+    // fields で capabilities / shortcutDetails も引く。
+    suspend fun validateFolder(
+        token: String,
+        id: String,
+        resourceKey: String?
+    ): ApiResult<ValidateResult> = withContext(Dispatchers.IO) {
+        try {
+            val fields = "id,name,mimeType,capabilities/canAddChildren,shortcutDetails/targetId"
+            val rk = if (!resourceKey.isNullOrBlank()) "&resourceKey=$resourceKey" else ""
+            val url = "$BASE_FILES/$id?supportsAllDrives=true&fields=$fields$rk"
+
+            val req = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Accept", "application/json")
+                .get()
+                .build()
+
+            http.newCall(req).execute().use { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (!resp.isSuccessful) {
+                    return@withContext ApiResult.HttpError(resp.code, body)
+                }
+                val obj = JSONObject(body)
+                val mime = obj.optString("mimeType", "")
+                val isFolder = (mime == "application/vnd.google-apps.folder")
+                val shortcutTargetId = obj.optJSONObject("shortcutDetails")?.optString("targetId")
+                val canAdd = obj.optJSONObject("capabilities")?.optBoolean("canAddChildren", false) ?: false
+
+                ApiResult.Success(
+                    ValidateResult(
+                        id = obj.optString("id"),
+                        name = obj.optString("name"),
+                        mimeType = mime,
+                        isFolder = isFolder,
+                        canAddChildren = canAdd,
+                        shortcutTargetId = shortcutTargetId
+                    )
                 )
-            )
+            }
+        } catch (e: IOException) {
+            ApiResult.NetworkError(e)
         }
-    } catch (e: IOException) {
-        ApiResult.NetworkError(e)
     }
+
     /** multipart/related で Drive へアップロード */
     fun uploadMultipart(
         token: String,
@@ -207,7 +257,7 @@ class DriveApiClient(
             .addPart(mediaPart)
             .build()
 
-        val url = "$BASE_UPLOAD?uploadType=multipart&fields=id,name,parents,webViewLink"
+        val url = "$BASE_UPLOAD?uploadType=multipart&supportsAllDrives=true&fields=id,name,parents,webViewLink"
         val req = Request.Builder()
             .url(url)
             .addHeader("Authorization", "Bearer $token")
