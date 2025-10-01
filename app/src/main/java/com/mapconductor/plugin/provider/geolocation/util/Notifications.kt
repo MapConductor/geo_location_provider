@@ -30,7 +30,7 @@ object NotificationHelper {
     fun notifyPermanentFailure(context: Context, message: String) {
         ensureChannel(context)
         val notif = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground) // 適宜差し替え
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation) // 適宜差し替え
             .setContentTitle("Export/Upload Failed")
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))

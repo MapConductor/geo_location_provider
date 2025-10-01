@@ -85,19 +85,20 @@ fun DriveSettingsScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { vm.callAboutGet() }) { Text("About.get") }
                 OutlinedButton(onClick = { vm.validateFolder() }) { Text("Validate Folder") }
+                Button(onClick = { vm.uploadSampleNow() }) { Text("Sample Upload") } // ★追加
             }
 
             HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
             Text(text = status, style = MaterialTheme.typography.bodyMedium)
 
             // --- P8: 運用系（Backlogの見える化/操作） ---
-            BacklogPanel()
+            BacklogPanel(vm = vm)
         }
     }
 }
 
 @Composable
-private fun BacklogPanel() {
+private fun BacklogPanel(vm: DriveSettingsViewModel) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var oldest by remember { mutableStateOf<Long?>(null) }

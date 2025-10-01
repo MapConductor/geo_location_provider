@@ -14,10 +14,17 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+//import com.google.firebase.appdistribution.gradle.models.UploadResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import com.mapconductor.plugin.provider.geolocation.drive.net.DriveHttp
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Request
 
 /* ===========================================
    ここに “既存クラス本体をそのまま” 同居させます
@@ -28,6 +35,13 @@ sealed class ApiResult<out T> {
     data class HttpError(val code: Int, val body: String) : ApiResult<Nothing>()
     data class NetworkError(val exception: IOException) : ApiResult<Nothing>()
 }
+
+data class UploadResponse(
+    val id: String?,
+    val name: String?,
+    val mimeType: String?,
+    val webViewLink: String?
+)
 
 // About.get のモデル
 data class AboutResponse(val user: User?) {
@@ -242,73 +256,88 @@ class DriveApiClient(
         }
     }
 
-    /** multipart/related で Drive へアップロード */
-    fun uploadMultipart(
+    /**
+     * Drive の multipart/related アップロード
+     * - Part の Header に "Content-Type" を入れない（←今回の例外原因）
+     * - 代わりに RequestBody.contentType() でタイプを指定する
+     * - multipart のタイプは "multipart/related"
+     */
+    suspend fun uploadMultipart(
         token: String,
-        uri: Uri,
-        fileName: String? = null,
-        folderId: String? = null
-    ): UploadResult {
-        val cr: ContentResolver = context.contentResolver
-        val name = fileName ?: queryDisplayName(cr, uri) ?: "export.dat"
-        val mime = detectMime(cr, uri, name)
-        val len  = querySize(cr, uri) ?: -1L
-
-        // part1: metadata (application/json)
-        val metaJson = org.json.JSONObject().apply {
-            put("name", name)
-            if (!folderId.isNullOrBlank()) put("parents", listOf(folderId))
-        }.toString()
-        val metaPart = MultipartBody.Part.create(
-            Headers.headersOf("Content-Type", "application/json; charset=UTF-8"),
-            metaJson.toRequestBody(JSON)
-        )
-
-        // part2: media (file stream)  ※ InputStreamRequestBody は DriveApi.kt 内の定義に合わせる
-        val mediaType = mime.toMediaType()
-        val mediaBody = InputStreamRequestBody(
-            mediaType = mediaType,
-            contentResolver = cr,
-            uri = uri,
-            contentLength = len
-        )
-        val mediaPart = MultipartBody.Part.create(
-            Headers.headersOf("Content-Type", mime),
-            mediaBody
-        )
-
-        val multipart = MultipartBody.Builder()
-            .setType("multipart/related".toMediaType())
-            .addPart(metaPart)
-            .addPart(mediaPart)
-            .build()
-
-        val url = "$BASE_UPLOAD?uploadType=multipart&supportsAllDrives=true&fields=id,name,parents,webViewLink"
-        val req = Request.Builder()
-            .url(url)
-            .addHeader("Authorization", "Bearer $token")
-            .addHeader("Accept", "application/json")
-            .post(multipart)
-            .build()
-
-        return try {
-            http.newCall(req).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    return UploadResult.Failure(resp.code, body, "HTTP ${resp.code}")
-                }
-                val obj = org.json.JSONObject(body)
-                UploadResult.Success(
-                    id = obj.optString("id", ""),
-                    name = obj.optString("name", name),
-                    webViewLink = obj.optString("webViewLink", "")
-                )
+        name: String,
+        parentsId: String,
+        mimeType: String?,              // null/空なら application/octet-stream
+        bytes: ByteArray
+    ): ApiResult<UploadResponse> = withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            // 1) メタデータ JSON（Content-Type は RequestBody 側に付ける）
+            val metadataJson = """
+            {
+              "name": ${jsonEscape(name)},
+              "parents": ["$parentsId"]
             }
-        } catch (e: java.io.IOException) {
-            UploadResult.Failure(-1, e.message ?: "network error", "IO")
+        """.trimIndent()
+            val metadataBody: RequestBody =
+                metadataJson.toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            // 2) メディア（Content-Type は RequestBody 側に付ける）
+            val mediaType = (mimeType?.takeIf { it.isNotBlank() } ?: "application/octet-stream").toMediaType()
+            val mediaBody: RequestBody = bytes.toRequestBody(mediaType)
+
+            // 3) multipart/related を構築（Part ヘッダに Content-Type を入れない）
+            val multi: MultipartBody = MultipartBody.Builder()
+                .setType("multipart/related".toMediaType())   // ← Drive は related を推奨
+                .addPart(metadataBody)                        // ← ヘッダ無し。Body の contentType が使われる
+                .addPart(mediaBody)                           // ← 同上
+                .build()
+
+            // 4) リクエスト（supportsAllDrives は維持）
+            val req = Request.Builder()
+                .url(
+                    "$BASE_UPLOAD" +
+                            "?uploadType=multipart" +
+                            "&supportsAllDrives=true" +
+                            // ★ webViewLink を取りたいので fields を明示
+                            "&fields=id,name,mimeType,webViewLink"
+                )
+                .addHeader("Authorization", "Bearer $token")
+                .post(multi)
+                .build()
+
+            http.newCall(req).execute().use { resp ->
+                val code = resp.code
+                val body = resp.body?.string().orEmpty()
+                return@withContext if (resp.isSuccessful) {
+                    // ← あなたのデシリアライズ処理に合わせてパース
+                    val parsed = parseUploadResponse(body)
+                    ApiResult.Success(parsed)
+                } else {
+                    ApiResult.HttpError(code, body)
+                }
+            }
+        } catch (e: IOException) {
+            ApiResult.NetworkError(e)
         }
     }
 
+    // ✅ 追加（Body から必要フィールドを抜き出す）
+    private fun parseUploadResponse(json: String): UploadResponse {
+        val obj = JSONObject(json)
+        fun JSONObject.optStringOrNull(key: String): String? {
+            val s = optString(key, null)
+            return if (s.isNullOrBlank()) null else s
+        }
+        return UploadResponse(
+            id          = obj.optStringOrNull("id"),
+            name        = obj.optStringOrNull("name"),
+            mimeType    = obj.optStringOrNull("mimeType"),
+            webViewLink = obj.optStringOrNull("webViewLink")
+        )
+    }
+
+    /** 単純な JSON 文字列エスケープ（必要ならあなたの util に差し替え） */
+    private fun jsonEscape(s: String): String =
+        "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
     // ---- helpers ----
     private fun queryDisplayName(cr: ContentResolver, uri: Uri): String? =
         cr.query(

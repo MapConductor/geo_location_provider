@@ -42,6 +42,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
@@ -148,6 +150,7 @@ private fun AppRoot(
     onOpenDriveSettings: () -> Unit, // ★ 追加
     content: @Composable () -> Unit
 ) {
+    val settingsVm: com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsViewModel = viewModel()
     val snackbarHostState = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -177,99 +180,50 @@ private fun AppRoot(
                 actions = {
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
+// Sign in
                         DropdownMenuItem(
                             text = { Text("Sign in") },
                             onClick = {
                                 driveMenu = false
-                                launcher.launch(repo.buildSignInIntent())
+                                launcher.launch(settingsVm.buildSignInIntent())
                             }
                         )
+
+// Get Token
                         DropdownMenuItem(
                             text = { Text("Get Token") },
                             onClick = {
                                 driveMenu = false
-                                scope.launch {
-                                    val t = repo.getAccessTokenOrNull()
-                                    showMsg(t?.let { "Token OK: ${it.take(12)}…" } ?: "Token failed")
-                                }
+                                // VM 内で IO 化されている実装を呼ぶだけ
+                                settingsVm.getToken()
+                                scope.launch { showMsg("Requested token. See status on Drive settings.") }
                             }
                         )
-                        DropdownMenuItem(
-                            text = { Text("Set Folder ID…") },
-                            onClick = {
-                                driveMenu = false
-                                scope.launch {
-                                    val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    folderInput = prefs.folderIdFlow.first().orEmpty()
-                                    showFolderDialog = true
-                                }
-                            }
-                        )
+
+// About.get
                         DropdownMenuItem(
                             text = { Text("About.get") },
                             onClick = {
                                 driveMenu = false
-                                scope.launch {
-                                    val token = repo.getAccessTokenOrNull()
-                                    val msg = if (token == null) {
-                                        "No token"
-                                    } else {
-                                        val r = withContext(Dispatchers.IO) {
-                                            api.aboutGet(token)
-                                        }
-                                        when (r) {
-                                            is ApiResult.Success ->
-                                                "About 200: ${r.data.user?.emailAddress ?: "-"}"
-                                            is ApiResult.HttpError ->
-                                                "About ${r.code}: ${r.body.take(160)}"
-                                            is ApiResult.NetworkError ->
-                                                "About network: ${r.exception.message}"
-                                            else -> "About: unexpected result"
-                                        }
-                                    }
-                                    showMsg(msg)
-                                }
+                                settingsVm.callAboutGet() // VM 側で withContext(Dispatchers.IO) 済み
                             }
                         )
+
+// Validate Folder
                         DropdownMenuItem(
                             text = { Text("Validate Folder") },
                             onClick = {
                                 driveMenu = false
-                                scope.launch {
-                                    val token = repo.getAccessTokenOrNull()
-                                    val prefs = DrivePrefsRepository(ctx.applicationContext)
-                                    val saved = prefs.folderIdFlow.first().orEmpty()
-                                    val rk    = prefs.folderResourceKeyFlow.first() // ★ 追加（null 可）
-
-                                    val msg = when {
-                                        token == null -> "No token"
-                                        saved.isBlank() -> "Folder ID empty"
-                                        else -> {
-                                            val pureId = extractFromUrlOrId(saved) ?: saved
-
-                                            val r = withContext(Dispatchers.IO) {
-                                                api.validateFolder(token, pureId, rk) // ★ rk を渡す
-                                            }
-                                            when (r) {
-                                                is ApiResult.Success ->
-                                                    if (r.data.isFolder)
-                                                        "Folder OK: ${r.data.name} (${r.data.id})"
-                                                    else
-                                                        "Not a folder: ${r.data.mimeType}"
-                                                is ApiResult.HttpError ->
-                                                    "Folder ${r.code}: ${r.body.take(160)}"
-                                                is ApiResult.NetworkError ->
-                                                    "Folder network: ${r.exception.message}"
-                                                else ->
-                                                    "Folder: unexpected result"
-                                            }
-                                        }
-                                    }
-                                    showMsg(msg)
-                                }
+                                settingsVm.validateFolder() // VM 側で URL→id/rk 抽出と IO 実行
                             }
                         )
-                        androidx.compose.material3.Divider()
+
+                        HorizontalDivider(
+                            Modifier,
+                            DividerDefaults.Thickness,
+                            DividerDefaults.color
+                        )
+
                         DropdownMenuItem(
                             text = { Text("Drive 設定（詳細）") },
                             onClick = {
@@ -310,21 +264,19 @@ private fun AppRoot(
                 )
             },
             confirmButton = {
+// 保存ボタン押下時（元コードの confirmButton 内）
                 TextButton(onClick = {
                     scope.launch {
-                        val prefs = DrivePrefsRepository(ctx.applicationContext)
                         val extractedId = extractFromUrlOrId(folderInput)
                         if (extractedId.isNullOrBlank()) {
-                            showMsg("Invalid Folder ID or URL")
-                            return@launch
+                            showMsg("Invalid Folder ID or URL"); return@launch
                         }
-                        // ★ 追加: URL から resourceKey も抽出して保存
-                        val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-                            .extractResourceKey(folderInput)
-
+                        val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractResourceKey(folderInput)
+                        // DataStore直呼びではなく VM のユーティリティを用意して寄せるのが理想
+                        // 例: settingsVm.saveFolderInput(extractedId, rk)
+                        val prefs = DrivePrefsRepository(ctx.applicationContext)
                         prefs.setFolderId(extractedId)
-                        prefs.setFolderResourceKey(rk) // ← 新規
-
+                        prefs.setFolderResourceKey(rk)
                         showFolderDialog = false
                         showMsg("Saved Folder ID: $extractedId" + if (!rk.isNullOrBlank()) " (rk saved)" else "")
                     }
