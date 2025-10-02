@@ -18,6 +18,6 @@ object ServiceLauncher {
         val intent = Intent(context, GeoLocationService::class.java).apply {
             action = "ACTION_STOP_LOCATION"
         }
-        context.stopService(intent)
+        context.startService(intent)
     }
 }

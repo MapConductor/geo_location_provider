@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.flow
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     private val dao = AppDatabase.Companion.get(app).locationSampleDao()
 
-    // latest(...) は存在しないため latestFlow(...) に置換
-    val latest30: Flow<List<LocationSample>> = dao.latestFlow(30)
+    /** 画面に映る分だけ描画するため、DAO側では上限を設けない */
+    val latest: Flow<List<LocationSample>> = dao.latestFlow(18)
 
     // DAOの suspend 関数 latestOne() を Flow 化（単発emit・自動更新なし）
     val latestOne: Flow<LocationSample?> = dao.latestOneFlow()

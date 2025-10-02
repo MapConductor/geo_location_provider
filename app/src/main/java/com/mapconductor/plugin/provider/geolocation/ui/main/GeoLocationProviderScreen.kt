@@ -24,9 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.geolocation.ui.components.ExportButton
 import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
-import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceLocationReadout
 // ★ 統一：work パッケージの Scheduler を使用
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 
@@ -52,7 +50,7 @@ fun GeoLocationProviderScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-                Spacer(Modifier.height(64.dp))
+                Spacer(Modifier.height(12.dp))
 
                 // 更新間隔（秒）入力 → サービスに反映
                 val context = LocalContext.current
@@ -62,9 +60,6 @@ fun GeoLocationProviderScreen(
                 IntervalSettingsSection(viewModel)
 
                 Spacer(Modifier.height(8.dp))
-
-                // 現在の位置・バッテリーの読み出し（bindで購読）
-                ServiceLocationReadout()
 
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
@@ -78,13 +73,6 @@ fun GeoLocationProviderScreen(
                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                 Spacer(Modifier.height(8.dp))
 
-                Text(
-                    text = "Latest 30 records",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                Spacer(Modifier.height(8.dp))
-
-                // ★ 履歴（LazyColumn）には残り領域を割り当てる
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -145,7 +133,7 @@ private fun BacklogMaintenanceSection(
             text = "Maintenance",
             style = MaterialTheme.typography.titleMedium
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically

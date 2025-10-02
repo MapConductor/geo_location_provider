@@ -56,6 +56,7 @@ import kotlinx.coroutines.withContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 
 class MainActivity : ComponentActivity() {
@@ -113,7 +114,7 @@ class MainActivity : ComponentActivity() {
     private fun stopLocationService() {
         val intent = Intent(this, GeoLocationService::class.java)
             .setAction(GeoLocationService.ACTION_STOP)
-        stopService(intent)
+        startService(intent)
     }
 
     private val permLauncher = registerForActivityResult(
@@ -232,18 +233,19 @@ private fun AppRoot(
                             }
                         )
                     }
-                    TextButton(onClick = onStopTracking) { Text("Stop") }
+                    ServiceToggleAction()
+//                    TextButton(onClick = onStopTracking) { Text("Stop") }
                 }
             )
         },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = onStartTracking,
-                text = { Text("開始") },
-                icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) }
-            )
-        }
+//        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+//        floatingActionButton = {
+//            ExtendedFloatingActionButton(
+//                onClick = onStartTracking,
+//                text = { Text("開始") },
+//                icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) }
+//            )
+//        }
     ) { inner ->
         Box(Modifier.padding(inner)) {
             content()

@@ -11,15 +11,22 @@ interface LocationSampleDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(sample: LocationSample): Long
 
-    /** 最新 N 件（降順）を Flow で購読（履歴用） */
-    @Query(
-        """
+    @Query("""
         SELECT * FROM location_samples
         ORDER BY id DESC
         LIMIT :limit
         """
     )
     fun latestFlow(limit: Int): Flow<List<LocationSample>>
+
+    /** 全件（降順）を Flow で購読（可変表示用） */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        ORDER BY id DESC
+        """
+    )
+    fun latestFlowAll(): Flow<List<LocationSample>>
 
     /** 最新 1 件（降順） */
     @Query(

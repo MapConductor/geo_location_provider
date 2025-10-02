@@ -142,15 +142,87 @@ class GeoLocationService : Service() {
     }
 
     /** 位置更新開始：あなたの実装に置き換えてください（updateIntervalMs を使う） */
+    private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient
+    private var locationCb: com.google.android.gms.location.LocationCallback? = null
+
+    private suspend fun saveSample(
+        lat: Double,
+        lon: Double,
+        acc: Float,
+        provider: String?
+    ) {
+        val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
+            .AppDatabase.get(applicationContext)
+            .locationSampleDao()
+
+        // 例: バッテリー状態の取得（既存ヘルパがあればそちらを使用）
+        val batteryPct = 0   // TODO: 実装に合わせて取得
+        val isCharging = false // TODO: 実装に合わせて取得
+
+        dao.insert(
+            com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
+                lat = lat,
+                lon = lon,
+                accuracy = acc,
+                provider = provider,
+                batteryPct = batteryPct,
+                isCharging = isCharging,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+    }
+
     private suspend fun startLocationUpdatesSafely() {
-        // 例：
-        // val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, updateIntervalMs).build()
-        // fusedClient.requestLocationUpdates(request, pendingIntent)
+        if (!::fusedClient.isInitialized) {
+            fusedClient = com.google.android.gms.location.LocationServices
+                .getFusedLocationProviderClient(this)
+        }
+
+        val req = com.google.android.gms.location.LocationRequest.Builder(
+            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
+            updateIntervalMs
+        ).build()
+
+        val cb = object : com.google.android.gms.location.LocationCallback() {
+            override fun onLocationResult(r: com.google.android.gms.location.LocationResult) {
+                val loc = r.lastLocation ?: return
+
+                serviceScope.launch {
+                    // ★ Battery
+                    val st = com.mapconductor.plugin.provider.geolocation.util
+                        .BatteryStatusReader.read(applicationContext)
+
+                    // ★ Provider（android.location.Location の provider をそのまま使用）
+                    val providerName = loc.provider  // 例: "fused" / "gps" / "network"
+
+                    // ★ DB INSERT（必ず provider / battery を埋める）
+                    val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
+                        .AppDatabase.get(applicationContext)
+                        .locationSampleDao()
+
+                    dao.insert(
+                        com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
+                            lat = loc.latitude,
+                            lon = loc.longitude,
+                            accuracy = loc.accuracy,
+                            provider = providerName,           // ← ここが空だとUIで "-" になります
+                            batteryPct = st.percent,          // ← 0 ではなく実値に
+                            isCharging = st.isCharging,       // ← 充電中/非充電 を判定
+                            createdAt = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
+        }
+        locationCb = cb
+        fusedClient.requestLocationUpdates(req, cb, mainLooper)
     }
 
     /** 位置更新停止：あなたの実装に置き換えてください */
     private fun stopLocationUpdatesSafely() {
-        // 例：
-        // fusedClient.removeLocationUpdates(pendingIntent)
+        locationCb?.let { cb ->
+            fusedClient.removeLocationUpdates(cb)
+            locationCb = null
+        }
     }
 }
