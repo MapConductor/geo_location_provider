@@ -11,53 +11,48 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.Icon
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.DividerDefaults
-import androidx.compose.material3.HorizontalDivider
-import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
-import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
-import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-// ★ 追加
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
+import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
+import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,7 +60,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val navController = rememberNavController()
-                NavHost(navController = navController, startDestination = "home") {
+                NavHost(
+                    navController = navController,
+                    startDestination = "home"
+                ) {
                     composable("home") {
                         AppRoot(
                             onStartTracking = { requestPermissionsAndStartService() },
@@ -100,9 +98,7 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         else true
 
-        if (locOk && notifOk) {
-            startLocationService()
-        }
+        if (locOk && notifOk) startLocationService()
     }
 
     private fun startLocationService() {
@@ -148,25 +144,31 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot(
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
-    onOpenDriveSettings: () -> Unit, // ★ 追加
+    onOpenDriveSettings: () -> Unit,
     content: @Composable () -> Unit
 ) {
-    val settingsVm: com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsViewModel = viewModel()
     val snackbarHostState = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val repo = remember { GoogleAuthRepository(ctx.applicationContext) }
-    val api  = remember { DriveApiClient(context = ctx) }
+    // 直接利用するリポジトリ/クライアント
+    val authRepo = remember { GoogleAuthRepository(ctx.applicationContext) }
+    val driveApi = remember { DriveApiClient(context = ctx) }
+    val prefs = remember { DrivePrefsRepository(ctx.applicationContext) }
 
-    val showMsg: (String) -> Unit = { msg -> scope.launch { snackbarHostState.showSnackbar(msg) } }
+    val showMsg: (String) -> Unit = { msg ->
+        scope.launch { snackbarHostState.showSnackbar(msg) }
+    }
 
+    // Sign-in ランチャ
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { res ->
-        scope.launch {
-            val acct = repo.handleSignInResult(res.data)
-            showMsg(acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed")
+        scope.launch(Dispatchers.IO) {
+            val acct = authRepo.handleSignInResult(res.data)
+            launch(Dispatchers.Main) {
+                showMsg(acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed")
+            }
         }
     }
 
@@ -181,41 +183,103 @@ private fun AppRoot(
                 actions = {
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
-// Sign in
+                        // Sign in
                         DropdownMenuItem(
                             text = { Text("Sign in") },
                             onClick = {
                                 driveMenu = false
-                                launcher.launch(settingsVm.buildSignInIntent())
+                                launcher.launch(authRepo.buildSignInIntent())
                             }
                         )
 
-// Get Token
+                        // Get Token
                         DropdownMenuItem(
                             text = { Text("Get Token") },
                             onClick = {
                                 driveMenu = false
-                                // VM 内で IO 化されている実装を呼ぶだけ
-                                settingsVm.getToken()
-                                scope.launch { showMsg("Requested token. See status on Drive settings.") }
+                                scope.launch(Dispatchers.IO) {
+                                    val token = authRepo.getAccessTokenOrNull()
+                                    launch(Dispatchers.Main) {
+                                        if (token != null) {
+                                            prefs.markTokenRefreshed(System.currentTimeMillis())
+                                            showMsg("Token OK: ${token.take(12)}…")
+                                        } else {
+                                            showMsg("Token failed")
+                                        }
+                                    }
+                                }
                             }
                         )
 
-// About.get
+                        // About.get
                         DropdownMenuItem(
                             text = { Text("About.get") },
                             onClick = {
                                 driveMenu = false
-                                settingsVm.callAboutGet() // VM 側で withContext(Dispatchers.IO) 済み
+                                scope.launch(Dispatchers.IO) {
+                                    val token = authRepo.getAccessTokenOrNull()
+                                    val msg = if (token == null) {
+                                        "No token"
+                                    } else {
+                                        when (val r = driveApi.aboutGet(token)) {
+                                            is ApiResult.Success      -> "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
+                                            is ApiResult.HttpError    -> "About ${r.code}: ${r.body}"
+                                            is ApiResult.NetworkError -> "About network: ${r.exception.message}"
+                                        }
+                                    }
+                                    launch(Dispatchers.Main) { showMsg(msg) }
+                                }
                             }
                         )
 
-// Validate Folder
+                        // Validate Folder
                         DropdownMenuItem(
                             text = { Text("Validate Folder") },
                             onClick = {
                                 driveMenu = false
-                                settingsVm.validateFolder() // VM 側で URL→id/rk 抽出と IO 実行
+                                scope.launch(Dispatchers.IO) {
+                                    val token = authRepo.getAccessTokenOrNull()
+                                    val msg = if (token == null) {
+                                        "No token"
+                                    } else {
+                                        // Flow から値を1回だけ取得
+                                        val raw = prefs.folderIdFlow.first()
+                                        val id  = extractFromUrlOrId(raw)
+                                        // Any? → String（非null）へ正規化
+                                        val rk: String = (DriveFolderId.extractResourceKey(raw) as? String).orEmpty()
+                                        if (id.isNullOrBlank()) {
+                                            "Invalid folder URL/ID"
+                                        } else {
+                                            prefs.setFolderResourceKey(rk)
+                                            when (val r = driveApi.validateFolder(token, id, rk)) {
+                                                is ApiResult.Success -> {
+                                                    var resolvedId = r.data.id
+                                                    var detail = r.data
+                                                    if (!detail.shortcutTargetId.isNullOrBlank()) {
+                                                        when (val r2 = driveApi.validateFolder(token, detail.shortcutTargetId!!, null)) {
+                                                            is ApiResult.Success      -> { resolvedId = r2.data.id; detail = r2.data }
+                                                            is ApiResult.HttpError    -> "Shortcut target ${r2.code}: ${r2.body}"
+                                                            is ApiResult.NetworkError -> "Shortcut target network: ${r2.exception.message}"
+                                                            else -> null
+                                                        }?.let { launch(Dispatchers.Main) { showMsg(it.toString()) }; return@launch }
+                                                    }
+                                                    if (!detail.isFolder) {
+                                                        "Not a folder: ${detail.mimeType}"
+                                                    } else if (!detail.canAddChildren) {
+                                                        "No write permission for this folder"
+                                                    } else {
+                                                        // setFolderId は非null想定なので !! で渡す（上で isNullOrBlank を排除済）
+                                                        prefs.setFolderId(resolvedId!!)
+                                                        "Folder OK: ${detail.name} ($resolvedId)"
+                                                    }
+                                                }
+                                                is ApiResult.HttpError    -> "Folder ${r.code}: ${r.body}"
+                                                is ApiResult.NetworkError -> "Folder network: ${r.exception.message}"
+                                            }
+                                        }
+                                    }
+                                    launch(Dispatchers.Main) { showMsg(msg) }
+                                }
                             }
                         )
 
@@ -234,18 +298,10 @@ private fun AppRoot(
                         )
                     }
                     ServiceToggleAction()
-//                    TextButton(onClick = onStopTracking) { Text("Stop") }
                 }
             )
         },
-//        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-//        floatingActionButton = {
-//            ExtendedFloatingActionButton(
-//                onClick = onStartTracking,
-//                text = { Text("開始") },
-//                icon = { Icon(Icons.Filled.PlayArrow, contentDescription = null) }
-//            )
-//        }
+        // snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { inner ->
         Box(Modifier.padding(inner)) {
             content()
@@ -266,21 +322,23 @@ private fun AppRoot(
                 )
             },
             confirmButton = {
-// 保存ボタン押下時（元コードの confirmButton 内）
                 TextButton(onClick = {
-                    scope.launch {
+                    scope.launch(Dispatchers.IO) {
                         val extractedId = extractFromUrlOrId(folderInput)
-                        if (extractedId.isNullOrBlank()) {
-                            showMsg("Invalid Folder ID or URL"); return@launch
+                        // Any? → String（非null）へ正規化
+                        val rk: String = (DriveFolderId.extractResourceKey(folderInput) as? String).orEmpty()
+                        val msg = if (extractedId.isNullOrBlank()) {
+                            "Invalid Folder ID or URL"
+                        } else {
+                            // setFolderId は非null String を要求する想定
+                            prefs.setFolderId(extractedId!!)
+                            prefs.setFolderResourceKey(rk)
+                            "Saved Folder ID: $extractedId" + if (rk.isNotEmpty()) " (rk saved)" else ""
                         }
-                        val rk = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractResourceKey(folderInput)
-                        // DataStore直呼びではなく VM のユーティリティを用意して寄せるのが理想
-                        // 例: settingsVm.saveFolderInput(extractedId, rk)
-                        val prefs = DrivePrefsRepository(ctx.applicationContext)
-                        prefs.setFolderId(extractedId)
-                        prefs.setFolderResourceKey(rk)
-                        showFolderDialog = false
-                        showMsg("Saved Folder ID: $extractedId" + if (!rk.isNullOrBlank()) " (rk saved)" else "")
+                        launch(Dispatchers.Main) {
+                            showFolderDialog = false
+                            showMsg(msg)
+                        }
                     }
                 }) { Text("Save") }
             },

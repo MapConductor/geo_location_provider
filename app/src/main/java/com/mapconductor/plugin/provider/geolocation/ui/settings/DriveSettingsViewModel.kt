@@ -1,22 +1,16 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
 import android.app.Application
-import android.content.ContentValues
 import android.content.Context
-import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
-import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
+import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -60,7 +54,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             _status.value = if (token != null) {
                 prefs.markTokenRefreshed(System.currentTimeMillis())
                 "Token OK: ${token.take(12)}…"
-            } else "Token failed"
+            } else {
+                "Token failed"
+            }
         }
     }
 
@@ -69,9 +65,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             val token = auth.getAccessTokenOrNull()
             if (token == null) { _status.value = "No token"; return@launch }
             when (val r = api.aboutGet(token)) {
-                is ApiResult.Success -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
-                is ApiResult.HttpError -> _status.value = "About ${r.code}: ${r.body}"
-                is ApiResult.NetworkError -> _status.value = "About network: ${r.exception.message}"
+                is ApiResult.Success     -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
+                is ApiResult.HttpError   -> _status.value = "About ${r.code}: ${r.body}"
+                is ApiResult.NetworkError-> _status.value = "About network: ${r.exception.message}"
             }
         }
     }
@@ -83,12 +79,11 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             if (token == null) { _status.value = "No token"; return@launch }
 
             val raw = folderId.value
-            val id = DriveFolderId.extractFromUrlOrId(raw)
-            val rk = DriveFolderId.extractResourceKey(raw)
+            val id  = DriveFolderId.extractFromUrlOrId(raw)
+            val rk  = DriveFolderId.extractResourceKey(raw)
             if (id.isNullOrBlank()) { _status.value = "Invalid folder URL/ID"; return@launch }
-            prefs.setFolderResourceKey(rk)
 
-            // ★ ここで resourceKey を DataStore に保存（アップロード時に利用）
+            // resourceKey を DataStore に保存（アップロード時に利用）
             prefs.setFolderResourceKey(rk)
 
             // 生ID + resourceKey 付きで検証
@@ -100,10 +95,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     // ショートカットなら、ターゲットへ追従して再検証（resourceKeyは不要）
                     if (!detail.shortcutTargetId.isNullOrBlank()) {
                         when (val r2 = api.validateFolder(token, detail.shortcutTargetId!!, null)) {
-                            is ApiResult.Success -> {
-                                resolvedId = r2.data.id
-                                detail = r2.data
-                            }
+                            is ApiResult.Success   -> { resolvedId = r2.data.id; detail = r2.data }
                             is ApiResult.HttpError -> { _status.value = "Shortcut target ${r2.code}: ${r2.body}"; return@launch }
                             is ApiResult.NetworkError -> { _status.value = "Shortcut target network: ${r2.exception.message}"; return@launch }
                         }
@@ -115,8 +107,6 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     // 実体フォルダIDを保存
                     prefs.setFolderId(resolvedId)
                     _status.value = "Folder OK: ${detail.name} ($resolvedId)"
-                    // 必要ならアップロードエンジンを DataStore に反映
-                    // prefs.setEngine(UploadEngine.KOTLIN)
                 }
                 is ApiResult.HttpError    -> _status.value = "Folder ${r.code}: ${r.body}"
                 is ApiResult.NetworkError -> _status.value = "Folder network: ${r.exception.message}"
@@ -131,12 +121,10 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             if (token == null) { _status.value = "Sign-in required"; return@launch }
 
             val raw = folderId.value
-            val parentId = com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-                .extractFromUrlOrId(raw)
+            val parentId = DriveFolderId.extractFromUrlOrId(raw)
             if (parentId.isNullOrBlank()) { _status.value = "Folder URL/ID is empty"; return@launch }
 
-            val uploader = com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
-                .create(getApplication(), com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN)
+            val uploader = UploaderFactory.create(getApplication(), com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN)
                 ?: run { _status.value = "Uploader not available"; return@launch }
 
             val now = System.currentTimeMillis()
@@ -181,9 +169,8 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         return uri
     }
 
+    /** 最終仕様：前日以前を即時バックアップ（Run now 撤去に伴い Worker を直接起動） */
     fun runBacklogNow() {
-        viewModelScope.launch(Dispatchers.Default) {
-            MidnightExportScheduler.runNow(getApplication())
-        }
+        MidnightExportWorker.runBacklogNow(getApplication())
     }
 }
