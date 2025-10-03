@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DividerDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -17,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryRow
 import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -38,31 +41,32 @@ fun LocationHistoryList(
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         items(items = rows, key = { it.id }) { s ->
-            // --- 新：2行フォーマット ---
-            val hundredths = ((s.createdAt % 1000L) / 10L).toInt()
-            val timeStr = "${baseFmt.format(Date(s.createdAt))}.%02d".format(hundredths)
-            val provider = s.provider ?: "-"
-            val charge = if (s.isCharging) "充電中" else "非充電"
-
-            val line1 = "Time : $timeStr / Provider : $provider / Battery : ${s.batteryPct}%($charge)"
-            val line2 = "Location : [Lon]%.6f, [Lat]%.6f, [Acc]%.2fm"
-                .format(s.lon, s.lat, s.accuracy)
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .onGloballyPositioned { coords ->
-                        // 可変LIMITのための実アイテム高さ計測（初回のみ）
-                        if (itemHeightPxState.value == null) {
-                            itemHeightPxState.value = coords.size.height
-                        }
-                    }
-            ) {
-                Text(line1, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
-                Text(line2, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
-            }
-            Divider(thickness = 0.5.dp)
+//            // --- 新：2行フォーマット ---
+//            val hundredths = ((s.createdAt % 1000L) / 10L).toInt()
+//            val timeStr = "${baseFmt.format(Date(s.createdAt))}.%02d".format(hundredths)
+//            val provider = s.provider ?: "-"
+//            val charge = if (s.isCharging) "充電中" else "非充電"
+//
+//            val line1 = "Time : $timeStr / Provider : $provider / Battery : ${s.batteryPct}%($charge)"
+//            val line2 = "Location : [Lon]%.6f, [Lat]%.6f, [Acc]%.2fm"
+//                .format(s.lon, s.lat, s.accuracy)
+//
+//            Column(
+//                modifier = Modifier
+//                    .fillMaxWidth()
+//                    .padding(horizontal = 12.dp, vertical = 8.dp)
+//                    .onGloballyPositioned { coords ->
+//                        // 可変LIMITのための実アイテム高さ計測（初回のみ）
+//                        if (itemHeightPxState.value == null) {
+//                            itemHeightPxState.value = coords.size.height
+//                        }
+//                    }
+//            ) {
+//                Text(line1, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
+//                Text(line2, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
+//            }
+            HistoryRow(item = s)
+            HorizontalDivider(thickness = 0.5.dp, color = DividerDefaults.color)
         }
     }
 }

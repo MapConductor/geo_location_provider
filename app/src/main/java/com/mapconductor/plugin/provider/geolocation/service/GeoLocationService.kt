@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
@@ -21,6 +22,9 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
+import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
+import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 
 class GeoLocationService : Service() {
 
@@ -53,9 +57,20 @@ class GeoLocationService : Service() {
     /** 直近の測位時刻（通知で「前回取得時間」を出すために保持） */
     private var lastFixMillis: Long? = null
 
+    // ▼ 追加：ヘディング & GNSS サンプラ
+    private lateinit var headingSensor: HeadingSensor
+    private lateinit var gnssSampler: GnssStatusSampler
+
     fun getUpdateIntervalMs(): Long = updateIntervalMs
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onCreate() {
+        super.onCreate()
+        // ヘディング／GNSS のサンプリング開始
+        headingSensor = HeadingSensor(applicationContext).also { it.start() }
+        gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -95,6 +110,12 @@ class GeoLocationService : Service() {
     }
 
     override fun onDestroy() {
+        // サンプラ停止
+        try {
+            if (::headingSensor.isInitialized) headingSensor.stop()
+            if (::gnssSampler.isInitialized) gnssSampler.stop()
+        } catch (_: Throwable) { /* no-op */ }
+
         stopLocationUpdatesSafely()
         serviceScope.cancel()
         _running.value = false
@@ -201,26 +222,7 @@ class GeoLocationService : Service() {
 
                 // DB 保存などはサービススコープで
                 serviceScope.launch {
-                    val st = com.mapconductor.plugin.provider.geolocation.util
-                        .BatteryStatusReader.read(applicationContext)
-
-                    val providerName = loc.provider // "fused" / "gps" / "network" など
-
-                    val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
-                        .AppDatabase.get(applicationContext)
-                        .locationSampleDao()
-
-                    dao.insert(
-                        com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
-                            lat = loc.latitude,
-                            lon = loc.longitude,
-                            accuracy = loc.accuracy,
-                            provider = providerName,
-                            batteryPct = st.percent,
-                            isCharging = st.isCharging,
-                            createdAt = System.currentTimeMillis()
-                        )
-                    )
+                    insertLocation(loc)
                 }
             }
         }
@@ -234,5 +236,54 @@ class GeoLocationService : Service() {
             fusedClient.removeLocationUpdates(cb)
             locationCb = null
         }
+    }
+
+    // ▼ 追加：Location を受け取って DB へ保存（ヘディング/進行方向/速度/GNSS 含む）
+    private suspend fun insertLocation(location: Location) {
+        // バッテリー情報
+        val bat = BatteryStatusReader.read(applicationContext)
+
+        // 進行方向・速度（存在チェック）
+        val courseDeg: Float? = if (location.hasBearing()) location.bearing else null
+        val speedMps: Float?  = if (location.hasSpeed()) location.speed else null
+
+        // ヘディング（真北化）
+        headingSensor.updateDeclination(
+            lat = location.latitude,
+            lon = location.longitude,
+            altitudeMeters = if (location.hasAltitude()) location.altitude.toFloat() else 0f,
+            timeMillis = location.time
+        )
+        val headingDeg: Float? = headingSensor.headingTrueDeg()
+
+        // GNSS スナップショット
+        val gnss = gnssSampler.snapshot()
+        val used: Int? = gnss?.used
+        val total: Int? = gnss?.total
+        val cn0: Float? = gnss?.cn0Mean
+
+        val providerName = location.provider // "fused" / "gps" / "network" など
+
+        val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
+            .AppDatabase.get(applicationContext)
+            .locationSampleDao()
+
+        dao.insert(
+            com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
+                lat = location.latitude,
+                lon = location.longitude,
+                accuracy = location.accuracy,
+                provider = providerName,
+                batteryPct = bat.percent,
+                isCharging = bat.isCharging,
+                headingDeg = headingDeg,
+                courseDeg = courseDeg,
+                speedMps = speedMps,
+                gnssUsed = used,
+                gnssTotal = total,
+                gnssCn0Mean = cn0,
+                createdAt = System.currentTimeMillis()
+            )
+        )
     }
 }

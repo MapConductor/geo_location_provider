@@ -19,5 +19,20 @@ data class LocationSample(
     val provider: String? = null,
     val batteryPct: Int,
     val isCharging: Boolean,
+
+    // ▼ 追加（すべて nullable：既存データ互換）
+    /** 端末の向き（真北 = 0°…360°） */
+    val headingDeg: Float? = null,
+    /** 進行方向（Location の bearing 等） */
+    val courseDeg: Float? = null,
+    /** 速度（m/s） */
+    val speedMps: Float? = null,
+    /** usedInFix の衛星数 */
+    val gnssUsed: Int? = null,
+    /** 見えている総衛星数 */
+    val gnssTotal: Int? = null,
+    /** C/N0（dB-Hz）の平均値（usedInFix 対象があればそちらの平均） */
+    val gnssCn0Mean: Float? = null,
+
     val createdAt: Long = System.currentTimeMillis()
 )

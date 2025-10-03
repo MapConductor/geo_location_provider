@@ -9,27 +9,30 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [LocationSample::class, ExportedDay::class],
-    version = 2,
+    version = 3, // ★ 2 -> 3
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun locationSampleDao(): LocationSampleDao
-    abstract fun exportedDayDao(): ExportedDayDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
-
-        private val MIGRATION_1_2 = object : Migration(1, 2) {
+        // ▼ 追加：v1 → v2 の移行（変更なしなら no-op）
+        val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("""
-                    CREATE TABLE IF NOT EXISTS exported_days(
-                      epochDay INTEGER NOT NULL PRIMARY KEY,
-                      exportedLocal INTEGER NOT NULL DEFAULT 0,
-                      uploaded INTEGER NOT NULL DEFAULT 0,
-                      driveFileId TEXT,
-                      lastError TEXT
-                    )
-                """.trimIndent())
+                // v1→v2 でスキーマ変更が無い場合は空でOK。
+                // もし v2 でテーブル/列追加があった場合は、ここに ALTER/CREATE を追記してください。
+            }
+        }
+
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN headingDeg REAL")
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN courseDeg REAL")
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN speedMps REAL")
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN gnssUsed INTEGER")
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN gnssTotal INTEGER")
+                db.execSQL("ALTER TABLE location_samples ADD COLUMN gnssCn0Mean REAL")
             }
         }
 
@@ -40,7 +43,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "geolocation.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    // ★ 既存の MIGRATION_1_2 に加えて
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build().also { INSTANCE = it }
             }
     }

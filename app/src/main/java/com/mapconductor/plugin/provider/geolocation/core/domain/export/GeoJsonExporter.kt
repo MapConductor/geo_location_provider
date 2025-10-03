@@ -110,15 +110,27 @@ object GeoJsonExporter {
             if (i > 0) sb.append(',')
             sb.append("{\"type\":\"Feature\",\"geometry\":{")
             sb.append("\"type\":\"Point\",\"coordinates\":[")
-            // GeoJSON は [lon, lat]
-            sb.append(r.lon).append(',').append(r.lat)
+            sb.append(r.lon).append(',').append(r.lat) // GeoJSON は [lon, lat]
             sb.append("]},\"properties\":{")
-            // 必須最小限のみ（スキーマに依存しすぎない）
-            sb.append("\"id\":").append(r.id)
-            sb.append(",\"t\":").append(r.createdAt) // epoch millis
+            // 既存プロパティ
+            sb.append("\"accuracy\":").append(r.accuracy)
+            r.provider?.let { sb.append(",\"provider\":\"").append(it).append('"') }
+            sb.append(",\"battery_pct\":").append(r.batteryPct)
+            sb.append(",\"is_charging\":").append(if (r.isCharging) "true" else "false")
+            sb.append(",\"created_at\":").append(r.createdAt)
+
+            // ▼ 追加プロパティ（null は出力しない）
+            r.headingDeg?.let   { sb.append(",\"heading_deg\":").append(it) }
+            r.courseDeg?.let    { sb.append(",\"course_deg\":").append(it) }
+            r.speedMps?.let     { sb.append(",\"speed_mps\":").append(it) }
+            r.gnssUsed?.let     { sb.append(",\"gnss_used\":").append(it) }
+            r.gnssTotal?.let    { sb.append(",\"gnss_total\":").append(it) }
+            r.gnssCn0Mean?.let  { sb.append(",\"gnss_cn0_mean\":").append(it) }
+
             sb.append("}}")
         }
         sb.append("]}")
         return sb.toString()
     }
+
 }
