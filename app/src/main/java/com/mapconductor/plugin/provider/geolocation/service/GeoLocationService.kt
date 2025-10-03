@@ -17,38 +17,42 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.time.Instant
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 class GeoLocationService : Service() {
 
     companion object {
-        // 既存の START/STOP
         const val ACTION_START = "ACTION_START_LOCATION"
         const val ACTION_STOP  = "ACTION_STOP_LOCATION"
 
-        // ★ VM が使う更新インターバル更新用 Action / Extra を追加
+        // 設定変更（インターバル）を受け取る
         const val ACTION_UPDATE_INTERVAL = "ACTION_UPDATE_INTERVAL"
         const val EXTRA_UPDATE_MS        = "EXTRA_UPDATE_MS"
 
         private const val CHANNEL_ID = "geo_location"
         private const val NOTIF_ID   = 1001
+
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
     }
 
-    /** サービス用コルーチンスコープ（終了時に cancel） */
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** サービスを外部へ返す Binder */
     inner class LocalBinder : Binder() {
         fun getService(): GeoLocationService = this@GeoLocationService
     }
     private val binder = LocalBinder()
 
-    /** 現在の更新インターバル（ms）。VM 初期化の既定値=5秒 */
+    /** 設定された取得間隔（ms）。既定値=5秒 */
     @Volatile
     private var updateIntervalMs: Long = 5_000L
 
-    /** VM から参照される Getter */
+    /** 直近の測位時刻（通知で「前回取得時間」を出すために保持） */
+    private var lastFixMillis: Long? = null
+
     fun getUpdateIntervalMs(): Long = updateIntervalMs
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -57,28 +61,24 @@ class GeoLocationService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 ensureChannel()
-                val notif = buildNotification()
-                // 5秒ルール：入室直後に startForeground
-                startForeground(NOTIF_ID, notif)
+                // 起動直後は前回取得時間がまだないので lastMillis=null で常駐開始
+                startForeground(NOTIF_ID, buildStatusNotification(lastMillis = null))
                 _running.value = true
 
-                // 重処理はバックグラウンドで
-                serviceScope.launch(Dispatchers.IO) {
-                    startLocationUpdatesSafely()
-                }
+                serviceScope.launch(Dispatchers.IO) { startLocationUpdatesSafely() }
             }
 
             ACTION_UPDATE_INTERVAL -> {
-                // ★ VM からの更新指示を反映
                 val newMs = intent.getLongExtra(EXTRA_UPDATE_MS, -1L)
                 if (newMs > 0L) {
                     updateIntervalMs = newMs
-                    // 実運用では軽量に更新できるなら差し替え、難しければ再購読
                     serviceScope.launch(Dispatchers.IO) {
                         try {
                             stopLocationUpdatesSafely()
                         } finally {
                             startLocationUpdatesSafely()
+                            // 設定値が変わったので通知の「取得間隔」も即時更新
+                            updateStatusNotification(lastFixMillis)
                         }
                     }
                 }
@@ -101,7 +101,7 @@ class GeoLocationService : Service() {
         super.onDestroy()
     }
 
-    /** Android O+ では事前にチャンネル作成 */
+    /** Android O+ ではチャンネル作成が必要 */
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -120,57 +120,62 @@ class GeoLocationService : Service() {
         }
     }
 
-    /** 前面通知（最小構成） */
-    private fun buildNotification(): Notification {
-        // ic_stat_name が未作成なら一旦 Android 標準アイコンでOK
+    /** 通知を現在の状態で更新（スワイプで消えない） */
+    private fun updateStatusNotification(lastMillis: Long?) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ID, buildStatusNotification(lastMillis))
+    }
+
+    /** 通知本文：「前回取得時間」「取得間隔(設定値)」 の2行 */
+    private fun buildStatusNotification(lastMillis: Long?): Notification {
+        val jst = ZoneId.of("Asia/Tokyo")
+        val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+
+        val lastText = lastMillis?.let {
+            val zdt = ZonedDateTime.ofInstant(Instant.ofEpochMilli(it), jst)
+            "前回取得時間 : ${zdt.format(fmt)}"
+        } ?: "前回取得時間 : -"
+
+        // ★ 取得間隔は実測ではなく「設定値」を表示
+        val intervalText = "取得間隔     : " + formatInterval(updateIntervalMs)
+
         val smallIconRes = android.R.drawable.ic_menu_mylocation
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, CHANNEL_ID)
                 .setSmallIcon(smallIconRes)
-                .setContentTitle("GeoLocation running")
-                .setContentText("Collecting location (every ${updateIntervalMs/1000}s)")
+                .setContentTitle("位置取得を実行中")
+                .setContentText("$lastText  |  $intervalText")
+                .setStyle(Notification.BigTextStyle().bigText("$lastText\n$intervalText"))
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .build()
         } else {
             NotificationCompat.Builder(this)
                 .setSmallIcon(smallIconRes)
-                .setContentTitle("GeoLocation running")
-                .setContentText("Collecting location (every ${updateIntervalMs/1000}s)")
+                .setContentTitle("位置取得を実行中")
+                .setContentText("$lastText  |  $intervalText")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$lastText\n$intervalText"))
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .build()
         }
     }
 
-    /** 位置更新開始：あなたの実装に置き換えてください（updateIntervalMs を使う） */
+    private fun formatInterval(ms: Long): String {
+        val s = ms / 1000
+        val h = s / 3600
+        val m = (s % 3600) / 60
+        val ss = s % 60
+        return when {
+            h > 0  -> "${h}時間${m}分${ss}秒"
+            m > 0  -> "${m}分${ss}秒"
+            else   -> "${ss}秒"
+        }
+    }
+
+    /** 位置更新開始：updateIntervalMs を使って購読開始 */
     private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient
     private var locationCb: com.google.android.gms.location.LocationCallback? = null
-
-    private suspend fun saveSample(
-        lat: Double,
-        lon: Double,
-        acc: Float,
-        provider: String?
-    ) {
-        val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
-            .AppDatabase.get(applicationContext)
-            .locationSampleDao()
-
-        // 例: バッテリー状態の取得（既存ヘルパがあればそちらを使用）
-        val batteryPct = 0   // TODO: 実装に合わせて取得
-        val isCharging = false // TODO: 実装に合わせて取得
-
-        dao.insert(
-            com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
-                lat = lat,
-                lon = lon,
-                accuracy = acc,
-                provider = provider,
-                batteryPct = batteryPct,
-                isCharging = isCharging,
-                createdAt = System.currentTimeMillis()
-            )
-        )
-    }
 
     private suspend fun startLocationUpdatesSafely() {
         if (!::fusedClient.isInitialized) {
@@ -187,15 +192,20 @@ class GeoLocationService : Service() {
             override fun onLocationResult(r: com.google.android.gms.location.LocationResult) {
                 val loc = r.lastLocation ?: return
 
+                // 前回取得時刻を更新（通知の1行目に使う）
+                val now = System.currentTimeMillis()
+                lastFixMillis = now
+
+                // 通知更新：取得間隔は設定値を表示
+                updateStatusNotification(now)
+
+                // DB 保存などはサービススコープで
                 serviceScope.launch {
-                    // ★ Battery
                     val st = com.mapconductor.plugin.provider.geolocation.util
                         .BatteryStatusReader.read(applicationContext)
 
-                    // ★ Provider（android.location.Location の provider をそのまま使用）
-                    val providerName = loc.provider  // 例: "fused" / "gps" / "network"
+                    val providerName = loc.provider // "fused" / "gps" / "network" など
 
-                    // ★ DB INSERT（必ず provider / battery を埋める）
                     val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
                         .AppDatabase.get(applicationContext)
                         .locationSampleDao()
@@ -205,9 +215,9 @@ class GeoLocationService : Service() {
                             lat = loc.latitude,
                             lon = loc.longitude,
                             accuracy = loc.accuracy,
-                            provider = providerName,           // ← ここが空だとUIで "-" になります
-                            batteryPct = st.percent,          // ← 0 ではなく実値に
-                            isCharging = st.isCharging,       // ← 充電中/非充電 を判定
+                            provider = providerName,
+                            batteryPct = st.percent,
+                            isCharging = st.isCharging,
                             createdAt = System.currentTimeMillis()
                         )
                     )
@@ -218,7 +228,7 @@ class GeoLocationService : Service() {
         fusedClient.requestLocationUpdates(req, cb, mainLooper)
     }
 
-    /** 位置更新停止：あなたの実装に置き換えてください */
+    /** 位置更新停止 */
     private fun stopLocationUpdatesSafely() {
         locationCb?.let { cb ->
             fusedClient.removeLocationUpdates(cb)
