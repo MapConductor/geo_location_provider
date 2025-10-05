@@ -22,7 +22,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -53,6 +52,11 @@ import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import androidx.compose.material3.*
+import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
+
+private const val ROUTE_HOME = "home"
+private const val ROUTE_PICKUP = "pickup"
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -147,6 +151,8 @@ private fun AppRoot(
     onOpenDriveSettings: () -> Unit,
     content: @Composable () -> Unit
 ) {
+    val navController = rememberNavController()
+
     val snackbarHostState = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -181,9 +187,9 @@ private fun AppRoot(
             TopAppBar(
                 title = { Text("GeoLocation") },
                 actions = {
+                    // --- Drive メニュー ---
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
-                        // Sign in
                         DropdownMenuItem(
                             text = { Text("Sign in") },
                             onClick = {
@@ -191,8 +197,6 @@ private fun AppRoot(
                                 launcher.launch(authRepo.buildSignInIntent())
                             }
                         )
-
-                        // Get Token
                         DropdownMenuItem(
                             text = { Text("Get Token") },
                             onClick = {
@@ -210,8 +214,6 @@ private fun AppRoot(
                                 }
                             }
                         )
-
-                        // About.get
                         DropdownMenuItem(
                             text = { Text("About.get") },
                             onClick = {
@@ -231,8 +233,6 @@ private fun AppRoot(
                                 }
                             }
                         )
-
-                        // Validate Folder
                         DropdownMenuItem(
                             text = { Text("Validate Folder") },
                             onClick = {
@@ -242,10 +242,8 @@ private fun AppRoot(
                                     val msg = if (token == null) {
                                         "No token"
                                     } else {
-                                        // Flow から値を1回だけ取得
                                         val raw = prefs.folderIdFlow.first()
                                         val id  = extractFromUrlOrId(raw)
-                                        // Any? → String（非null）へ正規化
                                         val rk: String = (DriveFolderId.extractResourceKey(raw) as? String).orEmpty()
                                         if (id.isNullOrBlank()) {
                                             "Invalid folder URL/ID"
@@ -268,7 +266,6 @@ private fun AppRoot(
                                                     } else if (!detail.canAddChildren) {
                                                         "No write permission for this folder"
                                                     } else {
-                                                        // setFolderId は非null想定なので !! で渡す（上で isNullOrBlank を排除済）
                                                         prefs.setFolderId(resolvedId!!)
                                                         "Folder OK: ${detail.name} ($resolvedId)"
                                                     }
@@ -293,18 +290,29 @@ private fun AppRoot(
                             text = { Text("Drive 設定（詳細）") },
                             onClick = {
                                 driveMenu = false
-                                onOpenDriveSettings()
+                                onOpenDriveSettings() // ← 外側の NavController（MainActivity 側）で drive_settings に遷移
                             }
                         )
                     }
+
+                    // --- Pickup へ遷移（Driver/Stop の間に配置でもOK） ---
+                    TextButton(onClick = { navController.navigate(ROUTE_PICKUP) }) { Text("Pickup") }
+
+                    // 既存の Start/Stop トグル等
                     ServiceToggleAction()
                 }
             )
         },
-        // snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }, // 必要に応じて有効化
     ) { inner ->
-        Box(Modifier.padding(inner)) {
-            content()
+        Box(Modifier.padding(inner).fillMaxSize()) {
+            // ★ NavHost を Scaffold の中に配置し、HOME では content() を表示
+            NavHost(navController = navController, startDestination = ROUTE_HOME) {
+                composable(ROUTE_HOME) { content() }
+                composable(ROUTE_PICKUP) {
+                    PickupScreen(onBack = { navController.popBackStack() })
+                }
+            }
         }
     }
 
@@ -325,12 +333,10 @@ private fun AppRoot(
                 TextButton(onClick = {
                     scope.launch(Dispatchers.IO) {
                         val extractedId = extractFromUrlOrId(folderInput)
-                        // Any? → String（非null）へ正規化
                         val rk: String = (DriveFolderId.extractResourceKey(folderInput) as? String).orEmpty()
                         val msg = if (extractedId.isNullOrBlank()) {
                             "Invalid Folder ID or URL"
                         } else {
-                            // setFolderId は非null String を要求する想定
                             prefs.setFolderId(extractedId!!)
                             prefs.setFolderResourceKey(rk)
                             "Saved Folder ID: $extractedId" + if (rk.isNotEmpty()) " (rk saved)" else ""

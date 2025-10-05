@@ -38,7 +38,7 @@ object Formatters {
     fun cn0Text(cn0: Float?): String = cn0?.let { "${oneDecimal(it)}dB-Hz" } ?: "-"
 
     fun latLonAcc(lat: Double, lon: Double, acc: Float): String =
-        "[${"%.6f".format(lon)}], [${"%.6f".format(lat)}], [${"%.2f".format(acc)}m]"
+        "[lng]${"%.6f".format(lon)}, [lat]${"%.6f".format(lat)}, [Acc]${"%.2f".format(acc)}m"
 
     private fun oneDecimal(x: Float): String = ((x * 10f).roundToInt() / 10f).toString()
 }
