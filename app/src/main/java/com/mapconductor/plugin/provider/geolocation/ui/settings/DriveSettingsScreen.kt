@@ -144,8 +144,9 @@ private fun BackupSection(modifier: Modifier = Modifier) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = {
+                // 前日以前のバックログを即時実行（UniqueWork REPLACE）
                 scope.launch(Dispatchers.Default) {
-                    MidnightExportWorker.runBacklogNow(ctx)
+                    MidnightExportWorker.runNow(ctx)
                     uiMsg = "前日以前のバックアップを開始しました。"
                 }
             }) { Text("前日以前をBackup") }

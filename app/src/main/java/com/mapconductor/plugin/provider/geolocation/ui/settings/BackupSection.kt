@@ -1,6 +1,5 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
-import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -14,9 +13,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -55,7 +54,7 @@ fun BackupSection(
 
             // A) 前日以前をBackup（＝バックログ即時実行）
             Button(
-                onClick = { runBacklogNow(context) },
+                onClick = { MidnightExportWorker.runNow(context) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("前日以前をBackup")
@@ -94,11 +93,6 @@ fun BackupSection(
             onDismiss = { showTodayDialog = false }
         )
     }
-}
-
-/** 「前日以前をBackup」 = MidnightExportWorker の即時実行 */
-private fun runBacklogNow(context: Context) {
-    MidnightExportWorker.runBacklogNow(context)
 }
 
 /** 今日のPreview：アップロードする/しない の選択ダイアログ */

@@ -10,21 +10,19 @@ import android.location.Location
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
+import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
+import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
+import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import java.time.Instant
-import java.time.ZoneId
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
-import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
-import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
-import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.max
 
 class GeoLocationService : Service() {
 
@@ -32,34 +30,40 @@ class GeoLocationService : Service() {
         const val ACTION_START = "ACTION_START_LOCATION"
         const val ACTION_STOP  = "ACTION_STOP_LOCATION"
 
-        // 設定変更（インターバル）を受け取る
         const val ACTION_UPDATE_INTERVAL = "ACTION_UPDATE_INTERVAL"
-        const val EXTRA_UPDATE_MS        = "EXTRA_UPDATE_MS"
+        const val EXTRA_UPDATE_MS = "EXTRA_UPDATE_MS"
 
-        private const val CHANNEL_ID = "geo_location"
-        private const val NOTIF_ID   = 1001
+        private const val CHANNEL_ID = "location_channel"
+        private const val NOTIF_ID = 1
+    }
 
-        private val _running = MutableStateFlow(false)
-        val running: StateFlow<Boolean> = _running
+    private val binder = LocalBinder()
+    inner class LocalBinder : Binder() {
+        fun getService(): GeoLocationService = this@GeoLocationService
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    inner class LocalBinder : Binder() {
-        fun getService(): GeoLocationService = this@GeoLocationService
-    }
-    private val binder = LocalBinder()
-
-    /** 設定された取得間隔（ms）。既定値=5秒 */
-    @Volatile
+    // --- 状態 ---
+    /** 設定上の取得間隔（通知表示・再購読に使用） */
     private var updateIntervalMs: Long = 5_000L
-
-    /** 直近の測位時刻（通知で「前回取得時間」を出すために保持） */
+    /** 直近の測位時刻（通知で「前回取得時間」に使用） */
     private var lastFixMillis: Long? = null
 
-    // ▼ 追加：ヘディング & GNSS サンプラ
+    /** FusedLocation */
+    private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient
+    private var locationCb: com.google.android.gms.location.LocationCallback? = null
+    /** “購読中” フラグ（二重購読の根絶） */
+    private val subscribed = AtomicBoolean(false)
+
+    // ヘディング／GNSS
     private lateinit var headingSensor: HeadingSensor
     private lateinit var gnssSampler: GnssStatusSampler
+
+    // 重複保存ガード
+    @Volatile private var lastInsertMillis: Long = 0L
+    @Volatile private var lastInsertSig: Long = 0L
+    private val insertLock = Any()
 
     fun getUpdateIntervalMs(): Long = updateIntervalMs
 
@@ -67,7 +71,9 @@ class GeoLocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        // ヘディング／GNSS のサンプリング開始
+        fusedClient = com.google.android.gms.location.LocationServices
+            .getFusedLocationProviderClient(this)
+
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
         gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
     }
@@ -76,41 +82,32 @@ class GeoLocationService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 ensureChannel()
-                // 起動直後は前回取得時間がまだないので lastMillis=null で常駐開始
                 startForeground(NOTIF_ID, buildStatusNotification(lastMillis = null))
-                _running.value = true
-
-                serviceScope.launch(Dispatchers.IO) { startLocationUpdatesSafely() }
+                serviceScope.launch(Dispatchers.IO) {
+                    restartLocationUpdates()
+                }
             }
-
             ACTION_UPDATE_INTERVAL -> {
                 val newMs = intent.getLongExtra(EXTRA_UPDATE_MS, -1L)
                 if (newMs > 0L) {
                     updateIntervalMs = newMs
                     serviceScope.launch(Dispatchers.IO) {
-                        try {
-                            stopLocationUpdatesSafely()
-                        } finally {
-                            startLocationUpdatesSafely()
-                            // 設定値が変わったので通知の「取得間隔」も即時更新
-                            updateStatusNotification(lastFixMillis)
-                        }
+                        restartLocationUpdates()
+                        // 設定値が変わったので通知も即時更新
+                        updateStatusNotification(lastFixMillis)
                     }
                 }
             }
-
             ACTION_STOP -> {
                 stopLocationUpdatesSafely()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
-                _running.value = false
             }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        // サンプラ停止
         try {
             if (::headingSensor.isInitialized) headingSensor.stop()
             if (::gnssSampler.isInitialized) gnssSampler.stop()
@@ -118,46 +115,24 @@ class GeoLocationService : Service() {
 
         stopLocationUpdatesSafely()
         serviceScope.cancel()
-        _running.value = false
         super.onDestroy()
     }
 
-    /** Android O+ ではチャンネル作成が必要 */
+    // ========= 通知 =========
+
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
-                nm.createNotificationChannel(
-                    NotificationChannel(
-                        CHANNEL_ID,
-                        "GeoLocation Running",
-                        NotificationManager.IMPORTANCE_LOW
-                    ).apply {
-                        description = "Location sampling in progress"
-                        setShowBadge(false)
-                    }
-                )
+            val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (mgr.getNotificationChannel(CHANNEL_ID) == null) {
+                val ch = NotificationChannel(CHANNEL_ID, "Location", NotificationManager.IMPORTANCE_LOW)
+                mgr.createNotificationChannel(ch)
             }
         }
     }
 
-    /** 通知を現在の状態で更新（スワイプで消えない） */
-    private fun updateStatusNotification(lastMillis: Long?) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, buildStatusNotification(lastMillis))
-    }
-
-    /** 通知本文：「前回取得時間」「取得間隔(設定値)」 の2行 */
     private fun buildStatusNotification(lastMillis: Long?): Notification {
-        val jst = ZoneId.of("Asia/Tokyo")
-        val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-
-        val lastText = lastMillis?.let {
-            val zdt = ZonedDateTime.ofInstant(Instant.ofEpochMilli(it), jst)
-            "前回取得時間 : ${zdt.format(fmt)}"
-        } ?: "前回取得時間 : -"
-
-        // ★ 取得間隔は実測ではなく「設定値」を表示
+        val lastText = "前回取得時刻 : " + Formatters.timeJst(lastMillis)
+        // 表示は “実行中の設定値” を使用（②の乖離を解消）
         val intervalText = "取得間隔     : " + formatInterval(updateIntervalMs)
 
         val smallIconRes = android.R.drawable.ic_menu_mylocation
@@ -171,39 +146,42 @@ class GeoLocationService : Service() {
                 .setOnlyAlertOnce(true)
                 .build()
         } else {
-            NotificationCompat.Builder(this)
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
                 .setSmallIcon(smallIconRes)
                 .setContentTitle("位置取得を実行中")
                 .setContentText("$lastText  |  $intervalText")
-                .setStyle(NotificationCompat.BigTextStyle().bigText("$lastText\n$intervalText"))
                 .setOngoing(true)
-                .setOnlyAlertOnce(true)
                 .build()
         }
     }
 
-    private fun formatInterval(ms: Long): String {
-        val s = ms / 1000
-        val h = s / 3600
-        val m = (s % 3600) / 60
-        val ss = s % 60
-        return when {
-            h > 0  -> "${h}時間${m}分${ss}秒"
-            m > 0  -> "${m}分${ss}秒"
-            else   -> "${ss}秒"
-        }
+    private fun updateStatusNotification(lastMillis: Long?) {
+        val mgr = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        mgr.notify(NOTIF_ID, buildStatusNotification(lastMillis))
     }
 
-    /** 位置更新開始：updateIntervalMs を使って購読開始 */
-    private lateinit var fusedClient: com.google.android.gms.location.FusedLocationProviderClient
-    private var locationCb: com.google.android.gms.location.LocationCallback? = null
+    private fun formatInterval(ms: Long): String {
+        val s = (ms / 1000.0)
+        return if (s < 60) String.format("%.1fs", s) else String.format("%.0fs", s)
+    }
 
+    // ========= 購読管理 =========
+
+    /** 現在の購読を停止（例外は握りつぶし） */
+    private fun stopLocationUpdatesSafely() {
+        try {
+            locationCb?.let { cb ->
+                fusedClient.removeLocationUpdates(cb)
+            }
+        } catch (_: Throwable) { /* no-op */ }
+        locationCb = null
+        subscribed.set(false)
+    }
+
+    /** 設定値で購読を開始（① 反映・③ 重複防止） */
     private suspend fun startLocationUpdatesSafely() {
-        if (!::fusedClient.isInitialized) {
-            fusedClient = com.google.android.gms.location.LocationServices
-                .getFusedLocationProviderClient(this)
-        }
-
+        if (subscribed.get()) return  // 二重購読を回避
         val req = com.google.android.gms.location.LocationRequest.Builder(
             com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY,
             updateIntervalMs
@@ -212,64 +190,79 @@ class GeoLocationService : Service() {
         val cb = object : com.google.android.gms.location.LocationCallback() {
             override fun onLocationResult(r: com.google.android.gms.location.LocationResult) {
                 val loc = r.lastLocation ?: return
+                // ヘディングの偏差を更新（真北化用）— 高度と時刻を含めて渡す
+                try {
+                    val alt: Float = if (loc.hasAltitude()) loc.altitude.toFloat() else 0f
+                    headingSensor.updateDeclination(
+                        lat = loc.latitude,
+                        lon = loc.longitude,
+                        altitudeMeters = alt,
+                        timeMillis = System.currentTimeMillis()
+                    )
+                } catch (_: Throwable) { /* best-effort */ }
 
-                // 前回取得時刻を更新（通知の1行目に使う）
-                val now = System.currentTimeMillis()
-                lastFixMillis = now
-
-                // 通知更新：取得間隔は設定値を表示
-                updateStatusNotification(now)
-
-                // DB 保存などはサービススコープで
-                serviceScope.launch {
-                    insertLocation(loc)
+                serviceScope.launch(Dispatchers.IO) {
+                    handleFix(loc)
                 }
             }
         }
         locationCb = cb
         fusedClient.requestLocationUpdates(req, cb, mainLooper)
+        subscribed.set(true)
     }
 
-    /** 位置更新停止 */
-    private fun stopLocationUpdatesSafely() {
-        locationCb?.let { cb ->
-            fusedClient.removeLocationUpdates(cb)
-            locationCb = null
-        }
+    /** 強制的に “止めて → 始める” */
+    private suspend fun restartLocationUpdates() {
+        stopLocationUpdatesSafely()
+        startLocationUpdatesSafely()
     }
 
-    // ▼ 追加：Location を受け取って DB へ保存（ヘディング/進行方向/速度/GNSS 含む）
-    private suspend fun insertLocation(location: Location) {
-        // バッテリー情報
-        val bat = BatteryStatusReader.read(applicationContext)
+    // ========= コールバック：保存（③ 同値の重複保存禁止） =========
 
-        // 進行方向・速度（存在チェック）
-        val courseDeg: Float? = if (location.hasBearing()) location.bearing else null
-        val speedMps: Float?  = if (location.hasSpeed()) location.speed else null
+    private suspend fun handleFix(location: Location) {
+        val now = System.currentTimeMillis()
+        lastFixMillis = now
 
-        // ヘディング（真北化）
-        headingSensor.updateDeclination(
-            lat = location.latitude,
-            lon = location.longitude,
-            altitudeMeters = if (location.hasAltitude()) location.altitude.toFloat() else 0f,
-            timeMillis = location.time
-        )
-        val headingDeg: Float? = headingSensor.headingTrueDeg()
+        // ヘディング/進行方向/速度
+        val headingDeg: Float = try {
+            // nullable を非null化
+            headingSensor.headingTrueDeg() ?: 0f
+        } catch (_: Throwable) { 0f }
+        val courseDeg: Float = location.bearing.takeIf { !it.isNaN() } ?: 0f
+        val speedMps: Float = max(0f, location.speed.takeIf { !it.isNaN() } ?: 0f)
 
-        // GNSS スナップショット
-        val gnss = gnssSampler.snapshot()
+        // GNSS
+        val gnss = try { gnssSampler.snapshot() } catch (_: Throwable) { null }
         val used: Int? = gnss?.used
         val total: Int? = gnss?.total
-        val cn0: Float? = gnss?.cn0Mean
+        val cn0: Float? = gnss?.cn0Mean?.toFloat()
 
-        val providerName = location.provider // "fused" / "gps" / "network" など
+        // バッテリー
+        val bat = BatteryStatusReader.read(applicationContext)
 
-        val dao = com.mapconductor.plugin.provider.geolocation.core.data.room
-            .AppDatabase.get(applicationContext)
-            .locationSampleDao()
+        // 重複保存ガード：
+        //   同一（lat,lon,accuracy,provider,heading,course,speed,used,total,cn0,battery）かつ 400ms 以内ならスキップ
+        val sig = sig(
+            location.latitude, location.longitude, location.accuracy,
+            location.provider ?: "fused",
+            headingDeg.toDouble(), courseDeg.toDouble(), speedMps.toDouble(),
+            used ?: -1, total ?: -1, (cn0 ?: Float.NaN).toDouble(),
+            bat.percent, bat.isCharging
+        )
+        synchronized(insertLock) {
+            if (sig == lastInsertSig && now - lastInsertMillis <= 400) {
+                updateStatusNotification(lastFixMillis)
+                return
+            }
+            lastInsertSig = sig
+            lastInsertMillis = now
+        }
 
+        // DB へ保存
+        val providerName = location.provider ?: "fused"
+        val dao = AppDatabase.get(applicationContext).locationSampleDao()
         dao.insert(
-            com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample(
+            LocationSample(
                 lat = location.latitude,
                 lon = location.longitude,
                 accuracy = location.accuracy,
@@ -282,8 +275,37 @@ class GeoLocationService : Service() {
                 gnssUsed = used,
                 gnssTotal = total,
                 gnssCn0Mean = cn0,
-                createdAt = System.currentTimeMillis()
+                createdAt = now
             )
         )
+
+        // 通知更新（②：実行中の updateIntervalMs を表示）
+        updateStatusNotification(lastFixMillis)
+    }
+
+    private fun sig(
+        lat: Double, lon: Double, acc: Float, provider: String,
+        heading: Double, course: Double, speed: Double,
+        used: Int, total: Int, cn0: Double,
+        batPct: Int, charging: Boolean
+    ): Long {
+        // 小数は丸めて同一判定をやや緩くする
+        fun q(x: Double, scale: Double) = (x * scale).toLong()
+        var h = 1469598103934665603L // FNV-1a 64-bit
+        fun mix(v: Long) {
+            h = h xor v
+            h *= 1099511628211L
+        }
+        mix(q(lat, 1e6))
+        mix(q(lon, 1e6))
+        mix(acc.toLong())
+        mix(provider.hashCode().toLong())
+        mix(q(heading, 10.0))
+        mix(q(course, 10.0))
+        mix(q(speed, 100.0))
+        mix(used.toLong()); mix(total.toLong())
+        mix(q(cn0, 10.0))
+        mix(batPct.toLong()); mix(if (charging) 1 else 0)
+        return h
     }
 }

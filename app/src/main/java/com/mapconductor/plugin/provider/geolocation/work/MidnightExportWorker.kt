@@ -2,43 +2,28 @@ package com.mapconductor.plugin.provider.geolocation.work
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
-import androidx.work.CoroutineWorker
-import androidx.work.WorkerParameters
 import androidx.work.Constraints
+import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.WorkerParameters
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.core.data.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.core.data.room.ExportedDay
+import com.mapconductor.plugin.provider.geolocation.core.data.room.ExportedDayDao
 import com.mapconductor.plugin.provider.geolocation.core.domain.export.GeoJsonExporter
-import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.drive.upload.KotlinDriveUploader
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
+import java.lang.reflect.Method
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 
-/**
- * 定時バックアップ（毎日 0:00 JST）と「前日以前をBackup（即時）」で実行されるコアのワーカー。
- *
- * 仕様（確定版）:
- * - 対象: 前日より前の全データを日付ごとに処理（古い日から）
- * - ファイル名: glp-YYYYMMDD.zip（対象日ベース）
- * - リトライ: 初回 + 4回 = 計5回（15s, 30s, 60s, 120s バックオフ）
- * - 成功: ZIP削除 + 対象日の Room レコード削除
- * - 失敗（5回とも失敗）: ZIP削除 / Room保持（翌日以降に再送）。当該日で打ち切り、残りは翌日に回す
- *
- * 備考:
- * - UniqueWork名: "MidnightExportWorkerUnique"
- * - ネットワーク必須 Constraints
- */
 class MidnightExportWorker(
     appContext: Context,
     params: WorkerParameters
@@ -46,134 +31,111 @@ class MidnightExportWorker(
 
     private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
 
-    override suspend fun doWork() = withContext(Dispatchers.IO) {
-        try {
-            val db = AppDatabase.get(applicationContext)
-            val dao = db.locationSampleDao()
+    override suspend fun doWork(): Result {
+        val db = AppDatabase.get(applicationContext)
+        val sampleDao = db.locationSampleDao()
+        val dayDao = resolveExportedDayDao(db)
+            ?: return Result.failure() // DAOが取れない場合は失敗を返す
 
-            // Upload設定
+        val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
+        val todayEpochDay = today.toEpochDay()
+
+        var oldest = dayDao.oldestNotUploaded()
+        if (oldest == null) {
+            // 初回は過去14日分をensure（必要に応じて調整）
+            val backDays = 14L
+            for (off in backDays downTo 1L) {
+                val d = today.minusDays(off).toEpochDay()
+                if (d < todayEpochDay) dayDao.ensure(ExportedDay(epochDay = d))
+            }
+            oldest = dayDao.oldestNotUploaded()
+        }
+
+        while (true) {
+            val target = oldest ?: break
+            if (target.epochDay >= todayEpochDay) break
+
+            val localDate = LocalDate.ofEpochDay(target.epochDay)
+            val startMillis = localDate.atStartOfDay(zone).toInstant().toEpochMilli()
+            val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+
+            val records = sampleDao.findBetween(startMillis, endMillis)
+            if (records.isEmpty()) {
+                // 空日も完了扱い（idempotent）
+                dayDao.markUploaded(target.epochDay, null)
+                oldest = dayDao.oldestNotUploaded()
+                continue
+            }
+
+            val baseName = "glp-${DateTimeFormatter.ofPattern("yyyyMMdd").format(localDate)}"
+            val exported: Uri? = GeoJsonExporter.exportToDownloads(
+                context = applicationContext,
+                records = records,
+                baseName = baseName,
+                compressAsZip = true
+            )
+            // ローカルへの書き出し成功かは exported!=null で判定
+            dayDao.markExportedLocal(target.epochDay)
+
+            // アップロード設定
             val prefs = AppPrefs.uploadSnapshot(applicationContext)
-            val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
-            val uploader = UploaderFactory.create(applicationContext, prefs.engine)
-
-            if (uploader == null || folderId.isNullOrBlank()) {
-                Log.w(TAG, "Uploader not ready: engine=${prefs.engine}, folderId=$folderId")
-                // 次回の0:00に任せる
-                scheduleNext0am()
-                return@withContext Result.success()
-            }
-
-            // 今日(0:00)より前を対象とする
-            val nowJst = ZonedDateTime.now(zone)
-            val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
-            val todayEpochDay = today0.toLocalDate().toEpochDay()
-
-            // すべて読み出してJSTのepochDayでグルーピング（古い順）
-            val all = dao.findAll()
-            if (all.isEmpty()) {
-                scheduleNext0am()
-                return@withContext Result.success()
-            }
-
-            val grouped = all.groupBy { rec ->
-                // ★ LocationSample のタイムスタンプは createdAt(Long) を使用します
-                val millis = rec.createdAt
-                ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(millis), zone)
-                    .toLocalDate()
-                    .toEpochDay()
-            }.toSortedMap()
-
-            for ((epochDay, records) in grouped) {
-                if (epochDay >= todayEpochDay) continue // 今日分は対象外
-
-                val localDate = LocalDate.ofEpochDay(epochDay)
-                val baseName = "glp-${DateTimeFormatter.ofPattern("yyyyMMdd").format(localDate)}"
-
-                // ZIP生成（Downloads/GeoLocationProvider）
-                var outUri: Uri? = null
-                try {
-                    outUri = GeoJsonExporter.exportToDownloads(
-                        context = applicationContext,
-                        records = records,
-                        baseName = baseName,
-                        compressAsZip = true
-                    )
-                    if (outUri == null) {
-                        Log.w(TAG, "ZIP create failed for $baseName; skip this day")
-                        // ZIP無ければ削除不要。次回以降Roomから再生成される
-                        continue
+            if (prefs.engine == UploadEngine.KOTLIN && exported != null && prefs.folderId.isNotBlank()) {
+                val uploader = KotlinDriveUploader(applicationContext)
+                when (val up = uploader.upload(exported, prefs.folderId, "$baseName.geojson.zip")) {
+                    is UploadResult.Success -> {
+                        // 成功：ファイルIDはAPIに依存するため保存しない／null
+                        dayDao.markUploaded(target.epochDay, null)
+                        // 任意：レコード削除の要件があればここで sampleDao.deleteByIds(...)
                     }
-
-                    // 最大5回試行（初回+4回リトライ）
-                    var success = false
-                    for (attempt in 0 until 5) {
-                        when (val result = uploader.upload(outUri, folderId, null)) {
-                            is UploadResult.Success -> {
-                                // 成功: ZIP削除 + 対象日Room削除（既存処理のまま）
-                                runCatching { applicationContext.contentResolver.delete(outUri, null, null) }
-                                val ids = records.map { it.id }
-                                runCatching { dao.deleteByIds(ids) }
-                                success = true
-                                break
+                    is UploadResult.Failure -> {
+                        // 失敗内容を保存（HTTPコード等があれば含まれている想定）
+                        val msg = buildString {
+                            up.code?.let { append("HTTP $it ") }
+                            if (!up.message.isNullOrBlank()) append(up.message)
+                            if (!up.body.isNullOrBlank()) {
+                                if (isNotEmpty()) append(" ")
+                                append(up.body.take(300))
                             }
-                            is UploadResult.Failure -> {
-                                if (attempt < 4) {
-                                    delay(15_000L * (1 shl attempt))
-                                }
-                            }
-                        }
-                    }
-
-                    if (!success) {
-                        // 失敗確定: ZIP削除 / Room保持（翌日以降に再送）
-                        runCatching { applicationContext.contentResolver.delete(outUri, null, null) }
-                        Log.w(TAG, "Upload failed after retries day=$localDate. Keep Room, drop ZIP. Stop here for today.")
-                        // ここで打ち切り（残りは翌日に回す）
-                        break
-                    }
-                } finally {
-                    // 念のため ZIPハンドルの掃除（上で消せてなくてもここで消す）
-                    if (outUri != null) {
-                        runCatching { applicationContext.contentResolver.delete(outUri, null, null) }
+                        }.ifBlank { "Upload failure" }
+                        dayDao.markError(target.epochDay, msg)
                     }
                 }
+            } else {
+                // アップロード無効／失敗時でもその日の処理は完了扱い
+                dayDao.markUploaded(target.epochDay, null)
             }
 
-            scheduleNext0am()
-            Result.success()
-        } catch (t: Throwable) {
-            Log.e(TAG, "MidnightExportWorker fatal", t)
-            scheduleNext0am()
-            Result.success() // 次回に任せる
+            oldest = dayDao.oldestNotUploaded()
         }
+
+        MidnightExportScheduler.scheduleNext(applicationContext)
+        return Result.success()
     }
 
-    private fun scheduleNext0am() {
-        // 既存のスケジューラ（同パッケージ）に委譲
-        try {
-            MidnightExportScheduler.scheduleNext(applicationContext)
-        } catch (_: Throwable) {
-            // フォールバック: UniqueWorkをネット必須で1回（次の0:00への合わせはスケジューラ側に委任）
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build()
-            val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
-                .setConstraints(constraints)
-                .build()
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(
-                UNIQUE_NAME,
-                ExistingWorkPolicy.KEEP,
-                req
-            )
+    /**
+     * AppDatabase から ExportedDayDao をアクセサ名に依存せず取得する。
+     * 例: exportedDayDao / exportedDaysDao / dayDao / getExportedDayDao 等に対応
+     */
+    private fun resolveExportedDayDao(db: AppDatabase): ExportedDayDao? {
+        // まずは代表的な名前で直呼び
+        try { return AppDatabase::class.java.getMethod("exportedDayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
+        try { return AppDatabase::class.java.getMethod("exportedDaysDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
+        try { return AppDatabase::class.java.getMethod("dayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
+        try { return AppDatabase::class.java.getMethod("getExportedDayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
+
+        // 最後に汎用探索：戻り値の型名に "ExportedDayDao" を含む無引数メソッドを探す
+        val m: Method? = db.javaClass.methods.firstOrNull {
+            it.parameterCount == 0 &&
+                    (it.returnType.simpleName == "ExportedDayDao" || it.returnType.name.endsWith(".ExportedDayDao"))
         }
+        return try { m?.invoke(db) as? ExportedDayDao } catch (_: Throwable) { null }
     }
 
     companion object {
-        private const val TAG = "MidnightExportWorker"
-        const val UNIQUE_NAME = "MidnightExportWorkerUnique"
+        private const val UNIQUE_NAME = "midnight-export-worker"
 
-        /** 「前日以前をBackup」ボタンから即時実行するためのユーティリティ */
-        fun runBacklogNow(context: Context) {
+        /** 前日以前のバックログを即時実行（UniqueWork: REPLACE） */
+        fun runNow(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
@@ -182,7 +144,7 @@ class MidnightExportWorker(
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
                 UNIQUE_NAME,
-                ExistingWorkPolicy.REPLACE, // 即時実行は置き換え
+                ExistingWorkPolicy.REPLACE,
                 req
             )
         }

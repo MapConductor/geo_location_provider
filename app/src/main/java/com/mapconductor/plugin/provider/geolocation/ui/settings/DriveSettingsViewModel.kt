@@ -169,8 +169,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         return uri
     }
 
-    /** 最終仕様：前日以前を即時バックアップ（Run now 撤去に伴い Worker を直接起動） */
+    /** 最終仕様：前日以前を即時バックアップ（Worker を直接起動） */
     fun runBacklogNow() {
-        MidnightExportWorker.runBacklogNow(getApplication())
+        // 旧: MidnightExportWorker.runBacklogNow(getApplication())
+        MidnightExportWorker.runNow(getApplication())
     }
 }
