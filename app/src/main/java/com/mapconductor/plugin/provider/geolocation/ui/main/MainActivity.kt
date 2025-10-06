@@ -53,6 +53,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 
 private const val ROUTE_HOME = "home"
@@ -181,13 +182,27 @@ private fun AppRoot(
     var driveMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderInput by remember { mutableStateOf("") }
+    val backStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = backStackEntry?.destination?.route
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("GeoLocation") },
+                title = { Text(if (currentRoute == ROUTE_PICKUP) "Pickup" else "GeoLocation") },
+                navigationIcon = {
+                    if (currentRoute == ROUTE_PICKUP) {
+                        TextButton(onClick = { navController.popBackStack() }) { Text("Back") }
+                    }
+                },
                 actions = {
-                    // --- Drive メニュー ---
+                    // Pickup ボタンは HOME のときだけ
+                    if (currentRoute != ROUTE_PICKUP) {
+                        TextButton(onClick = {
+                            navController.navigate(ROUTE_PICKUP) { launchSingleTop = true }
+                        }) { Text("Pickup") }
+                    }
+
+                    // Drive メニュー
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
                         DropdownMenuItem(
@@ -295,9 +310,6 @@ private fun AppRoot(
                         )
                     }
 
-                    // --- Pickup へ遷移（Driver/Stop の間に配置でもOK） ---
-                    TextButton(onClick = { navController.navigate(ROUTE_PICKUP) }) { Text("Pickup") }
-
                     // 既存の Start/Stop トグル等
                     ServiceToggleAction()
                 }
@@ -310,7 +322,7 @@ private fun AppRoot(
             NavHost(navController = navController, startDestination = ROUTE_HOME) {
                 composable(ROUTE_HOME) { content() }
                 composable(ROUTE_PICKUP) {
-                    PickupScreen(onBack = { navController.popBackStack() })
+                    PickupScreen()
                 }
             }
         }

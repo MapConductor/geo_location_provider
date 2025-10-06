@@ -13,27 +13,45 @@ import kotlinx.coroutines.withContext
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+/** 方式：期間指定 or 件数指定 */
 enum class PickupMode { PERIOD, COUNT }
 
+/** 画面入力モデル */
 data class PickupInput(
     val mode: PickupMode = PickupMode.PERIOD,
-    val intervalSec: String = "5",
+    val intervalSec: String = "3600",       // T（秒）
+    // PERIOD
     val startHms: String = "00:00:00",
-    val endHms: String = "23:59:59",
-    val count: String = "100"
+    val endHms: String = "03:00:00",
+    // COUNT
+    val count: String = "10"                // 1..20,000
 )
 
+/** スロット（理想時刻 g と、それに最も近いサンプル or 欠測） */
+data class PickupSlot(
+    val idealMs: Long,
+    val sample: LocationSample?,            // null の場合は欠測（UIは全項目 "-" 表示）
+    val deltaMs: Long?                      // sample がある時のみ ts - ideal（デバッグ/将来表示用）
+)
+
+/** UI状態 */
 sealed class PickupUiState {
     data object Idle : PickupUiState()
     data object Loading : PickupUiState()
     data class Error(val message: String) : PickupUiState()
-    data class Done(val summary: String, val items: List<LocationSample>) : PickupUiState()
+    data class Done(
+        val summary: String,
+        val slots: List<PickupSlot>,
+        val shortage: Boolean                // 件数指定で「ヒットが目標未満」だったか
+    ) : PickupUiState()
 }
 
 class PickupViewModel(app: Application) : AndroidViewModel(app) {
+
     private val zoneId: ZoneId = ZoneId.of("Asia/Tokyo")
     private val dao = AppDatabase.get(app).locationSampleDao()
 
@@ -43,15 +61,17 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
     private val _uiState = MutableStateFlow<PickupUiState>(PickupUiState.Idle)
     val uiState: StateFlow<PickupUiState> = _uiState
 
+    // ---- 入力更新 ----
     fun updateMode(mode: PickupMode) = _input.update { it.copy(mode = mode) }
     fun updateIntervalSec(text: String) = _input.update { it.copy(intervalSec = text) }
     fun updateStartHms(text: String) = _input.update { it.copy(startHms = text) }
     fun updateEndHms(text: String) = _input.update { it.copy(endHms = text) }
     fun updateCount(text: String) = _input.update { it.copy(count = text) }
 
+    /** 反映（抽出） */
     fun reflect() {
         val cur = _input.value
-        val intervalSec = cur.intervalSec.toIntOrNull()
+        val intervalSec = cur.intervalSec.toLongOrNull()
         if (intervalSec == null || intervalSec !in 1..86_400) {
             _uiState.value = PickupUiState.Error("間隔（秒）は 1..86,400 の整数で入力してください。")
             return
@@ -62,17 +82,18 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun reflectPeriod(intervalSec: Int, startHms: String, endHms: String) {
-        val (okStart, startMs) = parseHmsToTodayMillis(startHms)
-        val (okEnd, endMs) = parseHmsToTodayMillis(endHms)
-        if (!okStart || !okEnd) {
+    // ---- 期間指定 ----
+    private fun reflectPeriod(intervalSec: Long, startHms: String, endHms: String) {
+        val (okS, startMsRaw) = parseHmsToTodayMillis(startHms)
+        val (okE, endMsRaw) = parseHmsToTodayMillis(endHms)
+        if (!okS || !okE) {
             _uiState.value = PickupUiState.Error("時刻は hh:mm:ss 形式で入力してください。")
             return
         }
-        val todayStart = LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
+        val todayStart = todayStartMs()
         val nowMs = System.currentTimeMillis()
-        val start = max(todayStart, startMs)
-        val end = min(nowMs, endMs)
+        val start = max(todayStart, startMsRaw)
+        val end = min(nowMs, endMsRaw)
         if (start > end) {
             _uiState.value = PickupUiState.Error("時刻範囲が不正です（開始＞終了）。")
             return
@@ -81,22 +102,34 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = PickupUiState.Loading
 
-            // DAO は [from, to) なので end+1 を渡して「終了を含める」動きに寄せる
-            val raw = dao.findBetween(start, end + 1)
-            val picked = downsampleByInterval(raw, intervalSec * 1000L) { it.createdAt }
+            val T = intervalSec * 1000L
+            val W = T / 2L                              // 探索幅 ±(T/2) 両端含む
+            val midnight = todayStart                   // JST 0:00 をアンカー
+
+            // グリッド（開始・終了を「含む」）
+            val grid = buildGridTimesInclusive(midnight, start, end, T)
+
+            // DB取得範囲： [start - W, end + W] を本日範囲にクリップして半開区間へ
+            val fromQuery = max(todayStart, start - W)
+            val toQueryInclusive = min(nowMs, end + W)
+            val records = dao.findBetween(fromQuery, toQueryInclusive + 1) // [from, to]
+
+            val slots = snapToGrid(records, grid, W) { it.createdAt }
+            val hits = slots.count { it.sample != null }
 
             val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.JAPAN)
             val startStr = Instant.ofEpochMilli(start).atZone(zoneId).format(fmt)
-            val endStr = Instant.ofEpochMilli(end).atZone(zoneId).format(fmt)
-            val summary = "方式:期間指定 / 間隔:${intervalSec}s / 範囲:$startStr ~ $endStr / 件数:${picked.size}"
+            val endStr   = Instant.ofEpochMilli(end).atZone(zoneId).format(fmt)
+            val summary = "方式:期間指定 / T=${intervalSec}s / W=±${W/1000}s / スロット=${grid.size} / ヒット=$hits / 範囲=$startStr ~ $endStr"
 
             withContext(Dispatchers.Main) {
-                _uiState.value = PickupUiState.Done(summary, picked)
+                _uiState.value = PickupUiState.Done(summary, slots, shortage = false)
             }
         }
     }
 
-    private fun reflectCount(intervalSec: Int, countText: String) {
+    // ---- 件数指定（上限 20,000） ----
+    private fun reflectCount(intervalSec: Long, countText: String) {
         val wanted = countText.toIntOrNull()
         if (wanted == null || wanted !in 1..20_000) {
             _uiState.value = PickupUiState.Error("件数は 1..20,000 の整数で入力してください。")
@@ -106,31 +139,63 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.value = PickupUiState.Loading
 
-            val todayStart = LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
+            val T = intervalSec * 1000L
+            val W = T / 2L
+            val todayStart = todayStartMs()
             val nowMs = System.currentTimeMillis()
+            val midnight = todayStart
 
-            // 当日全件（当日限定なので初版は素直に取得）
-            val allToday = dao.findBetween(todayStart, nowMs + 1)
-            val down = downsampleByInterval(allToday, intervalSec * 1000L) { it.createdAt }
+            // g0 = floor((now - midnight)/T)*T + midnight（now 以下で最大の理想時刻）
+            val k0 = ((nowMs - midnight) / T)
+            val g0 = midnight + k0 * T
 
-            val actual = if (down.size <= wanted) down else down.takeLast(wanted)
+            // 過去方向に N スロット生成（本日 0:00 を下限・含む）
+            val gridDesc = ArrayList<Long>(wanted)
+            var g = g0
+            while (gridDesc.size < wanted && g >= midnight) {
+                gridDesc.add(g)
+                g -= T
+            }
+            // 昇順にして UI 表示順へ
+            val grid = gridDesc.asReversed()
+
+            // DB取得範囲： [minGrid - W, now + W] を本日範囲にクリップ
+            val minG = if (grid.isNotEmpty()) grid.first() else g0
+            val fromQuery = max(todayStart, minG - W)
+            val toQueryInclusive = min(nowMs, nowMs + W) // +W しても nowMs を上限に
+            val records = dao.findBetween(fromQuery, toQueryInclusive + 1)
+
+            val slots = snapToGrid(records, grid, W) { it.createdAt }
+            val hits = slots.count { it.sample != null }
+            val shortage = hits < wanted
 
             val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.JAPAN)
-            val sumStr = "方式:件数指定 / 間隔:${intervalSec}s / 目標:${wanted}件 / 実際:${actual.size}件 / 範囲:" +
-                    if (actual.isNotEmpty()) {
-                        val s = Instant.ofEpochMilli(actual.first().createdAt).atZone(zoneId).format(fmt)
-                        val e = Instant.ofEpochMilli(actual.last().createdAt).atZone(zoneId).format(fmt)
-                        "$s ~ $e"
-                    } else {
-                        "該当なし"
-                    }
+            val sumStr = buildString {
+                append("方式:件数指定 / T=${intervalSec}s / W=±${W/1000}s / 目標=$wanted / 実ヒット=$hits / 範囲:")
+                if (grid.isNotEmpty()) {
+                    val s = Instant.ofEpochMilli(grid.first()).atZone(zoneId).format(fmt)
+                    val e = Instant.ofEpochMilli(grid.last()).atZone(zoneId).format(fmt)
+                    append("$s ~ $e")
+                } else {
+                    append("該当なし")
+                }
+            }
 
             withContext(Dispatchers.Main) {
-                _uiState.value = PickupUiState.Done(sumStr, actual)
+                _uiState.value = PickupUiState.Done(sumStr, slots, shortage = shortage)
             }
         }
     }
 
+    // ======================
+    // ユーティリティ
+    // ======================
+
+    /** 当日 00:00:00 (JST) の epoch millis */
+    private fun todayStartMs(): Long =
+        LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
+
+    /** "hh:mm:ss" -> 今日の同時刻の epochMillis（JST） */
     private fun parseHmsToTodayMillis(hms: String): Pair<Boolean, Long> {
         val parts = hms.split(":")
         if (parts.size != 3) return false to 0L
@@ -144,25 +209,79 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
         return true to zdt.toInstant().toEpochMilli()
     }
 
-    /** 昇順配列に対して「前回採用 + intervalMs 以上」を採用する間引き */
-    private inline fun <T> downsampleByInterval(
-        list: List<T>,
-        intervalMs: Long,
-        crossinline ts: (T) -> Long
-    ): List<T> {
-        if (list.isEmpty()) return emptyList()
-        val out = ArrayList<T>(list.size)
-        var nextAllowed = Long.MIN_VALUE
-        for (e in list) {
-            val t = ts(e)
-            if (t >= nextAllowed) {
-                out.add(e)
-                nextAllowed = t + intervalMs
-            }
+    /**
+     * 期間指定：開始・終了**含む**でグリッド生成。
+     * アンカーは JST 0:00、g_k = midnight + k*T
+     */
+    private fun buildGridTimesInclusive(
+        midnight: Long,
+        startMs: Long,
+        endMs: Long,
+        T: Long
+    ): List<Long> {
+        if (endMs < startMs) return emptyList()
+        // ceil((start-midnight)/T)
+        val firstK = ((startMs - midnight) + (T - 1)) / T
+        // floor((end-midnight)/T)
+        val lastK = (endMs - midnight) / T
+        if (lastK < firstK) return emptyList()
+        val out = ArrayList<Long>((lastK - firstK + 1).toInt().coerceAtMost(1_000_000))
+        var k = firstK
+        while (k <= lastK) {
+            out.add(midnight + k * T)
+            k++
         }
         return out
     }
 
+    /**
+     * グリッド吸着：各 g について [g-W, g+W] 内の最良 1 件（|Δ| 最小、同差は過去側）を選択。
+     * records は createdAt 昇順想定。
+     */
+    private inline fun <T> snapToGrid(
+        records: List<T>,
+        grid: List<Long>,
+        W: Long,
+        crossinline ts: (T) -> Long
+    ): List<PickupSlot> {
+        val slots = ArrayList<PickupSlot>(grid.size)
+        var p = 0 // レコード走査位置（単調増加）
+        for (g in grid) {
+            val left = g - W
+            val right = g + W
+            // 左端までポインタを進める
+            while (p < records.size && ts(records[p]) < left) p++
+
+            var bestIdx = -1
+            var bestAbs = Long.MAX_VALUE
+            var q = p
+            // 右端まで探索
+            while (q < records.size) {
+                val t = ts(records[q])
+                if (t > right) break
+                val ad = abs(t - g)
+                if (ad < bestAbs) {
+                    bestAbs = ad
+                    bestIdx = q
+                } else if (ad == bestAbs) {
+                    // 同差は「過去側」（小さい t）を優先 → 既に先頭から昇順なので先に見つかった方でOK
+                    // ただし将来「未来優先」に変える場合はここを調整
+                }
+                q++
+            }
+
+            if (bestIdx >= 0) {
+                val chosen = records[bestIdx]
+                slots.add(PickupSlot(idealMs = g, sample = chosen as LocationSample, deltaMs = ts(chosen) - g))
+                // p は戻さない（単調増加でOK）
+            } else {
+                slots.add(PickupSlot(idealMs = g, sample = null, deltaMs = null))
+            }
+        }
+        return slots
+    }
+
+    // StateFlow 更新ヘルパ（Kotlin 1.9 互換）
     private inline fun <T> MutableStateFlow<T>.update(block: (T) -> T) {
         this.value = block(this.value)
     }
