@@ -12,15 +12,22 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-/**
- * TopAppBar/Scaffold は外側（AppRoot）で提供する前提。
- * 本画面は余白を作らないため、コンテンツのみを描画します。
- */
+// ▼ 見た目統一のための追加インポート
+import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material.icons.outlined.SettingsInputAntenna
+import androidx.compose.material.icons.outlined.BatteryFull
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.CompassCalibration
+import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.SatelliteAlt
+import androidx.compose.material.icons.outlined.SignalCellularAlt
+import androidx.compose.material3.Icon
+import androidx.compose.ui.text.font.FontWeight
+
 @Composable
 fun PickupScreen(
     vm: PickupViewModel = viewModel()
@@ -36,22 +43,24 @@ fun PickupScreen(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 方式ラジオ
+        // 方式選択
         Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(
-                selected = input.mode == PickupMode.PERIOD,
-                onClick = { vm.updateMode(PickupMode.PERIOD) }
-            )
-            Text("期間指定")
-            Spacer(Modifier.width(16.dp))
-            RadioButton(
-                selected = input.mode == PickupMode.COUNT,
-                onClick = { vm.updateMode(PickupMode.COUNT) }
-            )
-            Text("件数指定")
+            Text("方式：", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = input.mode == PickupMode.PERIOD,
+                    onClick = { vm.updateMode(PickupMode.PERIOD) },
+                    label = { Text("期間指定") }
+                )
+                FilterChip(
+                    selected = input.mode == PickupMode.COUNT,
+                    onClick = { vm.updateMode(PickupMode.COUNT) },
+                    label = { Text("件数指定") }
+                )
+            }
         }
 
-        // 共通：間隔
+        // 取得間隔
         OutlinedTextField(
             value = input.intervalSec,
             onValueChange = vm::updateIntervalSec,
@@ -66,73 +75,60 @@ fun PickupScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = input.startHms,
-                    onValueChange = vm::updateStartHms,
-                    label = { Text("開始 hh:mm:ss") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    onValueChange = vm::updateStartHms,   // ← 正式名
+                    label = { Text("開始 (HH:mm:ss)") },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedTextField(
                     value = input.endHms,
-                    onValueChange = vm::updateEndHms,
-                    label = { Text("終了 hh:mm:ss") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    onValueChange = vm::updateEndHms,     // ← 正式名
+                    label = { Text("終了 (HH:mm:ss)") },
                     singleLine = true,
                     modifier = Modifier.weight(1f)
                 )
             }
         } else {
+            // 件数指定：入力のみ（実行は下部の「反映」に統一）
             OutlinedTextField(
                 value = input.count,
                 onValueChange = vm::updateCount,
-                label = { Text("件数 1..20,000（不足時は最大件数を表示）") },
+                label = { Text("件数 (1..10000)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
-            Text("探索対象：本日 00:00:00 ～ 現在（JST）。now 以下で最大の理想時刻から過去へ N スロット。")
         }
 
-        // 実行ボタン
-        val enabled = when (input.mode) {
-            PickupMode.PERIOD -> input.intervalSec.isNotBlank() && input.startHms.isNotBlank() && input.endHms.isNotBlank()
-            PickupMode.COUNT  -> input.intervalSec.isNotBlank() && input.count.isNotBlank()
-        }
-        Button(
-            onClick = { vm.reflect() },
-            enabled = enabled,
-            modifier = Modifier.align(Alignment.End)
-        ) {
-            Text("Reflection!")
+        // 実行行：反映のみ（抽出は撤廃）
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(onClick = {
+                vm.reflect()
+                showShortageWarn = (vm.uiState.value as? PickupUiState.Done)?.shortage == true
+            }) { Text("反映") }
+
+            // クリア機能は ViewModel にAPIが無いため未表示（必要なら Idle へ戻す関数を追加してください）
+            // TextButton(onClick = vm::clear) { Text("クリア") }
         }
 
-        // 結果表示
-        when (val s = uiState) {
-            is PickupUiState.Idle -> {}
-            is PickupUiState.Loading -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            is PickupUiState.Error -> Text(text = s.message, color = MaterialTheme.colorScheme.error)
-            is PickupUiState.Done -> {
-                // 件数不足アラート（件数指定モード時のみ有効）
-                LaunchedEffect(s.shortage) {
-                    if (s.shortage) showShortageWarn = true
-                }
-
-                Text(s.summary, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                PickupList(slots = s.slots)
+        // 結果リスト
+        val slots: List<PickupSlot> =
+            when (val s = uiState) {
+                is PickupUiState.Done -> s.slots
+                else -> emptyList()
             }
-        }
-    }
+        PickupList(slots = slots)
 
-    if (showShortageWarn) {
-        AlertDialog(
-            onDismissRequest = { showShortageWarn = false },
-            confirmButton = {
-                TextButton(onClick = { showShortageWarn = false }) { Text("OK") }
-            },
-            title = { Text("データが不足しています") },
-            text = { Text("指定件数に満たないため、取得できた最大件数で表示しています。") }
-        )
+        if (showShortageWarn) {
+            AlertDialog(
+                onDismissRequest = { showShortageWarn = false },
+                confirmButton = {
+                    TextButton(onClick = { showShortageWarn = false }) { Text("OK") }
+                },
+                title = { Text("データが不足しています") },
+                text = { Text("指定件数に満たないため、取得できた最大件数で表示しています。") }
+            )
+        }
     }
 }
 
@@ -144,105 +140,106 @@ private fun PickupList(slots: List<PickupSlot>) {
     ) {
         itemsIndexed(slots) { idx, slot ->
             PickupRow(index = idx + 1, slot = slot)
-            HorizontalDivider()
-        }
-    }
-}
-
-/** スロット行（sample == null の時は全項目 "-"） */
-@Composable
-private fun PickupRow(index: Int, slot: PickupSlot) {
-    val sample = slot.sample
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        if (sample == null) {
-            Text("No.$index  Time : -  / Battery : -")
-            Text("Location : -  Acc : -")
-            Text("Heading : - / Course : - / Speed : -")
-            Text("GNSS : -  / C/N0 : -")
-        } else {
-            Text("No.$index  Time : ${sample.formattedTimeOrDash()}  / Battery : ${sample.formattedBatteryOrDash()}")
-            Text("Location : ${sample.formattedLatLngOrDash()}  Acc : ${sample.formattedAccOrDash()}")
-            Text("Heading : ${sample.formattedHeadingOrDash()} / Course : ${sample.formattedCourseOrDash()} / Speed : ${sample.formattedSpeedOrDash()}")
-            Text("GNSS : ${sample.formattedGnssOrDash()}  / C/N0 : ${sample.formattedCn0OrDash()}")
+            Divider()
         }
     }
 }
 
 /* =============================
-   表示用拡張（リフレクション版）
-   —— プロパティ名の差異に強い実装。
-   固定できるなら直接プロパティ参照に置換してください。
+   表示行：LocationHistoryList に見た目を完全一致
+   （Formatters のIFをそのまま使用）
    ============================= */
+@Composable
+private fun PickupRow(index: Int, slot: PickupSlot) {
+    val item: LocationSample? = slot.sample
 
-private val jst: ZoneId = ZoneId.of("Asia/Tokyo")
-private val timeFmt: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.JAPAN)
+    val time   = item?.let { Formatters.timeJst(it.createdAt) } ?: "-"
+    val prov   = item?.let { Formatters.providerText(it.provider) } ?: "-"
+    val bat    = item?.let { Formatters.batteryText(it.batteryPct, it.isCharging) } ?: "-"
+    val loc    = item?.let { Formatters.latLonAcc(it.lat, it.lon, it.accuracy) } ?: "-"
+    val head   = item?.let { Formatters.headingText(it.headingDeg) } ?: "-"
+    val course = item?.let { Formatters.courseText(it.courseDeg) } ?: "-"
+    val speed  = item?.let { Formatters.speedText(it.speedMps) } ?: "-"
+    val gnss   = item?.let { Formatters.gnssUsedTotal(it.gnssUsed, it.gnssTotal) } ?: "-"
+    val cn0    = item?.let { Formatters.cn0Text(it.gnssCn0Mean) } ?: "-"
 
-private fun LocationSample.formattedTimeOrDash(): String {
-    val ts = getNumberField("createdAt", "timestampMillis")?.toLong() ?: return "-"
-    return try { Instant.ofEpochMilli(ts).atZone(jst).format(timeFmt) } catch (_: Exception) { "-" }
-}
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        // 1行目: [時計] Time
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Time")
+            Text(time, style = MaterialTheme.typography.bodyMedium)
+        }
 
-private fun LocationSample.formattedBatteryOrDash(): String {
-    val pct = getNumberField("batteryPct", "batteryPercent", "battery")?.toInt() ?: return "-"
-    return "$pct%"
-}
+        // 2行目: [アンテナ] Provider / [バッテリー] Battery
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.SettingsInputAntenna, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Provider")
+            Text(prov, style = MaterialTheme.typography.bodyMedium)
 
-private fun LocationSample.formattedLatLngOrDash(): String {
-    val lat = getNumberField("latitude", "lat")?.toDouble()
-    val lon = getNumberField("longitude", "lng", "lon")?.toDouble()
-    return if (lat != null && lon != null) {
-        "%,.6f, %,.6f".format(Locale.US, lat, lon)
-    } else "-"
-}
+            Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-private fun LocationSample.formattedAccOrDash(): String {
-    val acc = getNumberField("accuracy", "accuracyMeters", "acc")?.toDouble() ?: return "-"
-    return "%,.2fm".format(Locale.US, acc)
-}
+            Icon(Icons.Outlined.BatteryFull, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Battery")
+            Text(bat, style = MaterialTheme.typography.bodyMedium)
+        }
 
-private fun LocationSample.formattedHeadingOrDash(): String {
-    val v = getNumberField("headingDeg", "bearingDeg", "heading")?.toDouble() ?: return "-"
-    return "%,.1f°".format(Locale.US, v)
-}
+        // 3行目: [地球] Location
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Location")
+            Text(loc, style = MaterialTheme.typography.bodyMedium)
+        }
 
-private fun LocationSample.formattedCourseOrDash(): String {
-    val v = getNumberField("courseDeg", "course")?.toDouble() ?: return "-"
-    return "%,.1f°".format(Locale.US, v)
-}
+        // 4行目: [コンパス] Heading / [矢印] Course / [スピード] Speed
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.CompassCalibration, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Heading")
+            Text(head, style = MaterialTheme.typography.bodyMedium)
 
-private fun LocationSample.formattedSpeedOrDash(): String {
-    val kmh = getNumberField("speedKmh")?.toDouble()
-    val mps = getNumberField("speedMps")?.toDouble()
-    val k = kmh ?: (mps?.let { it * 3.6 })
-    val m = mps ?: (kmh?.let { it / 3.6 })
-    return if (k != null && m != null) {
-        "%,.1fKm/h(%,.1fm/s)".format(Locale.US, k, m)
-    } else "-"
-}
+            Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-private fun LocationSample.formattedGnssOrDash(): String {
-    val used = getNumberField("gnssUsed", "satellitesUsed")?.toInt()
-    val tot  = getNumberField("gnssTotal", "satellitesTotal")?.toInt()
-    return if (used != null && tot != null) "$used/$tot" else "-"
-}
+            Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Course")
+            Text(course, style = MaterialTheme.typography.bodyMedium)
 
-private fun LocationSample.formattedCn0OrDash(): String {
-    val v = getNumberField("cn0DbHz", "cn0")?.toDouble() ?: return "-"
-    return "%,.1fdB-Hz".format(Locale.US, v)
-}
+            Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-/** 指定名の最初に見つかった数値プロパティを返す（Number / String数値 に対応） */
-private fun Any.getNumberField(vararg names: String): Number? {
-    for (n in names) {
-        val v = runCatching {
-            val f = this.javaClass.getDeclaredField(n).apply { isAccessible = true }
-            f.get(this)
-        }.getOrNull() ?: continue
-        when (v) {
-            is Number -> return v
-            is String -> v.toDoubleOrNull()?.let { return it }
+            Icon(Icons.Outlined.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("Speed")
+            Text(speed, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        // 5行目: [衛星] GNSS / [電波] C/N0
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.SatelliteAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("GNSS")
+            Text(gnss, style = MaterialTheme.typography.bodyMedium)
+
+            Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+            Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("C/N0")
+            Text(cn0, style = MaterialTheme.typography.bodyMedium)
         }
     }
-    return null
+}
+
+@Composable
+private fun BoldLabel(label: String) {
+    Text("$label : ", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
 }

@@ -41,30 +41,6 @@ fun LocationHistoryList(
         contentPadding = PaddingValues(bottom = 24.dp)
     ) {
         items(items = rows, key = { it.id }) { s ->
-//            // --- 新：2行フォーマット ---
-//            val hundredths = ((s.createdAt % 1000L) / 10L).toInt()
-//            val timeStr = "${baseFmt.format(Date(s.createdAt))}.%02d".format(hundredths)
-//            val provider = s.provider ?: "-"
-//            val charge = if (s.isCharging) "充電中" else "非充電"
-//
-//            val line1 = "Time : $timeStr / Provider : $provider / Battery : ${s.batteryPct}%($charge)"
-//            val line2 = "Location : [Lon]%.6f, [Lat]%.6f, [Acc]%.2fm"
-//                .format(s.lon, s.lat, s.accuracy)
-//
-//            Column(
-//                modifier = Modifier
-//                    .fillMaxWidth()
-//                    .padding(horizontal = 12.dp, vertical = 8.dp)
-//                    .onGloballyPositioned { coords ->
-//                        // 可変LIMITのための実アイテム高さ計測（初回のみ）
-//                        if (itemHeightPxState.value == null) {
-//                            itemHeightPxState.value = coords.size.height
-//                        }
-//                    }
-//            ) {
-//                Text(line1, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
-//                Text(line2, style = MaterialTheme.typography.bodySmall) // ★ 修正：typography
-//            }
             HistoryRow(item = s)
             HorizontalDivider(thickness = 0.5.dp, color = DividerDefaults.color)
         }
