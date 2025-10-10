@@ -12,6 +12,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+secrets.properties
+GeoLocationProvider.zip
 /here-credentials.properties
 /.idea/
 /.kotlin/
