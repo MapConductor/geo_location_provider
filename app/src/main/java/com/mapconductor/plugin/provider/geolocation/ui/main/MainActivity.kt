@@ -3,6 +3,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.main
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.midi.MidiDevice
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,6 +11,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -54,6 +56,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.navigation.compose.currentBackStackEntryAsState
+import com.google.android.gms.maps.MapView
+import com.mapconductor.googlemaps.GoogleMapsView
+import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 
 private const val ROUTE_HOME = "home"
@@ -69,6 +74,11 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     startDestination = "home"
                 ) {
+                    composable("map") {
+                        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                            MapComponent(modifier = Modifier.padding(innerPadding))
+                        }
+                    }
                     composable("home") {
                         AppRoot(
                             onStartTracking = { requestPermissionsAndStartService() },
@@ -363,6 +373,17 @@ private fun AppRoot(
             dismissButton = {
                 TextButton(onClick = { showFolderDialog = false }) { Text("Cancel") }
             }
+        )
+    }
+}
+
+@Composable
+fun MapComponent(modifier: Modifier = Modifier){
+    val mapViewState = rememberGoogleMapViewState()
+    Column(modifier = modifier) {
+        Text("Hello world.")
+        GoogleMapsView(
+            state = mapViewState,
         )
     }
 }

@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
 }
 
 android {
@@ -13,7 +14,7 @@ android {
 
     defaultConfig {
         applicationId = "com.mapconductor.plugin.provider.geolocation"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -72,7 +73,24 @@ room {
     schemaDirectory("$projectDir/schemas")
 }
 
+secrets {
+    propertiesFileName = "secrets.properties"
+    defaultPropertiesFileName = "local.default.properties"
+}
+
 dependencies {
+    // Google Maps SDK - Version 19.2.0 (as used by MapConductor 1.0.0)
+    implementation("com.google.android.gms:play-services-maps:19.2.0")
+
+    // MapConductor BOM for version management
+    implementation(platform("com.mapconductor:mapconductor-bom:1.0.0"))
+
+    // MapConductor modules (versions managed by BOM)
+    implementation("com.mapconductor:core")
+    implementation("com.mapconductor:for-googlemaps")
+
+//    implementation("com.mapconductor:marker-strategy")
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.navigation:navigation-compose:2.8.0")
     implementation("androidx.activity:activity-compose:1.9.2")
