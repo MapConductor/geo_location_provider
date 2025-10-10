@@ -11,6 +11,7 @@
 /captures
 .externalNativeBuild
 .cxx
+local.default.properties
 local.properties
 secrets.properties
 GeoLocationProvider.zip
