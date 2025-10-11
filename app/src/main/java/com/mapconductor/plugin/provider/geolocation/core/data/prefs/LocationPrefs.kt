@@ -3,14 +3,13 @@ package com.mapconductor.plugin.provider.geolocation.core.data.prefs
 import android.content.Context
 import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull  // ★ 追加（任意：null安全に使う場合）
 
 /**
  * 設定の“読み出し統合”用ファサード。
  * まずは Upload 関連だけ UploadPrefs から橋渡し。
  */
-// AppPrefs.kt（最小差分）
+// LocationPrefs.kt（最小差分）
 object AppPrefs {
     data class Snapshot(val engine: UploadEngine, val folderId: String)
 

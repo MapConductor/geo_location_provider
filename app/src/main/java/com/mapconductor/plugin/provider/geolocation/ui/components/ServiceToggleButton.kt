@@ -13,7 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
-import com.mapconductor.plugin.provider.geolocation.util.ServiceStateProbe
+import com.mapconductor.plugin.provider.geolocation.util.ServiceStateIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,7 +33,7 @@ fun ServiceToggleAction() {
     fun refreshState() {
         scope.launch {
             busyState.value = true
-            val running = ServiceStateProbe.isRunning(context, GeoLocationService::class.java)
+            val running = ServiceStateIndicator.isRunning(context, GeoLocationService::class.java)
             runningState.value = running
             busyState.value = false
         }

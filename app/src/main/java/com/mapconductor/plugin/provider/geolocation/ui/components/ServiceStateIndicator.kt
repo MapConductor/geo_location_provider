@@ -6,7 +6,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import kotlin.coroutines.resume
 
-object ServiceStateProbe {
+object ServiceStateIndicator {
     /**
      * GeoLocationService が“いま”動いているかを問い合わせる（保存しない）。
      * flags=0（AUTO_CREATE なし）なので、存在しなければ起動しません。

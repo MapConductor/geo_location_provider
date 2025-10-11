@@ -2,23 +2,6 @@ package com.mapconductor.plugin.provider.geolocation.ui.components
 
 // ★ 既存3ファイルで使っていた import を “そのまま” まとめて持ってきてください。
 // 例:
-import androidx.compose.runtime.Composable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.ui.platform.LocalContext
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
-import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
-import com.mapconductor.plugin.provider.geolocation.ui.main.ManualExportViewModel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 // ...他、既存の3ファイルの import を必要分ペースト...
 
