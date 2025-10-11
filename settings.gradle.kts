@@ -22,4 +22,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "GeoLocationProvider"
 include(":app")
- 
+include(":core")
+include(":dataselector")
+include(":datamanager")
