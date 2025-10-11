@@ -3,7 +3,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.main
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.ContextCompat
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation._core.service.GeoLocationService
 
 object ServiceLauncher {
     fun startLocationService(context: Context) {

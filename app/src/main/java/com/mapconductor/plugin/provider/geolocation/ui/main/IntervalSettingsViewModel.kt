@@ -10,7 +10,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.SettingsStore
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation._core.service.GeoLocationService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow

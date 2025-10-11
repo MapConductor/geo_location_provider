@@ -4,13 +4,15 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
-import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
-import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
-import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.geolocation._datamanager.prefs.DrivePrefsRepository
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveApiClient
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation._datamanager.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -124,7 +126,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             val parentId = DriveFolderId.extractFromUrlOrId(raw)
             if (parentId.isNullOrBlank()) { _status.value = "Folder URL/ID is empty"; return@launch }
 
-            val uploader = UploaderFactory.create(getApplication(), com.mapconductor.plugin.provider.geolocation.config.UploadEngine.KOTLIN)
+            val uploader = UploaderFactory.create(getApplication(), UploadEngine.KOTLIN)
                 ?: run { _status.value = "Uploader not available"; return@launch }
 
             val now = System.currentTimeMillis()
@@ -134,9 +136,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                 ?: run { _status.value = "Failed to create sample file"; return@launch }
 
             when (val r = uploader.upload(uri, parentId, name)) {
-                is com.mapconductor.plugin.provider.geolocation.drive.UploadResult.Success ->
+                is UploadResult.Success ->
                     _status.value = "Upload OK: ${r.name}\n${r.webViewLink}"
-                is com.mapconductor.plugin.provider.geolocation.drive.UploadResult.Failure ->
+                is UploadResult.Failure ->
                     _status.value = "Upload NG: ${r.code} ${r.message ?: ""}\n${r.body.take(300)}"
             }
         }

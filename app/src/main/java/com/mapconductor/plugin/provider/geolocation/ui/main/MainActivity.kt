@@ -3,7 +3,6 @@ package com.mapconductor.plugin.provider.geolocation.ui.main
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.midi.MidiDevice
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -42,13 +41,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.mapconductor.plugin.provider.geolocation.DrivePrefsRepository
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
-import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
-import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation._datamanager.prefs.DrivePrefsRepository
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveApiClient
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.ApiResult
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId.extractFromUrlOrId
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation._core.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 import kotlinx.coroutines.Dispatchers
@@ -56,7 +55,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.google.android.gms.maps.MapView
 import com.mapconductor.googlemaps.GoogleMapsView
 import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen

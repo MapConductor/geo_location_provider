@@ -12,7 +12,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation._core.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.util.ServiceStateIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

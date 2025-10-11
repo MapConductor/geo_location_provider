@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mapconductor.plugin.provider.geolocation.core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
 
 // ▼ 見た目統一のための追加インポート
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters

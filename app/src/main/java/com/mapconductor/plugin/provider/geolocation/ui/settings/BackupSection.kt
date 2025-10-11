@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.ui.main.ManualExportViewModel
 import com.mapconductor.plugin.provider.geolocation.ui.main.TodayPreviewMode
-import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.geolocation._datamanager.work.MidnightExportWorker
 
 /**
  * バックアップ操作セクション（最終仕様）

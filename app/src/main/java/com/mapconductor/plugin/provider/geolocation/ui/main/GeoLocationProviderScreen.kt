@@ -26,7 +26,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
 // ★ 統一：work パッケージの Scheduler を使用
-import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 
 /**
  * 画面エントリ。
