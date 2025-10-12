@@ -64,4 +64,10 @@ interface LocationSampleDao {
         LIMIT 1
     """)
     fun latestOneFlow(): Flow<LocationSample?>
+
+    @Query("""
+        SELECT * FROM location_samples
+        ORDER BY createdAt DESC
+    """)
+    fun observeAll(): Flow<List<LocationSample>>
 }

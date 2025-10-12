@@ -1,5 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.ui.pickup
 
+import android.app.Application
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -8,9 +9,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
 
 // ▼ 見た目統一のための追加インポート
@@ -26,7 +30,7 @@ import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.SatelliteAlt
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material3.Icon
-import androidx.compose.ui.text.font.FontWeight
+import kotlinx.coroutines.flow.Flow
 
 @Composable
 fun PickupScreen(
@@ -36,6 +40,29 @@ fun PickupScreen(
     val uiState by vm.uiState.collectAsState()
 
     var showShortageWarn by remember { mutableStateOf(false) }
+
+    // -----------------------------
+    // ▼ dataselector 導入（厳密案）
+    //    - 全件Flowを DAO から取得
+    //    - SelectorViewModel で抽出済み rows を購読
+    // -----------------------------
+    val app = LocalContext.current.applicationContext as Application
+    val context = LocalContext.current
+
+    // Dao に observeAll(): Flow<List<LocationSample>> がある前提
+    val baseFlow: Flow<List<LocationSample>> = remember(context) {
+        AppDatabase.get(context).locationSampleDao().observeAll()
+    }
+
+    val selectorVm: SelectorViewModel = viewModel(
+        factory = SelectorViewModel.Factory(
+            app = app,
+            baseFlow = baseFlow,
+            getMillis = { it.createdAt },   // ← あなたの LocationSample の時刻プロパティ
+            getAccuracy = { it.accuracy }   // ← 無ければ { null }
+        )
+    )
+    val rows by selectorVm.rows.collectAsState()
 
     Column(
         modifier = Modifier
@@ -100,24 +127,19 @@ fun PickupScreen(
             )
         }
 
-        // 実行行：反映のみ（抽出は撤廃）
+        // 実行行：反映のみ（抽出は dataselector 側で自動反映）
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = {
                 vm.reflect()
                 showShortageWarn = (vm.uiState.value as? PickupUiState.Done)?.shortage == true
             }) { Text("反映") }
 
-            // クリア機能は ViewModel にAPIが無いため未表示（必要なら Idle へ戻す関数を追加してください）
+            // クリア機能は ViewModel にAPIが無いため未表示（必要なら Idle へ戻す関数を追加）
             // TextButton(onClick = vm::clear) { Text("クリア") }
         }
 
-        // 結果リスト
-        val slots: List<PickupSlot> =
-            when (val s = uiState) {
-                is PickupUiState.Done -> s.slots
-                else -> emptyList()
-            }
-        PickupList(slots = slots)
+        // ▼▼▼ ここからリスト描画を rows（抽出結果）に置き換え ▼▼▼
+        PickupListBySamples(samples = rows)
 
         if (showShortageWarn) {
             AlertDialog(
@@ -133,35 +155,33 @@ fun PickupScreen(
 }
 
 @Composable
-private fun PickupList(slots: List<PickupSlot>) {
+private fun PickupListBySamples(samples: List<LocationSample>) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        itemsIndexed(slots) { idx, slot ->
-            PickupRow(index = idx + 1, slot = slot)
+        itemsIndexed(samples) { idx, sample ->
+            PickupRowFromSample(index = idx + 1, sample = sample)
             Divider()
         }
     }
 }
 
 /* =============================
-   表示行：LocationHistoryList に見た目を完全一致
+   表示行：LocationHistoryList と見た目を完全一致
    （Formatters のIFをそのまま使用）
    ============================= */
 @Composable
-private fun PickupRow(index: Int, slot: PickupSlot) {
-    val item: LocationSample? = slot.sample
-
-    val time   = item?.let { Formatters.timeJst(it.createdAt) } ?: "-"
-    val prov   = item?.let { Formatters.providerText(it.provider) } ?: "-"
-    val bat    = item?.let { Formatters.batteryText(it.batteryPct, it.isCharging) } ?: "-"
-    val loc    = item?.let { Formatters.latLonAcc(it.lat, it.lon, it.accuracy) } ?: "-"
-    val head   = item?.let { Formatters.headingText(it.headingDeg) } ?: "-"
-    val course = item?.let { Formatters.courseText(it.courseDeg) } ?: "-"
-    val speed  = item?.let { Formatters.speedText(it.speedMps) } ?: "-"
-    val gnss   = item?.let { Formatters.gnssUsedTotal(it.gnssUsed, it.gnssTotal) } ?: "-"
-    val cn0    = item?.let { Formatters.cn0Text(it.gnssCn0Mean) } ?: "-"
+private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
+    val time   = sample?.let { Formatters.timeJst(it.createdAt) } ?: "-"
+    val prov   = sample?.let { Formatters.providerText(it.provider) } ?: "-"
+    val bat    = sample?.let { Formatters.batteryText(it.batteryPct, it.isCharging) } ?: "-"
+    val loc    = sample?.let { Formatters.latLonAcc(it.lat, it.lon, it.accuracy) } ?: "-"
+    val head   = sample?.let { Formatters.headingText(it.headingDeg) } ?: "-"
+    val course = sample?.let { Formatters.courseText(it.courseDeg) } ?: "-"
+    val speed  = sample?.let { Formatters.speedText(it.speedMps) } ?: "-"
+    val gnss   = sample?.let { Formatters.gnssUsedTotal(it.gnssUsed, it.gnssTotal) } ?: "-"
+    val cn0    = sample?.let { Formatters.cn0Text(it.gnssCn0Mean) } ?: "-"
 
     Column(
         modifier = Modifier
