@@ -1,10 +1,9 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.prefs
 
 import android.content.Context
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -22,6 +21,7 @@ class SelectorPrefs(private val appContext: Context) {
         val TO = longPreferencesKey("to")
         val LIMIT = intPreferencesKey("limit")
         val MIN_ACC = floatPreferencesKey("min_acc")
+        val INTERVAL_MS = longPreferencesKey("interval_ms")
     }
 
     val condition: Flow<SelectorCondition> =
@@ -31,7 +31,8 @@ class SelectorPrefs(private val appContext: Context) {
                 fromMillis = p[K.FROM],
                 toMillis = p[K.TO],
                 limit = p[K.LIMIT],
-                minAccuracyM = p[K.MIN_ACC]
+                minAccuracyM = p[K.MIN_ACC],
+                intervalMs = p[K.INTERVAL_MS]
             )
         }
 
@@ -42,7 +43,8 @@ class SelectorPrefs(private val appContext: Context) {
                 fromMillis = p[K.FROM],
                 toMillis = p[K.TO],
                 limit = p[K.LIMIT],
-                minAccuracyM = p[K.MIN_ACC]
+                minAccuracyM = p[K.MIN_ACC],
+                intervalMs = p[K.INTERVAL_MS]
             )
             val next = block(curr)
             p[K.MODE] = next.mode.name
@@ -50,6 +52,7 @@ class SelectorPrefs(private val appContext: Context) {
             next.toMillis?.let { p[K.TO] = it } ?: p.remove(K.TO)
             next.limit?.let { p[K.LIMIT] = it } ?: p.remove(K.LIMIT)
             next.minAccuracyM?.let { p[K.MIN_ACC] = it } ?: p.remove(K.MIN_ACC)
+            next.intervalMs?.let { p[K.INTERVAL_MS] = it } ?: p.remove(K.INTERVAL_MS)
         }
     }
 }

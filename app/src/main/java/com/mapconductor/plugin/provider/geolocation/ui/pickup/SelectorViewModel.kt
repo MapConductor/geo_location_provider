@@ -33,9 +33,10 @@ class SelectorViewModel(
 
     // Repository はジェネリック版（getMillis / getAccuracy を注入）想定
     private val repo = SelectorRepository(
-        baseFlow = baseFlow
+        baseFlow = baseFlow,                // Flow<List<LocationSample>>
+        getMillis = { it.createdAt },       // ← あなたの時刻プロパティに合わせる
+        getAccuracy = { it.accuracy }       // ← 無ければ { null }
     )
-
     private val buildSelectedRows = BuildSelectedRows(prefs, repo)
 
     /** 画面が購読する抽出済みリスト */

@@ -5,7 +5,8 @@ data class SelectorCondition(
     val fromMillis: Long? = null,
     val toMillis: Long? = null,
     val limit: Int? = null,
-    val minAccuracyM: Float? = null
+    val minAccuracyM: Float? = null,
+    val intervalMs: Long? = null
 ) {
     enum class Mode { ByPeriod, ByCount }
 }

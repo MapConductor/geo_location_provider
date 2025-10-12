@@ -7,10 +7,11 @@ import kotlinx.coroutines.flow.Flow
 
 /**
  * UseCase：条件Flow × ベースFlow → 抽出済み行Flow を組み立てる
+ * Repository は LocationSample 用（SelectorRepository<LocationSample>）を想定
  */
 class BuildSelectedRows(
     private val prefs: SelectorPrefs,
-    private val repo: SelectorRepository
+    private val repo: SelectorRepository<LocationSample>
 ) {
     operator fun invoke(): Flow<List<LocationSample>> = repo.rows(prefs.condition)
 }
