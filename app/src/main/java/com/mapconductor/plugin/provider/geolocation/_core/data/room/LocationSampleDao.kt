@@ -5,7 +5,6 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
-
 @Dao
 interface LocationSampleDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -70,4 +69,53 @@ interface LocationSampleDao {
         ORDER BY createdAt DESC
     """)
     fun observeAll(): Flow<List<LocationSample>>
+
+    @Query(
+        """
+        SELECT * FROM location_samples
+        WHERE (:from IS NULL OR createdAt >= :from)
+          AND (:to   IS NULL OR createdAt  < :to)
+        ORDER BY createdAt DESC
+        LIMIT :limit
+        """
+    )
+    fun getInRangeNewestFirst(
+        from: Long?,
+        to: Long?,
+        limit: Int
+    ): Flow<List<LocationSample>>
+
+    @Query(
+        """
+        SELECT * FROM location_samples
+        WHERE (:from IS NULL OR createdAt >= :from)
+          AND (:to   IS NULL OR createdAt  < :to)
+        ORDER BY createdAt ASC
+        LIMIT :limit
+        """
+    )
+    fun getInRangeOldestFirst(
+        from: Long?,
+        to: Long?,
+        limit: Int
+    ): Flow<List<LocationSample>>
+
+    /**
+     * 間隔リサンプリング用：範囲を ASC で一括取得（メモリで最近傍選定）。
+     * softLimit は安全側に多めを指定する想定。
+     */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        WHERE (:from IS NULL OR createdAt >= :from)
+          AND (:to   IS NULL OR createdAt  < :to)
+        ORDER BY createdAt ASC
+        LIMIT :softLimit
+        """
+    )
+    suspend fun getInRangeAscOnce(
+        from: Long?,
+        to: Long?,
+        softLimit: Int
+    ): List<LocationSample>
 }

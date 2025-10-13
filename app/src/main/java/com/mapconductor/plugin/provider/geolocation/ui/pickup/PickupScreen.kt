@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.ui.pickup
 
 import android.app.Application
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -16,260 +17,187 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
-
-// ▼ 見た目統一のための追加インポート
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material.icons.outlined.SettingsInputAntenna
-import androidx.compose.material.icons.outlined.BatteryFull
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.CompassCalibration
-import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.SatelliteAlt
-import androidx.compose.material.icons.outlined.SignalCellularAlt
-import androidx.compose.material3.Icon
-import kotlinx.coroutines.flow.Flow
+import androidx.compose.material.icons.outlined.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.ZoneId
-import java.time.format.DateTimeFormatterBuilder
-import java.time.temporal.ChronoField
 import java.text.Normalizer
+import java.time.*
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import androidx.compose.material3.ExperimentalMaterial3Api
 
 @Composable
-fun PickupScreen(
-    vm: PickupViewModel = viewModel()
-) {
-    val input by vm.input.collectAsState()
+fun PickupScreen() {
     val scope = rememberCoroutineScope()
 
-    // ▼ 反映ボタンを押すまでは表示しないゲート + スナップショット格納
-    var hasApplied by remember { mutableStateOf(false) }
-    var displayRows by remember { mutableStateOf<List<LocationSample>>(emptyList()) }
-    var showShortageWarn by remember { mutableStateOf(false) }
-
     // -----------------------------
-    // ▼ dataselector 導入（厳密案）
+    // ▼ dataselector：DAO を渡して VM 構築
     // -----------------------------
     val app = LocalContext.current.applicationContext as Application
     val context = LocalContext.current
-
-    // Dao に observeAll(): Flow<List<LocationSample>> がある前提
-    val baseFlow: Flow<List<LocationSample>> = remember(context) {
-        AppDatabase.get(context).locationSampleDao().observeAll()
-    }
-
+    val dao = remember(context) { AppDatabase.get(context).locationSampleDao() }
     val selectorVm: SelectorViewModel = viewModel(
-        factory = SelectorViewModel.Factory(
-            app = app,
-            baseFlow = baseFlow,
-            getMillis = { it.createdAt },   // ← あなたの LocationSample の時刻プロパティ
-            getAccuracy = { it.accuracy }   // ← 無ければ { null }
-        )
+        factory = SelectorViewModel.Factory(app = app, dao = dao)
     )
 
-    // ==== 反映ボタンから SelectorViewModel の条件へ反映するヘルパ ====
+    // ====== 入力フィールド（統一フォーム） ======
     val jst = remember { ZoneId.of("Asia/Tokyo") }
-    fun todayStartMillis(): Long =
-        LocalDate.now(jst).atStartOfDay(jst).toInstant().toEpochMilli()
+    val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ROOT) }
+    val hmsFmt  = remember { DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT) }
 
-    // H:mm[:ss] 形式も許容するフォーマッタ
-    val timeFmt = remember {
-        DateTimeFormatterBuilder()
-            .appendValue(ChronoField.HOUR_OF_DAY, 1)  // 1 or 2 桁
-            .appendLiteral(':')
-            .appendValue(ChronoField.MINUTE_OF_HOUR, 2)
-            .optionalStart()
-            .appendLiteral(':')
-            .appendValue(ChronoField.SECOND_OF_MINUTE, 2)
-            .optionalEnd()
-            .toFormatter()
-    }
+    // 既定値：今日の 00:00:00 ～ 現在
+    val now = remember { ZonedDateTime.now(jst) }
+    var fromDate by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
+    var fromHms  by remember { mutableStateOf("00:00:00") }
+    var toDate   by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
+    var toHms    by remember { mutableStateOf(now.toLocalTime().format(hmsFmt)) }
+    var sortOrder by remember { mutableStateOf(SortOrder.NewestFirst) }
+    var countText by remember { mutableStateOf("100") }
+    var intervalSecText by remember { mutableStateOf("3600") } // 0で無効
 
-    fun parseHmsToOffsetMillis(raw: String): Long? {
-        // 全角→半角、前後空白除去
+    // 反映後の固定表示用スナップショット
+    var displayRows by remember { mutableStateOf<List<LocationSample>>(emptyList()) }
+
+    // ====== 変換ユーティリティ ======
+    fun parseDateMillis(text: String): Long? =
+        runCatching { LocalDate.parse(text.trim(), dateFmt).atStartOfDay(jst).toInstant().toEpochMilli() }.getOrNull()
+
+    fun parseHmsToMillisOfDay(raw: String): Long? {
         val t = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
-        if (t.isEmpty()) return null
-        // H:mm[:ss] を柔軟に許容
         val m = Regex("""^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?$""").matchEntire(t) ?: return null
-        val h = m.groupValues[1].toInt()
-        val min = m.groupValues[2].toInt()
-        val sec = m.groupValues.getOrNull(3)?.takeIf { it.isNotEmpty() }?.toInt() ?: 0
-        if (h !in 0..23 || min !in 0..59 || sec !in 0..59) return null
-        val totalSec = h * 3600 + min * 60 + sec
-        return totalSec * 1000L
+        val hh = m.groupValues[1].toInt()
+        val mm = m.groupValues[2].toInt()
+        val ss = m.groupValues.getOrNull(3)?.takeIf { it.isNotEmpty() }?.toInt() ?: 0
+        if (hh !in 0..23 || mm !in 0..59 || ss !in 0..59) return null
+        return (hh * 3600 + mm * 60 + ss) * 1000L
     }
 
-    // ★ ここを suspend に変更し、内部で直接 update する（外側で順序制御しやすくする）
-    suspend fun applySelectorCondition() {
-        val intervalMs = input.intervalSec.trim().toLongOrNull()
-            ?.coerceIn(1, 86_400)
-            ?.times(1000L)
-
-        when (input.mode) {
-            PickupMode.PERIOD -> {
-                val base = todayStartMillis()
-                val from = parseHmsToOffsetMillis(input.startHms)?.let { base + it }
-                val to   = parseHmsToOffsetMillis(input.endHms)?.let { base + it }
-                selectorVm.update { cond ->
-                    cond.copy(
-                        mode = com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition.Mode.ByPeriod,
-                        fromMillis = from,
-                        toMillis = to,
-                        limit = null,
-                        minAccuracyM = cond.minAccuracyM,
-                        intervalMs = intervalMs
-                    )
-                }
-            }
-            PickupMode.COUNT -> {
-                val limit = input.count.trim().toIntOrNull()?.coerceIn(1, 10_000)
-                selectorVm.update { cond ->
-                    cond.copy(
-                        mode = com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition.Mode.ByCount,
-                        fromMillis = null,
-                        toMillis = null,
-                        limit = limit,
-                        minAccuracyM = cond.minAccuracyM,
-                        intervalMs = intervalMs // 件数指定でも間隔を併用したい場合は残す
-                    )
-                }
-            }
-        }
+    fun combine(dateMs: Long?, hmsMs: Long?): Long? {
+        if (dateMs == null) return null
+        val base = Instant.ofEpochMilli(dateMs).atZone(jst).toLocalDate()
+        val lt = hmsMs?.let { LocalTime.ofSecondOfDay(it / 1000) } ?: LocalTime.MIDNIGHT
+        return base.atTime(lt).atZone(jst).toInstant().toEpochMilli()
     }
 
+    fun clampToNow(toMs: Long?): Long? {
+        val nowMs = System.currentTimeMillis()
+        return toMs?.let { minOf(it, nowMs) }
+    }
+
+    // ====== 画面 ======
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // 方式選択
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("方式：", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = input.mode == PickupMode.PERIOD,
-                    onClick = {
-                        vm.updateMode(PickupMode.PERIOD)
-                        hasApplied = false // ← 変更されたので未反映状態に戻す
-                    },
-                    label = { Text("期間指定") }
-                )
-                FilterChip(
-                    selected = input.mode == PickupMode.COUNT,
-                    onClick = {
-                        vm.updateMode(PickupMode.COUNT)
-                        hasApplied = false // ← 変更されたので未反映状態に戻す
-                    },
-                    label = { Text("件数指定") }
-                )
-            }
+        Text("Pickup（統一）", style = MaterialTheme.typography.titleMedium)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = fromDate, onValueChange = { fromDate = it },
+                label = { Text("From 日付 (yyyy/MM/dd)") }, singleLine = true, modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = fromHms, onValueChange = { fromHms = it },
+                label = { Text("From 時刻 (HH:mm:ss)") }, singleLine = true, modifier = Modifier.weight(1f)
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = toDate, onValueChange = { toDate = it },
+                label = { Text("To 日付 (yyyy/MM/dd)") }, singleLine = true, modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = toHms, onValueChange = { toHms = it },
+                label = { Text("To 時刻 (HH:mm:ss)") }, singleLine = true, modifier = Modifier.weight(1f)
+            )
         }
 
-        // 取得間隔
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CountDirectionSelector(
+                value = sortOrder,
+                onChange = { sortOrder = it },
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = countText, onValueChange = { countText = it },
+                label = { Text("件数（上限）") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        // 間隔（秒）
         OutlinedTextField(
-            value = input.intervalSec,
-            onValueChange = {
-                vm.updateIntervalSec(it)
-                hasApplied = false // ← 入力変更時は未反映
-            },
-            label = { Text("間隔（秒） 1..86,400") },
+            value = intervalSecText, onValueChange = { intervalSecText = it },
+            label = { Text("間隔（秒）※0で無効") }, singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
 
-        if (input.mode == PickupMode.PERIOD) {
-            Text("対象は本日 00:00:00 ～ 現在（JST）に自動クリップ。開始・終了はグリッドに対して「含む」です。")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = input.startHms,
-                    onValueChange = {
-                        vm.updateStartHms(it)
-                        hasApplied = false // ← 入力変更時は未反映
-                    },
-                    label = { Text("開始 (HH:mm:ss)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = input.endHms,
-                    onValueChange = {
-                        vm.updateEndHms(it)
-                        hasApplied = false // ← 入力変更時は未反映
-                    },
-                    label = { Text("終了 (HH:mm:ss)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-        } else {
-            // 件数指定：入力のみ（実行は下部の「反映」に統一）
-            OutlinedTextField(
-                value = input.count,
-                onValueChange = {
-                    vm.updateCount(it)
-                    hasApplied = false // ← 入力変更時は未反映
-                },
-                label = { Text("件数 (1..10000)") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        // 実行行：反映のみ（反映時に selector 条件を同期 → スナップショット取得）
+        // 実行（反映）
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = {
                 scope.launch {
-                    // 1) 条件を保存（suspend化したので順序が担保される）
-                    applySelectorCondition()
-                    // 2) 1回だけ結果を取得して固定する
-                    val snapshot = selectorVm.rows.first()
-                    displayRows = snapshot
-                    hasApplied = true
-                }
+                    // 1) 入力→ミリ秒
+                    val fromDateMs = parseDateMillis(fromDate)
+                    val toDateMs = parseDateMillis(toDate)
+                    val fromHmsMs = parseHmsToMillisOfDay(fromHms) ?: 0L
+                    val toHmsMs = parseHmsToMillisOfDay(toHms) ?: 0L
 
-                // 既存の reflect() ロジック（件数不足アラートなど）は従来通り
-                vm.reflect()
-                showShortageWarn = (vm.uiState.value as? PickupUiState.Done)?.shortage == true
+                    var fromMs = combine(fromDateMs, fromHmsMs)
+                    var toMs = combine(toDateMs, toHmsMs)
+                    toMs = clampToNow(toMs)
+
+                    // From>To は入れ替え（UI下流は必ず From<To）
+                    if (fromMs != null && toMs != null && fromMs > toMs) {
+                        val tmp = fromMs; fromMs = toMs; toMs = tmp
+                    }
+
+                    val limit = countText.trim().toIntOrNull()?.coerceIn(1, 100_000) ?: 100
+                    val intervalSec = intervalSecText.trim().toIntOrNull()?.coerceIn(0, 86_400) ?: 0
+                    val intervalMs = if (intervalSec > 0) intervalSec * 1000L else null
+
+                    // 2) Prefs 更新（SelectorViewModel 内の Flow が反応）
+                    selectorVm.update { cond ->
+                        cond.copy(
+                            // Mode は ByPeriod 固定（統一画面）
+                            mode = SelectorCondition.Mode.ByPeriod,
+                            fromMillis = fromMs,
+                            toMillis = toMs,
+                            limit = limit,
+                            // 既存互換：ms と seconds のどちらでも動く（usecase 側で seconds 優先）
+                            intervalMs = intervalMs,
+                            // 参考で HMS も保存（下位では使わない）
+                            fromHms = fromHms, toHms = toHms,
+                            sortOrder = sortOrder
+                        )
+                    }
+
+                    // 3) 一度だけ結果を固定表示
+                    // 反映内の最後、displayRows = selectorVm.rows.first() の直後など
+                    displayRows = when (sortOrder) {
+                        SortOrder.NewestFirst -> displayRows.sortedByDescending { it.createdAt } // フィールド名は実体に合わせる
+                        SortOrder.OldestFirst -> displayRows.sortedBy { it.createdAt }
+                    }                }
             }) { Text("反映") }
-
-            // クリアが必要なら ViewModel 側に API を追加
-            // TextButton(onClick = { /* vm.clear(); also reset selector if needed */ }) { Text("クリア") }
         }
 
-        // ▼▼▼ リスト描画は「反映済み」のときだけ & スナップショットを使う ▼▼▼
-        if (hasApplied) {
-            PickupListBySamples(samples = displayRows)
-        } else {
-            PickupListBySamples(samples = emptyList())
-        }
-
-        if (showShortageWarn) {
-            AlertDialog(
-                onDismissRequest = { showShortageWarn = false },
-                confirmButton = {
-                    TextButton(onClick = { showShortageWarn = false }) { Text("OK") }
-                },
-                title = { Text("データが不足しています") },
-                text = { Text("指定件数に満たないため、取得できた最大件数で表示しています。") }
-            )
-        }
+        // 結果
+        PickupListBySamples(samples = displayRows)
     }
 }
 
+/* ====== リスト ====== */
 @Composable
 private fun PickupListBySamples(samples: List<LocationSample>) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
+    LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         itemsIndexed(samples) { idx, sample ->
             PickupRowFromSample(index = idx + 1, sample = sample)
             Divider()
@@ -277,10 +205,7 @@ private fun PickupListBySamples(samples: List<LocationSample>) {
     }
 }
 
-/* =============================
-   表示行：LocationHistoryList と見た目を完全一致
-   （Formatters のIFをそのまま使用）
-   ============================= */
+/* ====== 行表示（既存 Formatters に合わせ）====== */
 @Composable
 private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
     val time   = sample?.let { Formatters.timeJst(it.createdAt) } ?: "-"
@@ -294,77 +219,90 @@ private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
     val cn0    = sample?.let { Formatters.cn0Text(it.gnssCn0Mean) } ?: "-"
 
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Time")
-            Text(time, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(6.dp)); BoldLabel("Time"); Text(time, style = MaterialTheme.typography.bodyMedium)
         }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.SettingsInputAntenna, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Provider")
-            Text(prov, style = MaterialTheme.typography.bodyMedium)
-
+            Spacer(Modifier.width(6.dp)); BoldLabel("Provider"); Text(prov, style = MaterialTheme.typography.bodyMedium)
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
             Icon(Icons.Outlined.BatteryFull, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Battery")
-            Text(bat, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(6.dp)); BoldLabel("Battery"); Text(bat, style = MaterialTheme.typography.bodyMedium)
         }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Location")
-            Text(loc, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(6.dp)); BoldLabel("Location"); Text(loc, style = MaterialTheme.typography.bodyMedium)
         }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.CompassCalibration, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Heading")
-            Text(head, style = MaterialTheme.typography.bodyMedium)
-
+            Spacer(Modifier.width(6.dp)); BoldLabel("Heading"); Text(head, style = MaterialTheme.typography.bodyMedium)
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
             Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Course")
-            Text(course, style = MaterialTheme.typography.bodyMedium)
-
+            Spacer(Modifier.width(6.dp)); BoldLabel("Course"); Text(course, style = MaterialTheme.typography.bodyMedium)
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
             Icon(Icons.Outlined.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Speed")
-            Text(speed, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(6.dp)); BoldLabel("Speed"); Text(speed, style = MaterialTheme.typography.bodyMedium)
         }
-
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.SatelliteAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("GNSS")
-            Text(gnss, style = MaterialTheme.typography.bodyMedium)
-
+            Spacer(Modifier.width(6.dp)); BoldLabel("GNSS"); Text(gnss, style = MaterialTheme.typography.bodyMedium)
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
             Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("C/N0")
-            Text(cn0, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.width(6.dp)); BoldLabel("C/N0"); Text(cn0, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
 
-@Composable
-private fun BoldLabel(label: String) {
+@Composable private fun BoldLabel(label: String) {
     Text("$label : ", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CountDirectionSelector(
+    value: com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder,
+    onChange: (com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val label = if (value == com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.NewestFirst)
+        "新しい方から優先" else "古い方から優先"
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = label,
+            onValueChange = {},
+            label = { Text("件数の適用方向") },     // ← 要件どおり名称変更
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text("新しい方から優先") },
+                onClick = {
+                    onChange(com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.NewestFirst)
+                    expanded = false
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("古い方から優先") },
+                onClick = {
+                    onChange(com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.OldestFirst)
+                    expanded = false
+                }
+            )
+        }
+    }
 }

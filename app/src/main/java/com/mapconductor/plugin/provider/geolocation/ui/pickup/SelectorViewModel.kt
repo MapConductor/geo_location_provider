@@ -6,49 +6,46 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation._dataselector.prefs.SelectorPrefs
-import com.mapconductor.plugin.provider.geolocation._dataselector.repository.SelectorRepository
-import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectedRows
-import kotlinx.coroutines.flow.Flow
+import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectRows
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 
 /**
- * 厳密案：ViewModel は app 側のみ。
- * dataselector は純ロジック（Prefs/Repository/UseCase）のみを提供。
+ * ViewModel は app 側のみ。
+ * dataselector は Prefs / UseCase（BuildSelectRows）だけを提供。
  */
 class SelectorViewModel(
     app: Application,
-    /** 既存の「全件 Flow<List<LocationSample>>」を注入（Daoや既存VMから渡す） */
-    baseFlow: Flow<List<LocationSample>>,
-    /** LocationSample から比較用のエポックミリ秒を取り出す関数（例：{ it.recordedAt }） */
-    getMillis: (LocationSample) -> Long,
-    /** LocationSample から精度(m)を取り出す関数（無い場合は { null }） */
-    getAccuracy: (LocationSample) -> Float?
+    dao: LocationSampleDao,               // ★ 必要なのは DAO だけ
 ) : AndroidViewModel(app) {
 
     private val prefs = SelectorPrefs(app.applicationContext)
+    private val buildSelectRows = BuildSelectRows(dao)   // ★ 正しい依存性注入
 
-    // Repository はジェネリック版（getMillis / getAccuracy を注入）想定
-    private val repo = SelectorRepository(
-        baseFlow = baseFlow,                // Flow<List<LocationSample>>
-        getMillis = { it.createdAt },       // ← あなたの時刻プロパティに合わせる
-        getAccuracy = { it.accuracy }       // ← 無ければ { null }
-    )
-    private val buildSelectedRows = BuildSelectedRows(prefs, repo)
-
-    /** 画面が購読する抽出済みリスト */
-    val rows: StateFlow<List<LocationSample>> =
-        buildSelectedRows()
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    /** 現在の条件（必要ならUIで参照） */
+    /** 現在の条件（UIから参照/編集） */
     val condition: StateFlow<SelectorCondition> =
-        prefs.condition.stateIn(viewModelScope, SharingStarted.Eagerly, SelectorCondition())
+        prefs.condition.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.Eagerly,
+            initialValue = SelectorCondition()
+        )
 
-    /** 条件更新（期間/件数/精度） */
+    /** 条件に応じた抽出済みリスト（画面が購読） */
+    val rows: StateFlow<List<LocationSample>> =
+        condition
+            .flatMapLatest { cond -> buildSelectRows(cond) }   // ★ invoke(cond) は Flow<List<…>>
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList()
+            )
+
+    /** 条件更新（期間/件数/精度/間隔/並び順など） */
     suspend fun update(block: (SelectorCondition) -> SelectorCondition) {
         prefs.update(block)
     }
@@ -56,13 +53,11 @@ class SelectorViewModel(
     // ------- Factory -------
     class Factory(
         private val app: Application,
-        private val baseFlow: Flow<List<LocationSample>>,
-        private val getMillis: (LocationSample) -> Long,
-        private val getAccuracy: (LocationSample) -> Float?
+        private val dao: LocationSampleDao
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SelectorViewModel(app, baseFlow, getMillis, getAccuracy) as T
+            return SelectorViewModel(app, dao) as T
         }
     }
 }
