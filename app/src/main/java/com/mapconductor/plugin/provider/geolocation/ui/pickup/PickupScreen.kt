@@ -1,7 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.ui.pickup
 
 import android.app.Application
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -29,6 +28,7 @@ import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 
 @Composable
 fun PickupScreen() {
@@ -167,25 +167,26 @@ fun PickupScreen() {
                     // 2) Prefs 更新（SelectorViewModel 内の Flow が反応）
                     selectorVm.update { cond ->
                         cond.copy(
-                            // Mode は ByPeriod 固定（統一画面）
                             mode = SelectorCondition.Mode.ByPeriod,
                             fromMillis = fromMs,
                             toMillis = toMs,
                             limit = limit,
-                            // 既存互換：ms と seconds のどちらでも動く（usecase 側で seconds 優先）
                             intervalMs = intervalMs,
-                            // 参考で HMS も保存（下位では使わない）
-                            fromHms = fromHms, toHms = toHms,
+                            fromHms = fromHms,
+                            toHms = toHms,
                             sortOrder = sortOrder
                         )
                     }
 
+                    val once = selectorVm.rows.first()
+
                     // 3) 一度だけ結果を固定表示
                     // 反映内の最後、displayRows = selectorVm.rows.first() の直後など
                     displayRows = when (sortOrder) {
-                        SortOrder.NewestFirst -> displayRows.sortedByDescending { it.createdAt } // フィールド名は実体に合わせる
-                        SortOrder.OldestFirst -> displayRows.sortedBy { it.createdAt }
-                    }                }
+                        SortOrder.NewestFirst -> once.sortedByDescending { it.createdAt } // フィールド名は実体に合わせる
+                        SortOrder.OldestFirst -> once.sortedBy { it.createdAt }
+                    }
+                }
             }) { Text("反映") }
         }
 
@@ -200,7 +201,7 @@ private fun PickupListBySamples(samples: List<LocationSample>) {
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         itemsIndexed(samples) { idx, sample ->
             PickupRowFromSample(index = idx + 1, sample = sample)
-            Divider()
+            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
         }
     }
 }

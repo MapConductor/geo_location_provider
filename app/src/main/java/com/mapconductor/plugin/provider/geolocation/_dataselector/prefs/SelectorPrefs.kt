@@ -29,7 +29,6 @@ class SelectorPrefs(private val appContext: Context) {
         val FROM_HMS = stringPreferencesKey("from_hms")
         val TO_HMS = stringPreferencesKey("to_hms")
         val SORT_ORDER = stringPreferencesKey("sort_order") // NewestFirst / OldestFirst
-        val INTERVAL_SEC = intPreferencesKey("interval_sec")
     }
 
     /** 復元：新キーがあれば使い、無ければ旧キーのみで組み立てる（後方互換） */

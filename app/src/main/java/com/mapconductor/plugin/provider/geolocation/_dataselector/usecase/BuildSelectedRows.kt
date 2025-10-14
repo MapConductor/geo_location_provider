@@ -25,7 +25,7 @@ class BuildSelectRows(
     private val dao: LocationSampleDao
 ) {
     /** LocationSample の時刻取り出し。プロジェクトの実フィールド名に合わせてここだけ変更してください。 */
-    private fun ts(s: LocationSample): Long = (s.createdAt / 1000L)
+    private fun ts(s: LocationSample): Long = s.createdAt
 
     operator fun invoke(cond: SelectorCondition): Flow<List<LocationSample>> {
         val from = cond.fromMillis
