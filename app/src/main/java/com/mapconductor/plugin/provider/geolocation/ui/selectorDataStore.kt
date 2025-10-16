@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation._dataselector.prefs
+package com.mapconductor.plugin.provider.geolocation.ui
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
@@ -12,25 +12,25 @@ import com.mapconductor.plugin.provider.geolocation._dataselector.condition.Sort
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
-// DataStore
+// DataStore インスタンス
 private val Context.selectorDataStore by preferencesDataStore(name = "selector_prefs")
 
 class SelectorPrefs(private val appContext: Context) {
 
     private object K {
-        // 基本
+        // 既存・基本
         val FROM = longPreferencesKey("from")
         val TO = longPreferencesKey("to")
         val LIMIT = intPreferencesKey("limit")
         val MIN_ACC = floatPreferencesKey("min_acc")
 
-        // interval：新仕様は「秒」を保存
+        // interval は「秒」を正とする（新仕様）
         val INTERVAL_SEC = longPreferencesKey("interval_sec")
 
-        // 後方互換（過去に ms を保存していた可能性）
+        // 後方互換（過去は ms 保存していた可能性）
         val LEGACY_INTERVAL_MS = longPreferencesKey("interval_ms")
 
-        // 画面補助（任意：条件本体には含めない）
+        // 画面表示用の補助（任意・SelectorCondition には含めない）
         val FROM_HMS = stringPreferencesKey("from_hms")
         val TO_HMS = stringPreferencesKey("to_hms")
 
@@ -38,7 +38,7 @@ class SelectorPrefs(private val appContext: Context) {
         val SORT_ORDER = stringPreferencesKey("sort_order") // NewestFirst / OldestFirst
     }
 
-    /** 条件の復元（LEGACY: interval_ms を秒に変換して読み込み） */
+    /** 条件の復元（後方互換：interval_ms→秒に変換して読む） */
     val condition: Flow<SelectorCondition> =
         appContext.selectorDataStore.data.map { p ->
             val order = p[K.SORT_ORDER]
@@ -58,17 +58,18 @@ class SelectorPrefs(private val appContext: Context) {
             )
         }
 
-    /** 画面補助（任意） */
+    /** 画面補助：HH:mm:ss 文字列の保存値（任意） */
     val fromHms: Flow<String?> =
         appContext.selectorDataStore.data.map { it[K.FROM_HMS] }
+
     val toHms: Flow<String?> =
         appContext.selectorDataStore.data.map { it[K.TO_HMS] }
 
     /**
      * 条件の更新。
      * - null の項目は削除
-     * - interval は「秒」で保存（旧 ms キーはクリア）
-     * - fromHms/toHms は任意の補助値（条件本体とは独立）
+     * - interval は「秒」で保存（旧 ms キーは削除）
+     * - fromHms/toHms は任意で同時更新可（条件本体には含めない）
      */
     suspend fun update(
         block: (SelectorCondition) -> SelectorCondition,
@@ -76,7 +77,7 @@ class SelectorPrefs(private val appContext: Context) {
         toHms: String? = null
     ) {
         appContext.selectorDataStore.edit { p ->
-            // 現在値を復元（後方互換あり）
+            // 現在値（後方互換あり）を読み出し
             val currentOrder = p[K.SORT_ORDER]
                 ?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
                 ?: SortOrder.NewestFirst
@@ -107,7 +108,7 @@ class SelectorPrefs(private val appContext: Context) {
             // 並び順
             p[K.SORT_ORDER] = next.order.name
 
-            // 補助値
+            // 画面補助（任意）
             fromHms?.let { if (it.isNotBlank()) p[K.FROM_HMS] = it else p.remove(K.FROM_HMS) }
             toHms?.let { if (it.isNotBlank()) p[K.TO_HMS] = it else p.remove(K.TO_HMS) }
         }

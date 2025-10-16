@@ -87,7 +87,9 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
         val (okS, startMsRaw) = parseHmsToTodayMillis(startHms)
         val (okE, endMsRaw) = parseHmsToTodayMillis(endHms)
         if (!okS || !okE) {
-            _uiState.value = PickupUiState.Error("時刻は hh:mm:ss 形式で入力してください。")
+            _uiState.value = PickupUiState.Error(
+                "時刻は HH:mm / HH:mm:ss / HH:mm:ss.SSS のいずれかで入力してください。"
+            )
             return
         }
         val todayStart = todayStartMs()
@@ -195,17 +197,29 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
     private fun todayStartMs(): Long =
         LocalDate.now(zoneId).atStartOfDay(zoneId).toInstant().toEpochMilli()
 
-    /** "hh:mm:ss" -> 今日の同時刻の epochMillis（JST） */
+    /** "HH:mm[:ss[.SSS]]" を今日(JST)の同時刻の epochMillis に変換。 */
     private fun parseHmsToTodayMillis(hms: String): Pair<Boolean, Long> {
-        val parts = hms.split(":")
-        if (parts.size != 3) return false to 0L
-        val h = parts[0].toIntOrNull() ?: return false to 0L
-        val m = parts[1].toIntOrNull() ?: return false to 0L
-        val s = parts[2].toIntOrNull() ?: return false to 0L
-        if (h !in 0..23 || m !in 0..59 || s !in 0..59) return false to 0L
+        val t = hms.trim()
+        if (t.isEmpty()) return false to 0L
+
+        // 許容フォーマット：HH:mm / HH:mm:ss / HH:mm:ss.S / .SS / .SSS
+        val formats = listOf(
+            DateTimeFormatter.ofPattern("H:mm"),
+            DateTimeFormatter.ofPattern("H:mm:ss"),
+            DateTimeFormatter.ofPattern("H:mm:ss.S"),
+            DateTimeFormatter.ofPattern("H:mm:ss.SS"),
+            DateTimeFormatter.ofPattern("H:mm:ss.SSS")
+        )
+
+        val localTime: LocalTime = formats.firstNotNullOfOrNull { fmt ->
+            runCatching { LocalTime.parse(t, fmt) }.getOrNull()
+        } ?: return false to 0L
 
         val today = LocalDate.now(zoneId)
-        val zdt = ZonedDateTime.of(today.year, today.monthValue, today.dayOfMonth, h, m, s, 0, zoneId)
+        val zdt = ZonedDateTime.of(
+            today.year, today.monthValue, today.dayOfMonth,
+            localTime.hour, localTime.minute, localTime.second, localTime.nano, zoneId
+        )
         return true to zdt.toInstant().toEpochMilli()
     }
 

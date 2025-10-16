@@ -1,86 +1,114 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.repository
 
+import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSampleDao
+import com.mapconductor.plugin.provider.geolocation._dataselector.algorithm.*
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * フィールド名に依存しないよう、時刻/精度の取得関数を注入するジェネリック実装。
+ * LocationSampleDao を用いた抽出/補完の実装。
+ * - 今日限定のクリップは行わない（from/to はそのまま使う。null は無制限）
+ * - from > to は正規化（入れ替え）
+ * - intervalSec が null → ダイレクト抽出（グリッド無し）
+ * - intervalSec が指定 → グリッド吸着（±T/2、欠測は sample=null）
  */
-class SelectorRepository<T>(
-    private val baseFlow: Flow<List<T>>,
-    private val getMillis: (T) -> Long,
-    private val getAccuracy: (T) -> Float?
+class SelectorRepository(
+    private val dao: LocationSampleDao
 ) {
-    fun rows(conditionFlow: Flow<SelectorCondition>): Flow<List<T>> =
-        combine(baseFlow, conditionFlow) { base, cond ->
-            var list = base
+    suspend fun select(condRaw: SelectorCondition): List<SelectedSlot> {
+        val cond = condRaw.normalized()
 
-            // 1) 精度フィルタ
-            cond.minAccuracyM?.let { acc ->
-                list = list.filter { sample ->
-                    val a = getAccuracy(sample)
-                    a == null || a <= acc
-                }
-            }
+        val from = cond.fromMillis
+        val to   = cond.toMillis
 
-            // 2) 期間/件数
-            when (cond.mode) {
-                SelectorCondition.Mode.ByPeriod -> {
-                    val from = cond.fromMillis ?: Long.MIN_VALUE
-                    val to   = cond.toMillis ?: Long.MAX_VALUE
-                    val (lo, hi) = if (from <= to) from to to else to to from
+        // ダイレクト抽出（グリッド無し）
+        if (cond.intervalSec == null) {
+            val asc = fetchAsc(from, to)       // DAO は昇順返却
+            val filtered = filterByAccuracy(asc, cond.minAccuracy)
 
-                    // 2-1) 期間
-                    list = list
-                        .asSequence()
-                        .filter { sample ->
-                            val t = getMillis(sample)
-                            t in lo..hi
-                        }
-                        .sortedByDescending { sample -> getMillis(sample) }
-                        .toList()
-
-                    // 2-2) 間引き（intervalMs）※指定があれば適用
-                    cond.intervalMs?.takeIf { it > 0 }?.let { interval ->
-                        list = thinByIntervalDescending(list, interval)
-                    }
-                }
-
-                SelectorCondition.Mode.ByCount -> {
-                    // 2-1) 降順ソート
-                    list = list
-                        .asSequence()
-                        .sortedByDescending { sample -> getMillis(sample) }
-                        .toList()
-
-                    // 2-2) 間引き（intervalMs）※ByCountでも適用
-                    cond.intervalMs?.takeIf { it > 0 }?.let { interval ->
-                        list = thinByIntervalDescending(list, interval)
-                    }
-
-                    // 2-3) 件数でトリミング
-                    val n = (cond.limit ?: 100).coerceAtLeast(1)
-                    list = list.take(n)
-                }
-            }
-            list
+            val limited = limitAndOrderForDirect(filtered, cond)
+            return directToSlots(limited)
         }
+
+        // グリッド吸着（from/to/T が揃っていることを前提）
+        val T = cond.intervalSec.coerceAtLeast(1L) * 1000L
+        val W = T / 2L
+
+        // from/to のどちらかが null の場合、グリッドを安全に組めない → ダイレクトへフォールバック
+        if (from == null || to == null) {
+            val asc = fetchAsc(from, to)
+            val filtered = filterByAccuracy(asc, cond.minAccuracy)
+            val limited = limitAndOrderForDirect(filtered, cond)
+            return directToSlots(limited)
+        }
+
+        // グリッド列（両端含む）
+        val targets = buildTargetsInclusive(from, to, T)
+
+        // 候補の一括取得： [from-W, to+W)  ※ DAO は半開区間 toExcl のため +1ms で inclusive
+        val fromQ = from - W
+        val toQExcl = (to + W) + 1L
+
+        val ascAll = dao.findBetween(fromQ, toQExcl)
+
+        // 精度で前処理
+        val cand = filterByAccuracy(ascAll, cond.minAccuracy)
+
+        // 吸着
+        var slots = snapToGrid(cand, targets, W)
+
+        // 最終順序
+        when (cond.order) {
+            SortOrder.OldestFirst -> {} // 既に昇順（targets 自体が from→to）
+            SortOrder.NewestFirst -> slots = slots.asReversed()
+        }
+
+        // 最終件数制御（欠測行も件数にカウント）
+        val maxCount = effectiveLimit(cond.limit)
+        return if (maxCount != null) slots.take(maxCount) else slots
+    }
+
+    // ----------------------
+    // 内部ヘルパ
+    // ----------------------
+    private suspend fun fetchAsc(from: Long?, to: Long?): List<LocationSample> {
+        val f = from ?: Long.MIN_VALUE
+        val tExcl = ((to ?: Long.MAX_VALUE - 1L) + 1L) // 半開区間の上端
+        return dao.findBetween(f, tExcl)
+    }
+
+    private fun filterByAccuracy(
+        input: List<LocationSample>,
+        maxAcc: Float?
+    ): List<LocationSample> {
+        maxAcc ?: return input
+        return input.filter { it.accuracy <= maxAcc }
+    }
 
     /**
-     * すでに「降順（新しい→古い）」に並んでいる前提で、intervalMs 以上の間隔を空けて採用する。
+     * ダイレクト抽出の最終順序・件数制御。
+     * - DAO は昇順返却（OldestFirst）。NewestFirst の場合は末尾から取る。
+     * - limit は最終出力件数（null/<=0 なら無制限）
      */
-    private fun thinByIntervalDescending(list: List<T>, intervalMs: Long): List<T> {
-        if (list.isEmpty()) return list
-        val out = ArrayList<T>(list.size)
-        var lastAccepted: Long? = null
-        for (s in list) {
-            val t = getMillis(s)
-            if (lastAccepted == null || (lastAccepted - t) >= intervalMs) {
-                out += s
-                lastAccepted = t
+    private fun limitAndOrderForDirect(
+        asc: List<LocationSample>,
+        cond: SelectorCondition
+    ): List<LocationSample> {
+        val maxCount = effectiveLimit(cond.limit)
+        return when (cond.order) {
+            SortOrder.OldestFirst -> {
+                if (maxCount != null) asc.take(maxCount) else asc
+            }
+            SortOrder.NewestFirst -> {
+                val src = if (maxCount != null) {
+                    if (asc.size <= maxCount) asc else asc.takeLast(maxCount)
+                } else asc
+                src.asReversed()
             }
         }
-        return out
     }
 }

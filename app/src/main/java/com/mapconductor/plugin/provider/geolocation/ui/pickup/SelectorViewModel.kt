@@ -5,19 +5,20 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.prefs.SelectorPrefs
-import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectRows
+import com.mapconductor.plugin.provider.geolocation._dataselector.repository.SelectorRepository
+import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectedSlots
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 
 /**
  * ViewModel は app 側のみ。
- * dataselector は Prefs / UseCase（BuildSelectRows）だけを提供。
+ * dataselector は Prefs / Repository / UseCase(BuildSelectedSlots) を提供。
  */
 class SelectorViewModel(
     app: Application,
@@ -25,7 +26,8 @@ class SelectorViewModel(
 ) : AndroidViewModel(app) {
 
     private val prefs = SelectorPrefs(app.applicationContext)
-    private val buildSelectRows = BuildSelectRows(dao)   // ★ 正しい依存性注入
+    private val repo = SelectorRepository(dao)
+    private val buildSelectedSlots = BuildSelectedSlots(repo)
 
     /** 現在の条件（UIから参照/編集） */
     val condition: StateFlow<SelectorCondition> =
@@ -35,10 +37,10 @@ class SelectorViewModel(
             initialValue = SelectorCondition()
         )
 
-    /** 条件に応じた抽出済みリスト（画面が購読） */
-    val rows: StateFlow<List<LocationSample>> =
+    /** 条件に応じた抽出済みスロット（欠測補完を含む） */
+    val slots: StateFlow<List<SelectedSlot>> =
         condition
-            .flatMapLatest { cond -> buildSelectRows(cond) }   // ★ invoke(cond) は Flow<List<…>>
+            .mapLatest { cond -> buildSelectedSlots(cond) } // suspend -> List を Flow 化
             .stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.WhileSubscribed(5_000),

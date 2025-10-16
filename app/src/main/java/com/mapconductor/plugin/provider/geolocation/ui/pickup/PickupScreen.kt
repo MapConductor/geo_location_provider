@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -13,36 +15,31 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
+import com.mapconductor.plugin.provider.geolocation._dataselector.repository.SelectorRepository
+import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectedSlots
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.Normalizer
 import java.time.*
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 
 @Composable
 fun PickupScreen() {
     val scope = rememberCoroutineScope()
 
     // -----------------------------
-    // ▼ dataselector：DAO を渡して VM 構築
+    // ▼ dataselector：DAO → Repository → UseCase
     // -----------------------------
     val app = LocalContext.current.applicationContext as Application
-    val context = LocalContext.current
-    val dao = remember(context) { AppDatabase.get(context).locationSampleDao() }
-    val selectorVm: SelectorViewModel = viewModel(
-        factory = SelectorViewModel.Factory(app = app, dao = dao)
-    )
+    val dao = remember { AppDatabase.get(app).locationSampleDao() }
+    val repo = remember { SelectorRepository(dao) }
+    val buildSelectedSlots = remember { BuildSelectedSlots(repo) }
 
     // ====== 入力フィールド（統一フォーム） ======
     val jst = remember { ZoneId.of("Asia/Tokyo") }
@@ -59,8 +56,8 @@ fun PickupScreen() {
     var countText by remember { mutableStateOf("100") }
     var intervalSecText by remember { mutableStateOf("3600") } // 0で無効
 
-    // 反映後の固定表示用スナップショット
-    var displayRows by remember { mutableStateOf<List<LocationSample>>(emptyList()) }
+    // 反映後の固定表示用スナップショット（SelectedSlot = 欠測も行として保持）
+    var displaySlots by remember { mutableStateOf<List<SelectedSlot>>(emptyList()) }
 
     // ====== 変換ユーティリティ ======
     fun parseDateMillis(text: String): Long? =
@@ -155,60 +152,53 @@ fun PickupScreen() {
                     var toMs = combine(toDateMs, toHmsMs)
                     toMs = clampToNow(toMs)
 
-                    // From>To は入れ替え（UI下流は必ず From<To）
+                    // From>To は入れ替え（Repository 側でも normalized() するが二重でも安全）
                     if (fromMs != null && toMs != null && fromMs > toMs) {
                         val tmp = fromMs; fromMs = toMs; toMs = tmp
                     }
 
                     val limit = countText.trim().toIntOrNull()?.coerceIn(1, 100_000) ?: 100
                     val intervalSec = intervalSecText.trim().toIntOrNull()?.coerceIn(0, 86_400) ?: 0
-                    val intervalMs = if (intervalSec > 0) intervalSec * 1000L else null
+                    val interval = if (intervalSec > 0) intervalSec.toLong() else null
 
-                    // 2) Prefs 更新（SelectorViewModel 内の Flow が反応）
-                    selectorVm.update { cond ->
-                        cond.copy(
-                            mode = SelectorCondition.Mode.ByPeriod,
+                    // 2) UseCase 実行（欠測は SelectedSlot.sample == null）
+                    val slots = buildSelectedSlots(
+                        SelectorCondition(
                             fromMillis = fromMs,
                             toMillis = toMs,
+                            intervalSec = interval,   // null→ダイレクト / 非null→グリッド吸着
                             limit = limit,
-                            intervalMs = intervalMs,
-                            fromHms = fromHms,
-                            toHms = toHms,
-                            sortOrder = sortOrder
+                            minAccuracy = null,        // 必要なら入力欄を用意
+                            order = sortOrder
                         )
-                    }
+                    )
 
-                    val once = selectorVm.rows.first()
-
-                    // 3) 一度だけ結果を固定表示
-                    // 反映内の最後、displayRows = selectorVm.rows.first() の直後など
-                    displayRows = when (sortOrder) {
-                        SortOrder.NewestFirst -> once.sortedByDescending { it.createdAt } // フィールド名は実体に合わせる
-                        SortOrder.OldestFirst -> once.sortedBy { it.createdAt }
-                    }
+                    // 3) 結果を固定表示
+                    displaySlots = slots
                 }
             }) { Text("反映") }
         }
 
         // 結果
-        PickupListBySamples(samples = displayRows)
+        PickupListBySlots(slots = displaySlots)
     }
 }
 
-/* ====== リスト ====== */
+/* ====== リスト（SelectedSlot = 欠測も含む） ====== */
 @Composable
-private fun PickupListBySamples(samples: List<LocationSample>) {
+private fun PickupListBySlots(slots: List<SelectedSlot>) {
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        itemsIndexed(samples) { idx, sample ->
-            PickupRowFromSample(index = idx + 1, sample = sample)
-            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+        itemsIndexed(slots) { idx, slot ->
+            PickupRowFromSlot(index = idx + 1, slot = slot)
+            Divider()
         }
     }
 }
 
-/* ====== 行表示（既存 Formatters に合わせ）====== */
+/* ====== 行表示（フォーマットは既存 Formatters を使用）====== */
 @Composable
-private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
+private fun PickupRowFromSlot(index: Int, slot: SelectedSlot) {
+    val sample: LocationSample? = slot.sample
     val time   = sample?.let { Formatters.timeJst(it.createdAt) } ?: "-"
     val prov   = sample?.let { Formatters.providerText(it.provider) } ?: "-"
     val bat    = sample?.let { Formatters.batteryText(it.batteryPct, it.isCharging) } ?: "-"
@@ -223,6 +213,25 @@ private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
+        // 理想時刻（グリッド）と Δ 表示（sample がある場合のみ）
+        val idealJst = Formatters.timeJst(slot.idealMs)
+        val delta    = slot.deltaMs?.let { d ->
+            val sign = if (d >= 0) "+" else "-"
+            val ad = kotlin.math.abs(d)
+            val sec = ad / 1000
+            "$sign${sec}s"
+        } ?: null
+
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp)); BoldLabel("Ideal"); Text(idealJst, style = MaterialTheme.typography.bodyMedium)
+            if (delta != null) {
+                Spacer(Modifier.width(12.dp))
+                Icon(Icons.Outlined.Timeline, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp)); BoldLabel("Δ"); Text(delta, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp)); BoldLabel("Time"); Text(time, style = MaterialTheme.typography.bodyMedium)
@@ -265,13 +274,12 @@ private fun PickupRowFromSample(index: Int, sample: LocationSample?) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CountDirectionSelector(
-    value: com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder,
-    onChange: (com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder) -> Unit,
+    value: SortOrder,
+    onChange: (SortOrder) -> Unit,
     modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val label = if (value == com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.NewestFirst)
-        "新しい方から優先" else "古い方から優先"
+    val label = if (value == SortOrder.NewestFirst) "新しい方から優先" else "古い方から優先"
 
     ExposedDropdownMenuBox(
         expanded = expanded,
@@ -281,7 +289,7 @@ private fun CountDirectionSelector(
         OutlinedTextField(
             value = label,
             onValueChange = {},
-            label = { Text("件数の適用方向") },     // ← 要件どおり名称変更
+            label = { Text("件数の適用方向") },
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier.menuAnchor().fillMaxWidth()
@@ -293,14 +301,14 @@ private fun CountDirectionSelector(
             DropdownMenuItem(
                 text = { Text("新しい方から優先") },
                 onClick = {
-                    onChange(com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.NewestFirst)
+                    onChange(SortOrder.NewestFirst)
                     expanded = false
                 }
             )
             DropdownMenuItem(
                 text = { Text("古い方から優先") },
                 onClick = {
-                    onChange(com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder.OldestFirst)
+                    onChange(SortOrder.OldestFirst)
                     expanded = false
                 }
             )

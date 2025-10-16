@@ -1,31 +1,49 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.condition
 
-/** 表示順（結果の並び） */
-enum class SortOrder { NewestFirst, OldestFirst }
+import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
 
 /**
- * 抽出条件：
- *  - 期間（fromMillis < toMillis は UI層で正規化済み前提）
- *  - 並び順
- *  - 件数（上限；Hit＜Limit の場合は全件＝自然に Hit 件）
- *  - 間隔（秒）：null/<=0 で「間隔なし」。>0 で「ターゲット最近傍（同距離は古い方）」を適用
+ * データ抽出の条件。
+ *
+ * - fromMillis/toMillis はどちらか一方だけでも可（null は無制限）
+ * - intervalSec が null の場合は「ダイレクト抽出」（グリッド無し）
+ * - intervalSec が指定された場合は「グリッド吸着」（±T/2 窓、欠測は sample=null）
+ * - limit は 1 以上で有効。null/<=0 は「無制限」
+ * - minAccuracy は「この値以下の精度のみ許可」（null で無制限）
+ * - order は「最終出力の並び」(OldestFirst/NewestFirst)
  */
 data class SelectorCondition(
-    val mode: Mode = Mode.ByPeriod,
     val fromMillis: Long? = null,
     val toMillis: Long? = null,
+    val intervalSec: Long? = null,
     val limit: Int? = null,
-    val minAccuracyM: Float? = null,
-    val intervalMs: Long? = null,
-    val fromHms: String? = null,    // 記録用（解析には未使用）
-    val toHms: String? = null,      // 記録用（解析には未使用）
-    val sortOrder: SortOrder = SortOrder.NewestFirst
+    val minAccuracy: Float? = null,
+    val order: SortOrder = SortOrder.OldestFirst
 ) {
-    enum class Mode { ByPeriod, ByCount }
+    /** 両端があり、かつ from > to の場合は入れ替える */
+    fun normalized(): SelectorCondition {
+        val f = fromMillis
+        val t = toMillis
+        return if (f != null && t != null && f > t) copy(fromMillis = t, toMillis = f) else this
+    }
 }
 
-/** HMS 正規化（全角コロン→半角など）。必要ならUI側で利用してください。 */
-fun normalizeHmsOrNull(text: String?): String? {
-    val t = text?.trim().orEmpty().replace('：', ':')
-    return if (t.isEmpty()) null else t
+/** 最終出力の並び順 */
+enum class SortOrder {
+    OldestFirst, NewestFirst
 }
+
+/**
+ * グリッド吸着またはダイレクト抽出の結果 1 行を表す。
+ * - idealMs: ターゲット（理想）時刻
+ * - sample : 近傍で採用されたサンプル（無ければ null）
+ * - deltaMs: sample.createdAt - idealMs（sample がある時のみ）
+ *
+ * intervalSec が null のダイレクト抽出では、
+ *   idealMs = sample.createdAt, deltaMs = 0 として返す。
+ */
+data class SelectedSlot(
+    val idealMs: Long,
+    val sample: LocationSample?,
+    val deltaMs: Long?
+)
