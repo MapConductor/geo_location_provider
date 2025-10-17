@@ -30,19 +30,20 @@ class MidnightExportWorker(
 ) : CoroutineWorker(appContext, params) {
 
     private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
+    private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
     override suspend fun doWork(): Result {
         val db = AppDatabase.get(applicationContext)
         val sampleDao = db.locationSampleDao()
         val dayDao = resolveExportedDayDao(db)
-            ?: return Result.failure() // DAOが取れない場合は失敗を返す
+            ?: return Result.failure() // DAO が取得できない場合は失敗
 
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
         var oldest = dayDao.oldestNotUploaded()
         if (oldest == null) {
-            // 初回は過去14日分をensure（必要に応じて調整）
+            // 初回は過去14日分を ensure（必要に応じて調整）
             val backDays = 14L
             for (off in backDays downTo 1L) {
                 val d = today.minusDays(off).toEpochDay()
@@ -67,14 +68,14 @@ class MidnightExportWorker(
                 continue
             }
 
-            val baseName = "glp-${DateTimeFormatter.ofPattern("yyyyMMdd").format(localDate)}"
+            val baseName = "glp-${dateFmt.format(localDate)}"
             val exported: Uri? = GeoJsonExporter.exportToDownloads(
                 context = applicationContext,
                 records = records,
                 baseName = baseName,
                 compressAsZip = true
             )
-            // ローカルへの書き出し成功かは exported!=null で判定
+            // ローカルへの書き出し成功可否は exported != null で判断
             dayDao.markExportedLocal(target.epochDay)
 
             // アップロード設定
@@ -83,12 +84,12 @@ class MidnightExportWorker(
                 val uploader = KotlinDriveUploader(applicationContext)
                 when (val up = uploader.upload(exported, prefs.folderId, "$baseName.geojson.zip")) {
                     is UploadResult.Success -> {
-                        // 成功：ファイルIDはAPIに依存するため保存しない／null
+                        // 成功：ファイルIDは API に依存するため保存しない／null
                         dayDao.markUploaded(target.epochDay, null)
-                        // 任意：レコード削除の要件があればここで sampleDao.deleteByIds(...)
+                        // 任意：アップ後にレコード削除するならここで sampleDao.deleteByIds(...)
                     }
                     is UploadResult.Failure -> {
-                        // 失敗内容を保存（HTTPコード等があれば含まれている想定）
+                        // 失敗内容を保存（HTTPコードやレスポンスボディを要約）
                         val msg = buildString {
                             up.code?.let { append("HTTP $it ") }
                             if (!up.message.isNullOrBlank()) append(up.message)
@@ -101,7 +102,7 @@ class MidnightExportWorker(
                     }
                 }
             } else {
-                // アップロード無効／失敗時でもその日の処理は完了扱い
+                // アップロード無効／前提不足でも、その日の処理は完了扱い
                 dayDao.markUploaded(target.epochDay, null)
             }
 

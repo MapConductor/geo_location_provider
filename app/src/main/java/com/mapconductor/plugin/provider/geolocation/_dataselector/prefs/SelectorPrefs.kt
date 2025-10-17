@@ -11,6 +11,7 @@ import com.mapconductor.plugin.provider.geolocation._dataselector.condition.Sele
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlin.math.max
 
 // DataStore
 private val Context.selectorDataStore by preferencesDataStore(name = "selector_prefs")
@@ -45,8 +46,12 @@ class SelectorPrefs(private val appContext: Context) {
                 ?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
                 ?: SortOrder.NewestFirst
 
-            val intervalSec: Long? = p[K.INTERVAL_SEC]
-                ?: p[K.LEGACY_INTERVAL_MS]?.let { ms -> (ms / 1000L).coerceAtLeast(1L) }
+            // intervalSec: 負値をガード、legacy(ms)→sec 変換
+            val intervalSecFromStore = p[K.INTERVAL_SEC]
+            val intervalSecFromLegacy = p[K.LEGACY_INTERVAL_MS]?.let { ms ->
+                max(0L, ms / 1000L).takeIf { it > 0L }
+            }
+            val intervalSec: Long? = (intervalSecFromStore ?: intervalSecFromLegacy)?.let { max(0L, it) }?.takeIf { it > 0L }
 
             SelectorCondition(
                 fromMillis = p[K.FROM],
@@ -80,8 +85,9 @@ class SelectorPrefs(private val appContext: Context) {
             val currentOrder = p[K.SORT_ORDER]
                 ?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
                 ?: SortOrder.NewestFirst
-            val currentIntervalSec: Long? = p[K.INTERVAL_SEC]
-                ?: p[K.LEGACY_INTERVAL_MS]?.let { ms -> (ms / 1000L).coerceAtLeast(1L) }
+            val currentIntervalSec: Long? =
+                p[K.INTERVAL_SEC]
+                    ?: p[K.LEGACY_INTERVAL_MS]?.let { ms -> max(0L, ms / 1000L).takeIf { it > 0L } }
 
             val curr = SelectorCondition(
                 fromMillis = p[K.FROM],
@@ -100,8 +106,9 @@ class SelectorPrefs(private val appContext: Context) {
             next.limit?.let { p[K.LIMIT] = it } ?: p.remove(K.LIMIT)
             next.minAccuracy?.let { p[K.MIN_ACC] = it } ?: p.remove(K.MIN_ACC)
 
-            // interval（秒で保存）。旧 ms キーは削除。
-            next.intervalSec?.let { p[K.INTERVAL_SEC] = it } ?: p.remove(K.INTERVAL_SEC)
+            // interval（秒で保存）。負値ガード。旧 ms キーは削除。
+            val normalizedInterval = next.intervalSec?.let { max(0L, it) }?.takeIf { it > 0L }
+            normalizedInterval?.let { p[K.INTERVAL_SEC] = it } ?: p.remove(K.INTERVAL_SEC)
             p.remove(K.LEGACY_INTERVAL_MS)
 
             // 並び順
@@ -111,5 +118,27 @@ class SelectorPrefs(private val appContext: Context) {
             fromHms?.let { if (it.isNotBlank()) p[K.FROM_HMS] = it else p.remove(K.FROM_HMS) }
             toHms?.let { if (it.isNotBlank()) p[K.TO_HMS] = it else p.remove(K.TO_HMS) }
         }
+    }
+
+    // ===== 便利ヘルパ（任意） =====
+
+    suspend fun setRange(fromMillis: Long?, toMillis: Long?) {
+        update({ it.copy(fromMillis = fromMillis, toMillis = toMillis) })
+    }
+
+    suspend fun setLimit(limit: Int?) {
+        update({ it.copy(limit = limit) })
+    }
+
+    suspend fun setIntervalSec(intervalSec: Long?) {
+        update({ it.copy(intervalSec = intervalSec?.let { max(0L, it) }?.takeIf { it > 0L }) })
+    }
+
+    suspend fun setSortOrder(order: SortOrder) {
+        update({ it.copy(order = order) })
+    }
+
+    suspend fun clearAll() {
+        appContext.selectorDataStore.edit { it.clear() }
     }
 }
