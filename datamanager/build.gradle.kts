@@ -15,6 +15,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions { jvmTarget = "17" }
 }
 
@@ -29,5 +30,5 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.play.services.auth)
     implementation(libs.okhttp)
-//    implementation(libs.okio) // catalog 未定義なら一時的に: "com.squareup.okio:okio:3.9.0"
+    implementation(libs.okio)
 }
