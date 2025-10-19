@@ -23,5 +23,4 @@ mapbox_access_token.xml
 /herecredentials.properties
 build/
 libs/*
-app/schemas/
 /app/schemas/com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
