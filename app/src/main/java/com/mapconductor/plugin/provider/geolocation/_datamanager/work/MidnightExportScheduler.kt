@@ -18,18 +18,21 @@ object MidnightExportScheduler {
 
     fun scheduleNext(context: Context) {
         val delayMs = calcDelayUntilNextMidnightMillis()
+
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
+            // ローカル ZIP だけでも動かしたいなら CONNECTED 制約は付けない方が安全
+            // （アップロードはワーカー内部でネット判定＆再試行）
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
             .build()
 
         val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
-            .setConstraints(constraints)
             .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+            .setConstraints(constraints)
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             UNIQUE_NAME,
-            ExistingWorkPolicy.KEEP,   // 重複予約を避ける
+            ExistingWorkPolicy.KEEP,
             req
         )
     }

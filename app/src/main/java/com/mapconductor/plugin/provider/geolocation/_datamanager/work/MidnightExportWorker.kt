@@ -10,20 +10,32 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDay
 import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDayDao
-import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.KotlinDriveUploader
+import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
-import java.lang.reflect.Method
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.KotlinDriveUploader
+import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.concurrent.TimeUnit
 
+/**
+ * 定時バックアップ（前日以前のバックログ処理も包含）
+ *
+ * 仕様:
+ *  - 初回シード時は「昨日までの最大365日」を ExportedDay に ensure して網羅
+ *  - 1日単位で GeoJSON を ZIP 出力 → Drive へアップロード（設定が有効な場合）
+ *  - 結果に関わらず ZIP は必ず削除
+ *  - アップロード成功時のみ、その日の LocationSample を DB から削除
+ *  - 失敗/未設定時は Room を保持し、lastError に理由を保存
+ *  - 実行後は翌日0:00に再スケジュール
+ */
 class MidnightExportWorker(
     appContext: Context,
     params: WorkerParameters
@@ -35,23 +47,25 @@ class MidnightExportWorker(
     override suspend fun doWork(): Result {
         val db = AppDatabase.get(applicationContext)
         val sampleDao = db.locationSampleDao()
-        val dayDao = resolveExportedDayDao(db)
-            ?: return Result.failure() // DAO が取得できない場合は失敗
+        val dayDao: ExportedDayDao = db.exportedDayDao()
 
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
+        // --- 初回シード：昨日までの最大365日を ensure（列名に依存しない方式） ---
         var oldest = dayDao.oldestNotUploaded()
         if (oldest == null) {
-            // 初回は過去14日分を ensure（必要に応じて調整）
-            val backDays = 14L
-            for (off in backDays downTo 1L) {
+            val backMaxDays = 365L // 必要に応じて調整可
+            for (off in backMaxDays downTo 1L) {
                 val d = today.minusDays(off).toEpochDay()
-                if (d < todayEpochDay) dayDao.ensure(ExportedDay(epochDay = d))
+                if (d < todayEpochDay) {
+                    dayDao.ensure(ExportedDay(epochDay = d))
+                }
             }
             oldest = dayDao.oldestNotUploaded()
         }
 
+        // --- バックログ処理ループ（今日以降は対象外） ---
         while (true) {
             val target = oldest ?: break
             if (target.epochDay >= todayEpochDay) break
@@ -59,38 +73,41 @@ class MidnightExportWorker(
             val localDate = LocalDate.ofEpochDay(target.epochDay)
             val startMillis = localDate.atStartOfDay(zone).toInstant().toEpochMilli()
             val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-
-            val records = sampleDao.findBetween(startMillis, endMillis)
-            if (records.isEmpty()) {
-                // 空日も完了扱い（idempotent）
-                dayDao.markUploaded(target.epochDay, null)
-                oldest = dayDao.oldestNotUploaded()
-                continue
-            }
-
             val baseName = "glp-${dateFmt.format(localDate)}"
+
+            // 1日のレコード取得（既存DAOのレンジAPIを使用）
+            val records = sampleDao.getInRangeAscOnce(
+                from = startMillis,
+                to = endMillis,
+                softLimit = 1_000_000
+            )
+
+            // GeoJSON を ZIP でローカル生成（Downloads/.../baseName.zip）
             val exported: Uri? = GeoJsonExporter.exportToDownloads(
                 context = applicationContext,
                 records = records,
                 baseName = baseName,
                 compressAsZip = true
             )
-            // ローカルへの書き出し成功可否は exported != null で判断
+
+            // ローカル出力成功として印を付ける（空日でも成功扱い）
             dayDao.markExportedLocal(target.epochDay)
 
-            // アップロード設定
+            // アップロード（設定が揃っている場合のみ）
             val prefs = AppPrefs.uploadSnapshot(applicationContext)
-            if (prefs.engine == UploadEngine.KOTLIN && exported != null && prefs.folderId.isNotBlank()) {
+            val uploadConfigured = (prefs.engine == UploadEngine.KOTLIN && !prefs.folderId.isNullOrBlank())
+            var uploadSucceeded = false
+            var lastError: String? = null
+
+            if (exported != null && uploadConfigured) {
                 val uploader = KotlinDriveUploader(applicationContext)
-                when (val up = uploader.upload(exported, prefs.folderId, "$baseName.geojson.zip")) {
+                when (val up = uploader.upload(exported, prefs.folderId, "$baseName.zip")) {
                     is UploadResult.Success -> {
-                        // 成功：ファイルIDは API に依存するため保存しない／null
+                        uploadSucceeded = true
                         dayDao.markUploaded(target.epochDay, null)
-                        // 任意：アップ後にレコード削除するならここで sampleDao.deleteByIds(...)
                     }
                     is UploadResult.Failure -> {
-                        // 失敗内容を保存（HTTPコードやレスポンスボディを要約）
-                        val msg = buildString {
+                        lastError = buildString {
                             up.code?.let { append("HTTP $it ") }
                             if (!up.message.isNullOrBlank()) append(up.message)
                             if (!up.body.isNullOrBlank()) {
@@ -98,47 +115,74 @@ class MidnightExportWorker(
                                 append(up.body.take(300))
                             }
                         }.ifBlank { "Upload failure" }
-                        dayDao.markError(target.epochDay, msg)
+                        dayDao.markError(target.epochDay, lastError)
                     }
                 }
             } else {
-                // アップロード無効／前提不足でも、その日の処理は完了扱い
-                dayDao.markUploaded(target.epochDay, null)
+                lastError = if (exported == null) "No file exported" else "Upload not configured"
+                dayDao.markError(target.epochDay, lastError)
             }
 
+            // ZIP は必ず削除（成功/失敗とも）
+            exported?.let { safeDelete(it) }
+
+            // アップロード成功時のみ、当日のレコードを丸ごと削除（列名に依存しない @Delete）
+            if (uploadSucceeded && records.isNotEmpty()) {
+                try {
+                    sampleDao.deleteAll(records)
+                } catch (_: Throwable) {
+                    // 削除失敗は致命ではないため握りつぶす（次周で再度対象になる）
+                }
+            }
+
+            // 次の未アップロード日へ
             oldest = dayDao.oldestNotUploaded()
         }
 
-        MidnightExportScheduler.scheduleNext(applicationContext)
+        // 実行後は翌日0:00に再スケジュール
+        scheduleNext(applicationContext)
         return Result.success()
     }
 
-    /**
-     * AppDatabase から ExportedDayDao をアクセサ名に依存せず取得する。
-     * 例: exportedDayDao / exportedDaysDao / dayDao / getExportedDayDao 等に対応
-     */
-    private fun resolveExportedDayDao(db: AppDatabase): ExportedDayDao? {
-        // まずは代表的な名前で直呼び
-        try { return AppDatabase::class.java.getMethod("exportedDayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
-        try { return AppDatabase::class.java.getMethod("exportedDaysDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
-        try { return AppDatabase::class.java.getMethod("dayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
-        try { return AppDatabase::class.java.getMethod("getExportedDayDao").invoke(db) as ExportedDayDao } catch (_: Throwable) {}
+    // 翌日0:00を予約
+    private fun scheduleNext(context: Context) {
+        val delayMs = calcDelayUntilNextMidnightMillis()
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            .build()
+        val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
+            .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+            .setConstraints(constraints)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            UNIQUE_NAME,
+            ExistingWorkPolicy.REPLACE,
+            req
+        )
+    }
 
-        // 最後に汎用探索：戻り値の型名に "ExportedDayDao" を含む無引数メソッドを探す
-        val m: Method? = db.javaClass.methods.firstOrNull {
-            it.parameterCount == 0 &&
-                    (it.returnType.simpleName == "ExportedDayDao" || it.returnType.name.endsWith(".ExportedDayDao"))
+    private fun calcDelayUntilNextMidnightMillis(): Long {
+        val now = ZonedDateTime.now(zone)
+        val next = now.truncatedTo(ChronoUnit.DAYS).plusDays(1)
+        return Duration.between(now, next).toMillis()
+    }
+
+    private fun safeDelete(uri: Uri) {
+        try {
+            applicationContext.contentResolver.delete(uri, null, null)
+        } catch (_: Throwable) {
+            // 端末/権限状況により失敗することがあるが致命ではない
         }
-        return try { m?.invoke(db) as? ExportedDayDao } catch (_: Throwable) { null }
     }
 
     companion object {
         private const val UNIQUE_NAME = "midnight-export-worker"
 
-        /** 前日以前のバックログを即時実行（UniqueWork: REPLACE） */
+        /** UI から即時にバックログ処理を起動するためのヘルパー */
+        @JvmStatic
         fun runNow(context: Context) {
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
                 .build()
             val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
                 .setConstraints(constraints)

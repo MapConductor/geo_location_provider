@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation._core.data.room
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -146,4 +147,7 @@ interface LocationSampleDao {
         to: Long?,
         softLimit: Int
     ): List<LocationSample>
+
+    @Delete
+    suspend fun deleteAll(items: List<LocationSample>): Int
 }
