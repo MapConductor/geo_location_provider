@@ -15,7 +15,7 @@ import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDay
 import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDayDao
 import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.KotlinDriveUploader
+import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
 import java.time.Duration
 import java.time.LocalDate
@@ -66,10 +66,8 @@ class MidnightExportWorker(
         }
 
         // --- バックログ処理ループ（今日以降は対象外） ---
-        while (true) {
-            val target = oldest ?: break
-            if (target.epochDay >= todayEpochDay) break
-
+        while (oldest != null && oldest.epochDay < todayEpochDay) {
+            val target = oldest
             val localDate = LocalDate.ofEpochDay(target.epochDay)
             val startMillis = localDate.atStartOfDay(zone).toInstant().toEpochMilli()
             val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
@@ -95,15 +93,30 @@ class MidnightExportWorker(
 
             // アップロード（設定が揃っている場合のみ）
             val prefs = AppPrefs.uploadSnapshot(applicationContext)
-            val uploadConfigured = (prefs.engine == UploadEngine.KOTLIN && !prefs.folderId.isNullOrBlank())
+            val engineOk = (prefs.engine == UploadEngine.KOTLIN)
+            val folderOk = !prefs.folderId.isNullOrBlank()
+            val uploader = if (engineOk && folderOk) {
+                UploaderFactory.create(applicationContext, prefs.engine)
+            } else null
+
             var uploadSucceeded = false
             var lastError: String? = null
 
-            if (exported != null && uploadConfigured) {
-                val uploader = KotlinDriveUploader(applicationContext)
-                when (val up = uploader.upload(exported, prefs.folderId, "$baseName.zip")) {
+            if (exported == null) {
+                lastError = "No file exported"
+                dayDao.markError(target.epochDay, lastError)
+            } else if (uploader == null) {
+                lastError = when {
+                    !engineOk -> "Upload not configured (engine=${prefs.engine})"
+                    !folderOk -> "Upload not configured (folderId missing)"
+                    else -> "Uploader disabled"
+                }
+                dayDao.markError(target.epochDay, lastError)
+            } else {
+                when (val up = uploader.upload(exported, prefs.folderId!!, "$baseName.zip")) {
                     is UploadResult.Success -> {
                         uploadSucceeded = true
+                        // fileId 等を保持したい場合は第二引数に保存
                         dayDao.markUploaded(target.epochDay, null)
                     }
                     is UploadResult.Failure -> {
@@ -118,15 +131,12 @@ class MidnightExportWorker(
                         dayDao.markError(target.epochDay, lastError)
                     }
                 }
-            } else {
-                lastError = if (exported == null) "No file exported" else "Upload not configured"
-                dayDao.markError(target.epochDay, lastError)
             }
 
             // ZIP は必ず削除（成功/失敗とも）
             exported?.let { safeDelete(it) }
 
-            // アップロード成功時のみ、当日のレコードを丸ごと削除（列名に依存しない @Delete）
+            // アップロード成功時のみ、当日のレコードを丸ごと削除
             if (uploadSucceeded && records.isNotEmpty()) {
                 try {
                     sampleDao.deleteAll(records)
@@ -144,7 +154,8 @@ class MidnightExportWorker(
         return Result.success()
     }
 
-    // 翌日0:00を予約
+    // ---- ここからはクラスメンバ（ローカル関数にしない） ----
+
     private fun scheduleNext(context: Context) {
         val delayMs = calcDelayUntilNextMidnightMillis()
         val constraints = Constraints.Builder()
