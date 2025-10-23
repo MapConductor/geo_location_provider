@@ -1,6 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.algorithm
 
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import kotlin.math.abs
 import kotlin.math.max

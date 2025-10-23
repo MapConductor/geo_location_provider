@@ -1,13 +1,11 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.repository
 
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSampleDao
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation._dataselector.algorithm.*
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
-import kotlin.math.max
-import kotlin.math.min
 
 /**
  * LocationSampleDao を用いた抽出/補完の実装。

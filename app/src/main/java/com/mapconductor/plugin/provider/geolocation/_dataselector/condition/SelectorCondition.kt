@@ -1,6 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation._dataselector.condition
 
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 
 /**
  * データ抽出の条件。

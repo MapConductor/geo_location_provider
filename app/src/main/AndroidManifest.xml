@@ -37,7 +37,7 @@
             </intent-filter>
         </activity>
         <service
-            android:name="._core.service.GeoLocationService"
+            android:name=".service.GeoLocationService"
             android:foregroundServiceType="location"
             android:exported="false" />
     </application>

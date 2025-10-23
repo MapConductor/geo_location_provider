@@ -2,8 +2,8 @@ package com.mapconductor.plugin.provider.geolocation.ui.history
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import kotlinx.coroutines.flow.Flow
 
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {

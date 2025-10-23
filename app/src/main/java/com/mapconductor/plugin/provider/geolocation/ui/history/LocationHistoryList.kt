@@ -10,7 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime

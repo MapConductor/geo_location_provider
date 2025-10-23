@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import java.io.BufferedOutputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat

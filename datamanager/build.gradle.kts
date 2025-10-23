@@ -26,6 +26,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":dataselector"))
+
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.play.services.auth)

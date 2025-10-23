@@ -84,6 +84,12 @@ secrets {
 }
 
 dependencies {
+    implementation(project(":core"))
+    implementation(project(":dataselector"))
+    implementation(project(":datamanager"))
+
+    implementation("com.google.android.material:material:1.12.0")
+
     // Google Maps SDK - Version 19.2.0 (as used by MapConductor 1.0.0)
     implementation("com.google.android.gms:play-services-maps:19.2.0")
 

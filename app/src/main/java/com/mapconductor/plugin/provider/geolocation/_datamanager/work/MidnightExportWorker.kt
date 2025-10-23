@@ -10,10 +10,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDay
-import com.mapconductor.plugin.provider.geolocation._core.data.room.ExportedDayDao
-import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.room.ExportedDay
+import com.mapconductor.plugin.provider.geolocation.room.ExportedDayDao
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
@@ -92,7 +92,7 @@ class MidnightExportWorker(
             dayDao.markExportedLocal(target.epochDay)
 
             // アップロード（設定が揃っている場合のみ）
-            val prefs = AppPrefs.uploadSnapshot(applicationContext)
+            val prefs = AppPrefs.snapshot(applicationContext)
             val engineOk = (prefs.engine == UploadEngine.KOTLIN)
             val folderOk = !prefs.folderId.isNullOrBlank()
             val uploader = if (engineOk && folderOk) {

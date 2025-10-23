@@ -15,8 +15,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder

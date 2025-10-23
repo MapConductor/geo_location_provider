@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation._core.util
+package com.mapconductor.plugin.provider.geolocation.util
 
 import android.app.ActivityManager
 import android.content.Context

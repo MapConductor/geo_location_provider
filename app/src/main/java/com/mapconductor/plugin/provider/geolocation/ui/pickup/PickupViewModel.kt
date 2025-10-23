@@ -3,8 +3,8 @@ package com.mapconductor.plugin.provider.geolocation.ui.pickup
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSample
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

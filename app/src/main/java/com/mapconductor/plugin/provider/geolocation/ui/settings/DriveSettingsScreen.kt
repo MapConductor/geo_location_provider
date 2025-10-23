@@ -33,8 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
@@ -250,7 +250,7 @@ private suspend fun runTodayPreviewIO(
     }
 
     // ここから「アップロードする」経路
-    val snapshot = AppPrefs.uploadSnapshot(ctx)
+    val snapshot = AppPrefs.snapshot(ctx)
     val folderId = DriveFolderId.extractFromUrlOrId(snapshot.folderId)
     val uploader = UploaderFactory.create(ctx, snapshot.engine)
 

@@ -7,8 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation._core.prefs.AppPrefs
-import com.mapconductor.plugin.provider.geolocation._core.data.room.AppDatabase
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
@@ -107,7 +107,7 @@ class ManualExportViewModel(
                         }
                     }
                     TodayPreviewMode.UPLOAD_AND_DELETE_LOCAL -> {
-                        val prefs = AppPrefs.uploadSnapshot(appContext)
+                        val prefs = AppPrefs.snapshot(appContext)
                         val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
                         val uploader = UploaderFactory.create(appContext, prefs.engine)
 

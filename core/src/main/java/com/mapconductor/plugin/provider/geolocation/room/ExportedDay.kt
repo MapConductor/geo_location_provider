@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation._core.data.room
+package com.mapconductor.plugin.provider.geolocation.room
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey

@@ -5,7 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation._core.data.room.LocationSampleDao
+import com.mapconductor.plugin.provider.geolocation.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation._dataselector.prefs.SelectorPrefs

@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation._core.util
+package com.mapconductor.plugin.provider.geolocation.util
 
 /**
  * ログタグの集中管理。必要に応じて増やしてください。

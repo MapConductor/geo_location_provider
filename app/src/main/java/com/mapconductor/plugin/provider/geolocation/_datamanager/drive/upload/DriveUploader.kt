@@ -6,7 +6,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation._core.util.LogTags
+import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult

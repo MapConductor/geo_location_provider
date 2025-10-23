@@ -47,7 +47,7 @@ import com.mapconductor.plugin.provider.geolocation._datamanager.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId.extractFromUrlOrId
 import com.mapconductor.plugin.provider.geolocation._datamanager.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation._core.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 import kotlinx.coroutines.Dispatchers
