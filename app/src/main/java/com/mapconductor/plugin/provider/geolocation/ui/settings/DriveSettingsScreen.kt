@@ -35,11 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.UploaderFactory
-import com.mapconductor.plugin.provider.geolocation._datamanager.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

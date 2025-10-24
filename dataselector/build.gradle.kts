@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.mapconductor.plugin.provider.dataselector"
+    namespace = "com.mapconductor.plugin.provider.geolocation"
     compileSdk = 36
     defaultConfig { minSdk = 26 }
 

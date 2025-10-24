@@ -6,11 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.room.LocationSampleDao
-import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
-import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
-import com.mapconductor.plugin.provider.geolocation._dataselector.prefs.SelectorPrefs
-import com.mapconductor.plugin.provider.geolocation._dataselector.repository.SelectorRepository
-import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectedSlots
+import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
+import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
+import com.mapconductor.plugin.provider.geolocation.prefs.SelectorPrefs
+import com.mapconductor.plugin.provider.geolocation.repository.SelectorRepository
+import com.mapconductor.plugin.provider.geolocation.usecase.BuildSelectedSlots
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.mapLatest

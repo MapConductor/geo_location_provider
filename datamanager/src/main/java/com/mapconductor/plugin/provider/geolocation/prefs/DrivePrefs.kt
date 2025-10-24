@@ -1,0 +1,73 @@
+package com.mapconductor.plugin.provider.geolocation.prefs
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private const val DS_NAME = "drive_prefs"
+
+// Context 拡張（ファイル内 private にして衝突回避）
+private val Context.driveDataStore by preferencesDataStore(DS_NAME)
+
+/**
+ * DataStore の薄いラッパ（生値をそのまま扱うレイヤ）。
+ * Repository で null/blank の吸収などを行う想定。
+ */
+class DrivePrefs(private val appContext: Context) {
+
+    private object K {
+        val FOLDER_ID        = stringPreferencesKey("folder_id")
+        val ACCOUNT          = stringPreferencesKey("account_email")
+        val ENGINE           = stringPreferencesKey("upload_engine")
+        val TOKEN_TS         = longPreferencesKey("token_updated_at")
+        val FOLDER_RES_KEY   = stringPreferencesKey("folder_resource_key") // ★追加
+    }
+
+    // ---- Read Flows ----
+    val folderId: Flow<String> =
+        appContext.driveDataStore.data.map { it[K.FOLDER_ID] ?: "" }
+
+    val accountEmail: Flow<String> =
+        appContext.driveDataStore.data.map { it[K.ACCOUNT] ?: "" }
+
+    val uploadEngine: Flow<String> =
+        appContext.driveDataStore.data.map { it[K.ENGINE] ?: "" }
+
+    val tokenUpdatedAtMillis: Flow<Long> =
+        appContext.driveDataStore.data.map { it[K.TOKEN_TS] ?: 0L }
+
+    // resourceKey は null 許容（未保存の場合は null）
+    val folderResourceKey: Flow<String?> =
+        appContext.driveDataStore.data.map { it[K.FOLDER_RES_KEY] } // そのまま nullable
+
+    // ---- Write APIs ----
+    suspend fun setFolderId(folderId: String) {
+        appContext.driveDataStore.edit { it[K.FOLDER_ID] = folderId }
+    }
+
+    suspend fun setAccountEmail(email: String) {
+        appContext.driveDataStore.edit { it[K.ACCOUNT] = email }
+    }
+
+    suspend fun setUploadEngine(engineName: String) {
+        appContext.driveDataStore.edit { it[K.ENGINE] = engineName }
+    }
+
+    suspend fun setTokenUpdatedAt(millis: Long) {
+        appContext.driveDataStore.edit { it[K.TOKEN_TS] = millis }
+    }
+
+    suspend fun setFolderResourceKey(resourceKey: String?) {
+        appContext.driveDataStore.edit { prefs ->
+            if (resourceKey.isNullOrBlank()) {
+                prefs.remove(K.FOLDER_RES_KEY)
+            } else {
+                prefs[K.FOLDER_RES_KEY] = resourceKey
+            }
+        }
+    }
+}

@@ -17,11 +17,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation.room.LocationSample
-import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectedSlot
-import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SelectorCondition
-import com.mapconductor.plugin.provider.geolocation._dataselector.condition.SortOrder
-import com.mapconductor.plugin.provider.geolocation._dataselector.repository.SelectorRepository
-import com.mapconductor.plugin.provider.geolocation._dataselector.usecase.BuildSelectedSlots
+import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
+import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
+import com.mapconductor.plugin.provider.geolocation.condition.SortOrder
+import com.mapconductor.plugin.provider.geolocation.repository.SelectorRepository
+import com.mapconductor.plugin.provider.geolocation.usecase.BuildSelectedSlots
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import kotlinx.coroutines.launch
 import java.text.Normalizer

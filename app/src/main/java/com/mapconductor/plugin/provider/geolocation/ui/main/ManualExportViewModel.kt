@@ -9,10 +9,10 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation._datamanager.export.GeoJsonExporter
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.DriveFolderId
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation._datamanager.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
+import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
