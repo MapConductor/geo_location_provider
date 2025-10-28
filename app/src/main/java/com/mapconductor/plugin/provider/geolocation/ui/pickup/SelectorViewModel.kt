@@ -31,7 +31,7 @@ class SelectorViewModel(
 
     /** 現在の条件（UIから参照/編集） */
     val condition: StateFlow<SelectorCondition> =
-        prefs.condition.stateIn(
+        prefs.conditionFlow.stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
             initialValue = SelectorCondition()

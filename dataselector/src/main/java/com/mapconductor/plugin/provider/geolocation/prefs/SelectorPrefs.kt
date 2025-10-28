@@ -13,45 +13,45 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlin.math.max
 
-// DataStore
+// Single DataStore instance bound to the application Context
 private val Context.selectorDataStore by preferencesDataStore(name = "selector_prefs")
 
+/**
+ * DataStore facade for saving/restoring pickup/selection conditions.
+ * - All units follow UI/domain conventions: milliseconds for from/to, seconds for interval.
+ * - `limit` is clamped to [1, 20000].
+ * - `intervalSec` must be > 0 when present; non-positive values are cleared.
+ */
 class SelectorPrefs(private val appContext: Context) {
 
     private object K {
-        // 基本
+        // Base filters
         val FROM = longPreferencesKey("from")
         val TO = longPreferencesKey("to")
         val LIMIT = intPreferencesKey("limit")
         val MIN_ACC = floatPreferencesKey("min_acc")
-
-        // interval：新仕様は「秒」を保存
+        // Interval: store as seconds; legacy ms key retained for migration
         val INTERVAL_SEC = longPreferencesKey("interval_sec")
-
-        // 後方互換（過去に ms を保存していた可能性）
         val LEGACY_INTERVAL_MS = longPreferencesKey("interval_ms")
-
-        // 画面補助（任意：条件本体には含めない）
-        val FROM_HMS = stringPreferencesKey("from_hms")
-        val TO_HMS = stringPreferencesKey("to_hms")
-
-        // 並び順
-        val SORT_ORDER = stringPreferencesKey("sort_order") // NewestFirst / OldestFirst
+        // Sort
+        val ORDER = stringPreferencesKey("order")
     }
 
-    /** 条件の復元（LEGACY: interval_ms を秒に変換して読み込み） */
-    val condition: Flow<SelectorCondition> =
-        appContext.selectorDataStore.data.map { p ->
-            val order = p[K.SORT_ORDER]
-                ?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
-                ?: SortOrder.NewestFirst
+    private fun parseOrderOrDefault(raw: String?): SortOrder {
+        val parsed = raw?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
+        return parsed ?: SortOrder.entries.first()
+    }
 
-            // intervalSec: 負値をガード、legacy(ms)→sec 変換
-            val intervalSecFromStore = p[K.INTERVAL_SEC]
-            val intervalSecFromLegacy = p[K.LEGACY_INTERVAL_MS]?.let { ms ->
-                max(0L, ms / 1000L).takeIf { it > 0L }
+    /** Observe the current condition as a single flow. */
+    val conditionFlow: Flow<SelectorCondition> =
+        appContext.selectorDataStore.data.map { p ->
+            // Migrate legacy interval if needed (ms -> sec, rounded down)
+            val legacyMs = p[K.LEGACY_INTERVAL_MS]
+            val intervalSec = p[K.INTERVAL_SEC] ?: legacyMs?.let { ms ->
+                (ms / 1000L).takeIf { it > 0L }
             }
-            val intervalSec: Long? = (intervalSecFromStore ?: intervalSecFromLegacy)?.let { max(0L, it) }?.takeIf { it > 0L }
+
+            val order = parseOrderOrDefault(p[K.ORDER])
 
             SelectorCondition(
                 fromMillis = p[K.FROM],
@@ -63,31 +63,14 @@ class SelectorPrefs(private val appContext: Context) {
             )
         }
 
-    /** 画面補助（任意） */
-    val fromHms: Flow<String?> =
-        appContext.selectorDataStore.data.map { it[K.FROM_HMS] }
-    val toHms: Flow<String?> =
-        appContext.selectorDataStore.data.map { it[K.TO_HMS] }
-
-    /**
-     * 条件の更新。
-     * - null の項目は削除
-     * - interval は「秒」で保存（旧 ms キーはクリア）
-     * - fromHms/toHms は任意の補助値（条件本体とは独立）
-     */
-    suspend fun update(
-        block: (SelectorCondition) -> SelectorCondition,
-        fromHms: String? = null,
-        toHms: String? = null
-    ) {
+    /** Update condition atomically via transformation block. */
+    suspend fun update(block: (SelectorCondition) -> SelectorCondition) {
         appContext.selectorDataStore.edit { p ->
-            // 現在値を復元（後方互換あり）
-            val currentOrder = p[K.SORT_ORDER]
-                ?.let { runCatching { SortOrder.valueOf(it) }.getOrNull() }
-                ?: SortOrder.NewestFirst
-            val currentIntervalSec: Long? =
-                p[K.INTERVAL_SEC]
-                    ?: p[K.LEGACY_INTERVAL_MS]?.let { ms -> max(0L, ms / 1000L).takeIf { it > 0L } }
+            // Read current (apply migration the same way as in flow)
+            val legacyMs = p[K.LEGACY_INTERVAL_MS]
+            val currentIntervalSec =
+                p[K.INTERVAL_SEC] ?: legacyMs?.let { it / 1000L }?.takeIf { it > 0L }
+            val currentOrder = parseOrderOrDefault(p[K.ORDER])
 
             val curr = SelectorCondition(
                 fromMillis = p[K.FROM],
@@ -100,42 +83,44 @@ class SelectorPrefs(private val appContext: Context) {
 
             val next = block(curr)
 
-            // 基本キー
+            // Base keys
             next.fromMillis?.let { p[K.FROM] = it } ?: p.remove(K.FROM)
             next.toMillis?.let { p[K.TO] = it } ?: p.remove(K.TO)
-            next.limit?.let { p[K.LIMIT] = it } ?: p.remove(K.LIMIT)
+            next.limit?.let { p[K.LIMIT] = it.coerceIn(1, 20_000) } ?: p.remove(K.LIMIT)
             next.minAccuracy?.let { p[K.MIN_ACC] = it } ?: p.remove(K.MIN_ACC)
 
-            // interval（秒で保存）。負値ガード。旧 ms キーは削除。
-            val normalizedInterval = next.intervalSec?.let { max(0L, it) }?.takeIf { it > 0L }
-            normalizedInterval?.let { p[K.INTERVAL_SEC] = it } ?: p.remove(K.INTERVAL_SEC)
+            // Interval (seconds)
+            next.intervalSec?.let { sec ->
+                if (sec > 0) p[K.INTERVAL_SEC] = sec else p.remove(K.INTERVAL_SEC)
+            } ?: p.remove(K.INTERVAL_SEC)
+            // Legacy key always cleared after any write
             p.remove(K.LEGACY_INTERVAL_MS)
 
-            // 並び順
-            p[K.SORT_ORDER] = next.order.name
-
-            // 補助値
-            fromHms?.let { if (it.isNotBlank()) p[K.FROM_HMS] = it else p.remove(K.FROM_HMS) }
-            toHms?.let { if (it.isNotBlank()) p[K.TO_HMS] = it else p.remove(K.TO_HMS) }
+            // Order
+            p[K.ORDER] = next.order.name
         }
     }
 
-    // ===== 便利ヘルパ（任意） =====
+    // --- Fine-grained setters for UI ---
 
-    suspend fun setRange(fromMillis: Long?, toMillis: Long?) {
-        update({ it.copy(fromMillis = fromMillis, toMillis = toMillis) })
+    suspend fun setFromTo(fromMillis: Long?, toMillis: Long?) {
+        update { it.copy(fromMillis = fromMillis, toMillis = toMillis) }
     }
 
     suspend fun setLimit(limit: Int?) {
-        update({ it.copy(limit = limit) })
+        update { it.copy(limit = limit?.coerceIn(1, 20_000)) }
+    }
+
+    suspend fun setMinAccuracy(minAcc: Float?) {
+        update { it.copy(minAccuracy = minAcc) }
     }
 
     suspend fun setIntervalSec(intervalSec: Long?) {
-        update({ it.copy(intervalSec = intervalSec?.let { max(0L, it) }?.takeIf { it > 0L }) })
+        update { it.copy(intervalSec = intervalSec?.let { max(0L, it) }?.takeIf { it > 0L }) }
     }
 
     suspend fun setSortOrder(order: SortOrder) {
-        update({ it.copy(order = order) })
+        update { it.copy(order = order) }
     }
 
     suspend fun clearAll() {
