@@ -1,12 +1,9 @@
 package com.mapconductor.plugin.provider.geolocation.ui.main
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.ServiceConnection
 import android.hardware.Sensor
 import android.hardware.SensorManager
-import android.os.IBinder
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
@@ -14,147 +11,111 @@ import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.SettingsStore
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 更新間隔(秒) と 予測回数 を管理する VM。
- * - 既定: Interval=30秒 / 予測回数=5回
- * - IMU有効かつ stepSec(=sec/(count+1)) < 5秒 なら 予測回数の保存は拒否（現在値継続）
- * - Interval は従来どおり GeoLocationService へ適用（※適用トリガは DataStore 保存 or 明示 Intent）
+ * Interval(秒) と 予測回数 を管理し、保存とサービス反映を行う VM。
+ * - 既定: Interval=30秒 / 予測回数=5
+ * - IMU有効かつ stepSec(=sec/(count+1)) < 5秒 の場合は予測回数の保存を拒否（トースト表示）
+ * - Interval のサービス反映は GeoLocationService.ACTION_UPDATE_INTERVAL を発行
  */
-class IntervalSettingsViewModel(private val appContext: Context) : ViewModel() {
+class IntervalSettingsViewModel(
+    private val appContext: Context
+) : ViewModel() {
 
-    private val settingsStore = SettingsStore(appContext)
+    private val store = SettingsStore(appContext)
 
-    private val _seconds = MutableStateFlow("30")
-    val seconds: StateFlow<String> = _seconds
+    private val _secondsText = MutableStateFlow("30")
+    val secondsText: StateFlow<String> = _secondsText.asStateFlow()
 
-    private val _predictCount = MutableStateFlow("5")
-    val predictCount: StateFlow<String> = _predictCount
+    private val _predictCountText = MutableStateFlow("5")
+    val predictCountText: StateFlow<String> = _predictCountText.asStateFlow()
 
-    // ---- GeoLocationService バインド（必要なら反射で取得） ----
-    private var connectJob: Job? = null
-    @Volatile private var bound = false
-    @Volatile private var service: GeoLocationService? = null
-
-    private val conn = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            // LocalBinder の実装差異に依存しないよう反射で getService() を試す
-            val s: GeoLocationService? = try {
-                val m = binder?.javaClass?.getMethod("getService")
-                @Suppress("UNCHECKED_CAST")
-                m?.invoke(binder) as? GeoLocationService
-            } catch (_: Throwable) {
-                null
-            }
-            service = s
-            bound = s != null
-        }
-        override fun onServiceDisconnected(name: ComponentName?) {
-            bound = false
-            service = null
-        }
-    }
+    private val _imuAvailable = MutableStateFlow(false)
+    val imuAvailable: StateFlow<Boolean> = _imuAvailable.asStateFlow()
 
     init {
-        // 既存保存値のロード：なければ 30秒/5回
+        // 既存値を DataStore から読み込み（未保存時は既定値が入る）
         viewModelScope.launch(Dispatchers.IO) {
-            val ms = settingsStore.updateIntervalMsFlow.first()
-            val sec = ((ms ?: 30_000L) / 1000L).toInt().coerceAtLeast(0)
-            val pc = (settingsStore.predictCountFlow.first() ?: 5).coerceAtLeast(0)
-            _seconds.value = sec.toString()
-            _predictCount.value = pc.toString()
-        }
+            val sec = (store.currentIntervalMs() / 1000L).toInt()
+                .coerceAtLeast(SettingsStore.MIN_INTERVAL_SEC)
+            val cnt = store.currentPredictCount()
+                .coerceAtLeast(SettingsStore.MIN_PREDICT_COUNT)
 
-        // サービス起動＆バインド（サービス側が DataStore を監視していれば必須ではないが、従来踏襲）
-        connectJob = viewModelScope.launch(Dispatchers.IO) {
-            val intent = Intent(appContext, GeoLocationService::class.java)
-            ContextCompat.startForegroundService(appContext, intent)
-            appContext.bindService(intent, conn, Context.BIND_AUTO_CREATE)
+            _secondsText.value = sec.toString()
+            _predictCountText.value = cnt.toString()
+
+            _imuAvailable.value = detectImuAvailable(appContext)
         }
     }
 
-    fun onSecondsChanged(text: String) {
-        _seconds.value = text.filter { it.isDigit() }.take(5)
-    }
-
-    fun onPredictCountChanged(text: String) {
-        _predictCount.value = text.filter { it.isDigit() }.take(4)
-    }
-
-    /** 端末が IMU(加速度+ジャイロ) を使えるかどうか */
-    private fun isImuCapable(): Boolean {
-        val sm = appContext.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    private fun detectImuAvailable(ctx: Context): Boolean {
+        val sm = ContextCompat.getSystemService(ctx, SensorManager::class.java) ?: return false
         val hasAcc = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) != null
         val hasGyro = sm.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null
         return hasAcc && hasGyro
     }
 
+    fun onSecondsChanged(text: String) {
+        if (text.isEmpty() || text.all { it.isDigit() }) _secondsText.value = text
+    }
+
+    fun onPredictCountChanged(text: String) {
+        if (text.isEmpty() || text.all { it.isDigit() }) _predictCountText.value = text
+    }
+
     /**
-     * 保存＋サービス適用。
-     * - Interval（秒）は常に保存
-     * - 予測回数は、IMU有効かつ stepSec < 5秒 のときは保存拒否（現在値継続、Toast警告）
-     * - サービスへの適用は DataStore 監視で自動 / もしくは Intent で明示
+     * 保存 + サービス適用。
+     * - Interval(秒) は常に保存（最小5秒に矯正）
+     * - 予測回数は、IMU有効かつ stepSec < 5秒 のとき保存拒否（現在値継続、Toast警告）
+     * - サービスへの Interval 反映は ACTION_UPDATE_INTERVAL を送る
      */
     fun saveAndApply() {
         viewModelScope.launch(Dispatchers.IO) {
-            val sec = _seconds.value.toIntOrNull() ?: return@launch
-            val count = _predictCount.value.toIntOrNull() ?: 0
+            val sec = _secondsText.value.toIntOrNull()?.coerceAtLeast(SettingsStore.MIN_INTERVAL_SEC)
+                ?: SettingsStore.MIN_INTERVAL_SEC
+            _secondsText.value = sec.toString()
 
-            // Interval は保存
-            settingsStore.setUpdateIntervalMs(sec.coerceAtLeast(0) * 1000L)
+            val count = _predictCountText.value.toIntOrNull()
+                ?.coerceAtLeast(SettingsStore.MIN_PREDICT_COUNT)
+                ?: SettingsStore.MIN_PREDICT_COUNT
+            _predictCountText.value = count.toString()
 
-            // 予測回数の検証（IMU 有効時のみ）
-            val imuOk = isImuCapable()
-            val stepSec = sec.toFloat() / (count + 1).coerceAtLeast(1)
-            val canSavePredict = !(imuOk && stepSec < 5f)
-            if (canSavePredict) {
-                settingsStore.setPredictCount(count.coerceAtLeast(0))
-            }
+            // Interval を保存 & サービスへ即時反映
+            val ms = sec * 1000L
+            store.setUpdateIntervalMs(ms)
+            applyIntervalToService(ms)
 
-            // --- サービス適用のトリガ ---
-            // 1) DataStore 監視型なら、上記保存のみでOK
-            // 2) 明示適用が必要なら、Intent を投げる（サービス側で受け取る実装を用意してください）
-            try {
-                val applyIntent = Intent(appContext, GeoLocationService::class.java).apply {
-                    action = "com.mapconductor.plugin.provider.APPLY_SETTINGS"
-                    putExtra("updateIntervalMs", (sec.coerceAtLeast(0) * 1000L))
-                    putExtra("predictCount", count.coerceAtLeast(0))
-                }
-                ContextCompat.startForegroundService(appContext, applyIntent)
-            } catch (_: Throwable) {
-                // サービス側が未対応でもクラッシュしない
-            }
+            // 予測回数の保存判定（IMUが使える場合のみ制約を課す）
+            val stepSec = sec.toFloat() / (count + 1).toFloat()  // 例: 30 / (5+1) = 5.0
+            val allowSavePredict = (!_imuAvailable.value) || stepSec >= SettingsStore.MIN_INTERVAL_SEC.toFloat()
 
-            withContext(Dispatchers.Main) {
-                if (!canSavePredict) {
+            if (allowSavePredict) {
+                store.setPredictCount(count)
+            } else {
+                withContext(Dispatchers.Main) {
                     Toast.makeText(
                         appContext,
-                        "予測間隔が5秒未満になるため、予測回数は反映しません（現在の設定で継続）",
-                        Toast.LENGTH_LONG
-                    ).show()
-                } else {
-                    Toast.makeText(
-                        appContext,
-                        "更新間隔を ${sec}秒 / 予測回数を ${count} に設定しました",
+                        "予測間隔が5秒未満のため、予測回数の保存をスキップしました。",
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+                // UI を保存済み値に戻す
+                val saved = store.currentPredictCount()
+                _predictCountText.value = saved.toString()
             }
         }
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        if (bound) {
-            appContext.unbindService(conn)
-            bound = false
+    private fun applyIntervalToService(ms: Long) {
+        val intent = Intent(appContext, GeoLocationService::class.java).apply {
+            action = GeoLocationService.ACTION_UPDATE_INTERVAL
+            putExtra(GeoLocationService.EXTRA_UPDATE_MS, ms)
         }
-        connectJob?.cancel()
+        appContext.startService(intent)
     }
 }

@@ -55,8 +55,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.navigation.compose.currentBackStackEntryAsState
-import com.mapconductor.googlemaps.GoogleMapsView
-import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 
 private const val ROUTE_HOME = "home"
@@ -72,11 +70,6 @@ class MainActivity : ComponentActivity() {
                     navController = navController,
                     startDestination = "home"
                 ) {
-                    composable("map") {
-                        Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                            MapComponent(modifier = Modifier.padding(innerPadding))
-                        }
-                    }
                     composable("home") {
                         AppRoot(
                             onStartTracking = { requestPermissionsAndStartService() },
@@ -371,17 +364,6 @@ private fun AppRoot(
             dismissButton = {
                 TextButton(onClick = { showFolderDialog = false }) { Text("Cancel") }
             }
-        )
-    }
-}
-
-@Composable
-fun MapComponent(modifier: Modifier = Modifier){
-    val mapViewState = rememberGoogleMapViewState()
-    Column(modifier = modifier) {
-        Text("Hello world.")
-        GoogleMapsView(
-            state = mapViewState,
         )
     }
 }

@@ -91,17 +91,17 @@ dependencies {
 
     implementation("com.google.android.material:material:1.12.0")
 
-    // Google Maps SDK - Version 19.2.0 (as used by MapConductor 1.0.0)
-    implementation("com.google.android.gms:play-services-maps:19.2.0")
-
-    // MapConductor BOM for version management
-    implementation(platform("com.mapconductor:mapconductor-bom:1.0.0"))
-
-    // MapConductor modules (versions managed by BOM)
-    implementation("com.mapconductor:core")
-    implementation("com.mapconductor:for-googlemaps")
-
-//    implementation("com.mapconductor:marker-strategy")
+//    // Google Maps SDK - Version 19.2.0 (as used by MapConductor 1.0.0)
+//    implementation("com.google.android.gms:play-services-maps:19.2.0")
+//
+//    // MapConductor BOM for version management
+//    implementation(platform("com.mapconductor:mapconductor-bom:1.0.0"))
+//
+//    // MapConductor modules (versions managed by BOM)
+//    implementation("com.mapconductor:core")
+//    implementation("com.mapconductor:for-googlemaps")
+//
+////    implementation("com.mapconductor:marker-strategy")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.navigation:navigation-compose:2.8.0")
