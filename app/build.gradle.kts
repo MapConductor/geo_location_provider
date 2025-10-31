@@ -87,6 +87,7 @@ dependencies {
     implementation(project(":core"))
     implementation(project(":dataselector"))
     implementation(project(":datamanager"))
+    implementation(project(":deadreckoning"))
 
     implementation("com.google.android.material:material:1.12.0")
 

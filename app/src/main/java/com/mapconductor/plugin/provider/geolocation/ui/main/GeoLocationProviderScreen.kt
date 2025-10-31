@@ -1,5 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.ui.main
 
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.mapconductor.plugin.provider.geolocation.ui.components.LocationHistoryList
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
 // ★ 統一：work パッケージの Scheduler を使用
 
 /**
@@ -54,7 +58,7 @@ fun GeoLocationProviderScreen(
                 // 更新間隔（秒）入力 → サービスに反映
                 val context = LocalContext.current
                 val viewModel = remember {
-                    IntervalSettingsViewModel(context.applicationContext)
+                    LocalIntervalSettingsViewModel(context.applicationContext)
                 }
                 IntervalSettingsSection(viewModel)
 
@@ -63,11 +67,11 @@ fun GeoLocationProviderScreen(
                 Spacer(Modifier.height(12.dp))
                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
-//                // 主画面に出したい場合はコメントアウト解除
-//                BacklogMaintenanceSection(
-//                    onRunNow = { MidnightExportScheduler.runNow(context) },
-//                    onOpenDriveSettings = onOpenDriveSettings
-//                )
+                // 主画面に出したい場合はコメントアウト解除
+                // BacklogMaintenanceSection(
+                //     onRunNow = { MidnightExportScheduler.runNow(context) },
+                //     onOpenDriveSettings = onOpenDriveSettings
+                // )
 
                 HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
                 Spacer(Modifier.height(8.dp))
@@ -88,9 +92,8 @@ fun GeoLocationProviderScreen(
 
 /* --- 以下、画面内で使う補助Composableたち --- */
 @Composable
-fun IntervalSettingsSection(viewModel: IntervalSettingsViewModel) {
-    val secondsState = viewModel.secondsText.collectAsState()
-    val seconds = secondsState.value
+fun IntervalSettingsSection(viewModel: LocalIntervalSettingsViewModel) {
+    val seconds = viewModel.secondsText.collectAsState().value
 
     Row(
         modifier = Modifier
@@ -109,6 +112,17 @@ fun IntervalSettingsSection(viewModel: IntervalSettingsViewModel) {
         Button(onClick = { viewModel.saveAndApply() }) {
             Text("Save & Apply")
         }
+        Spacer(Modifier.height(8.dp))
+
+        val predictCount = viewModel.predictCount.collectAsState().value
+        OutlinedTextField(
+            value = predictCount,
+            onValueChange = viewModel::onPredictCountChanged,
+            label = { Text("予測回数") },
+            singleLine = true,
+            enabled = true, // IMU非搭載でも入力は可能。ただし保存時の検証で拒否（仕様どおり）
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 
@@ -145,5 +159,46 @@ private fun BacklogMaintenanceSection(
             text = "最古の未アップロード日を優先処理します（ネットワーク要件あり）。",
             style = MaterialTheme.typography.bodySmall
         )
+    }
+}
+
+/* --- 画面内ローカルVM（同名衝突を避けるためリネーム） --- */
+class LocalIntervalSettingsViewModel(
+    @Suppress("unused") private val appContext: Context
+) {
+    // 表示用 StateFlow（collectAsState() に初期値不要）
+    private val _secondsText = MutableStateFlow("10") // 既定 10sec
+    val secondsText: StateFlow<String> = _secondsText
+
+    private val _predictCount = MutableStateFlow("5") // 既定 5回
+    val predictCount: StateFlow<String> = _predictCount
+
+    fun onSecondsChanged(newValue: String) {
+        // 数字以外は無視、空は許容
+        if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+            _secondsText.value = newValue
+        }
+    }
+
+    fun onPredictCountChanged(newValue: String) {
+        if (newValue.isEmpty() || newValue.all { it.isDigit() }) {
+            _predictCount.value = newValue
+        }
+    }
+
+    /** 仕様の最小値（秒）や回数の簡易検証のみ。永続化/サービス反映は既存の実装に接続してください。 */
+    fun saveAndApply() {
+        // 最低5秒（空や0は5に矯正）
+        val sec = _secondsText.value.toIntOrNull()?.coerceAtLeast(5) ?: 5
+        _secondsText.value = sec.toString()
+
+        // 予測回数は1以上（空や0は1に矯正）
+        val count = _predictCount.value.toIntOrNull()?.coerceAtLeast(1) ?: 1
+        _predictCount.value = count.toString()
+
+        // TODO: 永続化（DataStore 等）と、サービスへの反映（既存の設定適用フロー）を呼び出す
+        // ex) settingsStore.saveIntervalSeconds(sec)
+        // ex) settingsStore.savePredictCount(count)
+        // ex) ForegroundService.applyNewSettings(...)
     }
 }
