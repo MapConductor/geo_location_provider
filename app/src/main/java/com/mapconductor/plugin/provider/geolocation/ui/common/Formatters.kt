@@ -13,20 +13,34 @@ object Formatters {
     fun timeJst(ms: Long?): String =
         ms?.let { timeFmt.format(Instant.ofEpochMilli(it).atZone(zoneJst)) } ?: "-"
 
-    fun providerText(raw: String?): String =
-        when (raw?.lowercase(Locale.ROOT)) {
-            null      -> "-"
-            "fused"   -> "Fused"
-            "gps"     -> "GPS"
-            "network" -> "Network"
-            else      -> raw
+    /**
+     * Provider string -> friendly text.
+     * - Dead reckoning identifiers ("dead", "deadreckoning", "dr") -> "DeadReckoning"
+     * - GPS/fused/network values are normalized to "GPS" / "Network"
+     * - Null/blank -> "-"
+     * - Otherwise returns the raw string.
+     */
+    fun providerText(raw: String?): String {
+        val v = raw?.trim()?.lowercase(Locale.ROOT) ?: return "-"
+        return when {
+            v.contains("dead") || v == "dr" -> "DeadReckoning"
+            v == "gps" || v == "fused" || v.contains("gnss") || v.contains("satellite") -> "GPS"
+            v.contains("network") -> "Network"
+            else -> raw
+        }
+    }
+
+    fun batteryText(pct: Int?, charging: Boolean?): String =
+        if (pct == null) "-" else buildString {
+            append("$pct%")
+            if (charging == true) append(" (Charging)")
         }
 
-    fun batteryText(percent: Int?, charging: Boolean?): String =
-        if (percent == null || charging == null) "-" else "${percent}%(${if (charging) "充電中" else "未充電"})"
+    fun headingText(deg: Float?): String =
+        deg?.let { "${oneDecimal(it)}°" } ?: "-"
 
-    fun headingText(deg: Float?): String = deg?.let { "${oneDecimal(it)}°" } ?: "-"
-    fun courseText(deg: Float?): String  = deg?.let { "${oneDecimal(it)}°" } ?: "-"
+    fun courseText(deg: Float?): String =
+        deg?.let { "${oneDecimal(it)}°" } ?: "-"
 
     /** m/s -> "0.0Km/h(0.0m/s)"（無いとき "-"） */
     fun speedText(mps: Float?): String =

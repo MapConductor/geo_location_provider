@@ -105,7 +105,7 @@ private fun IntervalAndPredictArea(
         OutlinedTextField(
             value = sec,
             onValueChange = { vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3)) },
-            label = { Text("Interval (sec)") },
+            label = { Text("GPS取得間隔") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)
