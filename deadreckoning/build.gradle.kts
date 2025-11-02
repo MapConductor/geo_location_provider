@@ -19,9 +19,6 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
-        freeCompilerArgs += listOf(
-            "-Xjvm-default=all"
-        )
     }
 
     buildFeatures {
@@ -35,8 +32,4 @@ dependencies {
 
     // AndroidX
     implementation(libs.androidx.core.ktx)
-
-    // 他モジュール
-    // StorageService の公開ドメイン(LocationLog等)に依存します
-    implementation(project(":storageservice"))
 }

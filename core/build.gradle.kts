@@ -36,4 +36,7 @@ dependencies {
 
     // コルーチン
     implementation(libs.kotlinx.coroutines.android)
+
+    // DeadReckoning engine（今回追加）
+    implementation(project(":deadreckoning"))
 }
