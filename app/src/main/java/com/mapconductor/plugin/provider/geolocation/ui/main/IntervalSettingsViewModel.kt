@@ -96,6 +96,7 @@ class IntervalSettingsViewModel(
 
             if (allowSavePredict) {
                 store.setPredictCount(count)
+                applyPredictToService(count)
             } else {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(
@@ -115,6 +116,14 @@ class IntervalSettingsViewModel(
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
             action = GeoLocationService.ACTION_UPDATE_INTERVAL
             putExtra(GeoLocationService.EXTRA_UPDATE_MS, ms)
+        }
+        appContext.startService(intent)
+    }
+
+    private fun applyPredictToService(count: Int) {
+        val intent = Intent(appContext, GeoLocationService::class.java).apply {
+            action = GeoLocationService.ACTION_UPDATE_PREDICT
+            putExtra(GeoLocationService.EXTRA_PREDICT_COUNT, count)
         }
         appContext.startService(intent)
     }

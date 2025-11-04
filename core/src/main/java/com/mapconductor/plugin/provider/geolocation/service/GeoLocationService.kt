@@ -33,8 +33,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class GeoLocationService : Service() {
@@ -73,6 +75,12 @@ class GeoLocationService : Service() {
     @Volatile private var lastInsertSig: Long = 0L
     private val insertLock = Any()
 
+    // ★ DRリアルタイム発行用
+    private var drTickerJob: Job? = null
+    @Volatile private var lastDrInsertMillis: Long = 0L
+    @Volatile private var lastDrInsertSig: Long = 0L
+    private val drInsertLock = Any()
+
     fun getUpdateIntervalMs(): Long = updateIntervalMs
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -91,18 +99,21 @@ class GeoLocationService : Service() {
                 ensureChannel()
                 startForeground(NOTIF_ID, buildStatusNotification(lastMillis = null))
                 serviceScope.launch(Dispatchers.IO) { restartLocationUpdates() }
+                restartDrTicker() // ★ 起動時からリアルタイムDRを回す
             }
             ACTION_UPDATE_INTERVAL -> {
                 val newMs = intent.getLongExtra(EXTRA_UPDATE_MS, -1L)
                 if (newMs > 0L) {
                     updateIntervalMs = newMs
                     serviceScope.launch(Dispatchers.IO) { restartLocationUpdates() }
+                    restartDrTicker() // ★ 周期が変わるので再起動
                 }
             }
             ACTION_UPDATE_PREDICT -> {
                 val newCount = intent.getIntExtra(EXTRA_PREDICT_COUNT, -1)
                 if (newCount >= 0) {
                     predictCount = newCount
+                    restartDrTicker() // ★ 周期が変わるので再起動
                 }
             }
             ACTION_STOP -> {
@@ -122,6 +133,7 @@ class GeoLocationService : Service() {
         try { dr?.close() } catch (_: Throwable) {}
         dr = null
 
+        drTickerJob?.cancel() // ★ 追加
         serviceScope.cancel()
         super.onDestroy()
     }
@@ -219,8 +231,7 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 3) 直前の Fix から今回 Fix までの間を predictCount 分割で予測し保存
-        //    例: interval=30s, predictCount=5 -> 5点（6分割の中間5点）を dead_reckoning として保存
+        // 3) 直前の Fix から今回 Fix までの間を predictCount 分割で予測し保存（バックフィル）
         if (lastFix != null && predictCount > 0) {
             val stepMs = (updateIntervalMs.toDouble() / (predictCount + 1)).toLong().coerceAtLeast(500L)
             val targets = (1..predictCount).map { t -> lastFix + stepMs * t }.filter { it < now - 100L }
@@ -230,20 +241,19 @@ class GeoLocationService : Service() {
                     serviceScope.launch(Dispatchers.IO) {
                         for (t in targets) {
                             try {
-                                // DeadReckoning は範囲 [lastFix, t] の代表点（現実装では toMillis 側）を返す
                                 val pts: List<PredictedPoint> = d.predict(fromMillis = lastFix, toMillis = t)
                                 val p = pts.lastOrNull() ?: continue
                                 dao.insert(
                                     LocationSample(
                                         lat = p.lat,
                                         lon = p.lon,
-                                        accuracy = (p.accuracyM ?: Float.NaN),
+                                        accuracy = (p.accuracyM?.toFloat() ?: Float.NaN), // ★ 明示キャスト
                                         provider = "dead_reckoning",
                                         batteryPct = bat.percent,
                                         isCharging = bat.isCharging,
-                                        headingDeg = null,         // 確度が担保できるまで null に
+                                        headingDeg = null,
                                         courseDeg = null,
-                                        speedMps = p.speedMps,
+                                        speedMps = p.speedMps?.toFloat(),                 // ★ 念のため Float? に
                                         gnssUsed = null,
                                         gnssTotal = null,
                                         gnssCn0Mean = null,
@@ -261,6 +271,86 @@ class GeoLocationService : Service() {
 
         lastFixMillis = now
         updateStatusNotification(lastFix)
+    }
+
+    // ------------------------
+    //   DR リアルタイム発行ループ（GPS無しでも更新）
+    // ------------------------
+    private fun restartDrTicker() {
+        drTickerJob?.cancel()
+        val stepMs = ((updateIntervalMs / (predictCount + 1).coerceAtLeast(1))).coerceAtLeast(500L)
+        drTickerJob = serviceScope.launch(Dispatchers.Default) {
+            while (true) {
+                try {
+                    val base = lastFixMillis
+                    val engine = dr
+                    if (base != null && engine != null) {
+                        val now = System.currentTimeMillis()
+                        // 直近Fixから“今”までの推定を取得し、末尾（最新）だけを採用
+                        val pts: List<PredictedPoint> = try {
+                            engine.predict(fromMillis = base, toMillis = now)
+                        } catch (_: Throwable) {
+                            emptyList()
+                        }
+                        val p = pts.lastOrNull()
+                        if (p != null) {
+                            // ★ 型を明確化して Elvis による型崩れを防止
+                            val accF: Float = p.accuracyM?.toFloat() ?: Float.NaN
+                            val speedD: Double = p.speedMps?.toDouble() ?: Double.NaN
+
+                            // 重複/過剰挿入の抑制
+                            val bat = BatteryStatusReader.read(applicationContext)
+                            val sig = sig(
+                                p.lat, p.lon, accF,                       // ★ Float で渡す
+                                "dead_reckoning",
+                                Double.NaN, Double.NaN, speedD,           // ★ Double で渡す
+                                -1, -1, Double.NaN,
+                                bat.percent, bat.isCharging
+                            )
+                            var skip = false
+                            synchronized(drInsertLock) {
+                                if (sig == lastDrInsertSig && now - lastDrInsertMillis <= (stepMs / 2)) {
+                                    skip = true
+                                } else {
+                                    lastDrInsertSig = sig
+                                    lastDrInsertMillis = now
+                                }
+                            }
+                            if (!skip) {
+                                // DB に「現在の推定点」を即時反映（UIはRoom観測でリアルタイム更新）
+                                val dao = AppDatabase.get(applicationContext).locationSampleDao()
+                                launch(Dispatchers.IO) {
+                                    try {
+                                        dao.insert(
+                                            LocationSample(
+                                                lat = p.lat,
+                                                lon = p.lon,
+                                                accuracy = accF,                      // ★ Float で保存
+                                                provider = "dead_reckoning",
+                                                batteryPct = bat.percent,
+                                                isCharging = bat.isCharging,
+                                                headingDeg = null,
+                                                courseDeg = null,
+                                                speedMps = p.speedMps?.toFloat(),    // ★ Float? で保存
+                                                gnssUsed = null,
+                                                gnssTotal = null,
+                                                gnssCn0Mean = null,
+                                                createdAt = now // “いま”の時刻でリアルタイム表示
+                                            )
+                                        )
+                                    } catch (_: Throwable) {
+                                        // ignore
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Throwable) {
+                    // 例外はループ継続
+                }
+                delay(stepMs)
+            }
+        }
     }
 
     // ------------------------
