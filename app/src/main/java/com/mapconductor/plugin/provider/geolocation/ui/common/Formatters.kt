@@ -8,7 +8,7 @@ import kotlin.math.roundToInt
 
 object Formatters {
     private val zoneJst = ZoneId.of("Asia/Tokyo")
-    private val timeFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd(E) HH:mm:ss'.00'", Locale.JAPAN)
+    private val timeFmt = DateTimeFormatter.ofPattern("yyyy/MM/dd(E) HH:mm:ss", Locale.JAPAN)
 
     fun timeJst(ms: Long?): String =
         ms?.let { timeFmt.format(Instant.ofEpochMilli(it).atZone(zoneJst)) } ?: "-"
@@ -44,15 +44,15 @@ object Formatters {
 
     /** m/s -> "0.0Km/h(0.0m/s)"（無いとき "-"） */
     fun speedText(mps: Float?): String =
-        mps?.let { "${oneDecimal(it * 3.6f)}Km/h(${oneDecimal(it)}m/s)" } ?: "-"
+        mps?.let { "${oneDecimal(it * 3.6f)} Km/h (${oneDecimal(it)} m/s)" } ?: "-"
 
     fun gnssUsedTotal(used: Int?, total: Int?): String =
         if (used == null || total == null) "-" else "$used/$total"
 
-    fun cn0Text(cn0: Float?): String = cn0?.let { "${oneDecimal(it)}dB-Hz" } ?: "-"
+    fun cn0Text(cn0: Float?): String = cn0?.let { "${oneDecimal(it)} dB-Hz" } ?: "-"
 
     fun latLonAcc(lat: Double, lon: Double, acc: Float): String =
-        "[lng]${"%.6f".format(lon)}, [lat]${"%.6f".format(lat)}, [Acc]${"%.2f".format(acc)}m"
+        "Lat=${"%.6f".format(lat)}, Lng=${"%.6f".format(lon)}, Acc=${"%.2f".format(acc)} m"
 
     private fun oneDecimal(x: Float): String = ((x * 10f).roundToInt() / 10f).toString()
 }

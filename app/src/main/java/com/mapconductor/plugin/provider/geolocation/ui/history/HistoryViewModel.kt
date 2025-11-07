@@ -15,7 +15,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 画面に映る分だけ描画するため、DAO側では上限を設けない（ここでlimit指定） */
     val latest: Flow<List<LocationSample>> =
-        StorageService.latestFlow(getApplication(), limit = 6)
+        StorageService.latestFlow(getApplication(), limit = 8)
 
     /** 最新1件（Flow） */
     val latestOne: Flow<LocationSample?> =
