@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.ui.history
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -14,16 +15,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
-import androidx.compose.material.icons.outlined.BatteryFull
 import androidx.compose.material.icons.outlined.CompassCalibration
 import androidx.compose.material.icons.outlined.Explore
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.SatelliteAlt
-import androidx.compose.material.icons.outlined.SettingsInputAntenna
+import androidx.compose.material.icons.outlined.GpsFixed
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material3.Divider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -31,8 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 
 private val ICON_SIZE: Dp = 18.dp
 
@@ -41,6 +40,18 @@ fun LocationHistoryList(
     records: List<LocationSample>,
     modifier: Modifier = Modifier
 ) {
+    // 空プレースホルダ（“壊れてる？”を防ぐ）
+    if (records.isEmpty()) {
+        Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "まだ記録がありません",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        return
+    }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(vertical = 4.dp)
@@ -52,89 +63,73 @@ fun LocationHistoryList(
     }
 }
 
-/** ← ここを public（デフォルト可視性）に変更 */
+/** 1レコード行 */
 @Composable
 fun HistoryRow(
     item: LocationSample,
     modifier: Modifier = Modifier
 ) {
-    val time   = Formatters.timeJst(item.createdAt)
+    val time   = Formatters.timeJst(item.timeMillis)
     val prov   = Formatters.providerText(item.provider)
-    val bat    = Formatters.batteryText(item.batteryPct, item.isCharging)
-    val loc    = Formatters.latLonAcc(item.lat, item.lon, item.accuracy)
-    val head   = Formatters.headingText(item.headingDeg)
-    val course = Formatters.courseText(item.courseDeg)
-    val speed  = Formatters.speedText(item.speedMps)
+    val latlon = Formatters.latLonAcc(item.lat, item.lon, item.accuracy)
+    val head   = Formatters.headingText(item.headingDeg.toFloat())
+    val course = Formatters.courseText(item.courseDeg.toFloat())
+    val speed  = Formatters.speedText(item.speedMps.toFloat())
     val gnss   = Formatters.gnssUsedTotal(item.gnssUsed, item.gnssTotal)
-    val cn0    = Formatters.cn0Text(item.gnssCn0Mean)
+    val cn0    = Formatters.cn0Text(item.cn0.toFloat())
 
     Column(
         modifier = modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        // 1行目: [時計] Time
+        // 1行目: [時計] 時刻 / Provider
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
             BoldLabel("Time")
             Text(time, style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // 2行目: [アンテナ] Provider / [電池] Battery
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.SettingsInputAntenna, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Provider")
-            Text(prov, style = MaterialTheme.typography.bodyMedium)
 
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-            Icon(Icons.Outlined.BatteryFull, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.GpsFixed, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
-            BoldLabel("Battery")
-            Text(bat, style = MaterialTheme.typography.bodyMedium)
+            BoldLabel("Provider")
+            Text(prov, style = MaterialTheme.typography.bodyMedium)
         }
 
-        // 3行目: [地球] Lat/Lon/Acc
+        // 2行目: [位置] Lat/Lon/Acc
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.LocationOn, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
-            BoldLabel("Location")
-            Text(loc, style = MaterialTheme.typography.bodyMedium)
+            BoldLabel("Lat/Lon/Acc")
+            Text(latlon, style = MaterialTheme.typography.bodyMedium)
+        }
+
+        // 3行目: [GNSS] Used/Total
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            Spacer(Modifier.width(6.dp))
+            BoldLabel("GNSS")
+            Text(gnss, style = MaterialTheme.typography.bodyMedium)
         }
 
         // 4行目: [方位] Heading / Course / Speed
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CompassCalibration, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.CompassCalibration, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
             BoldLabel("Heading")
             Text(head, style = MaterialTheme.typography.bodyMedium)
 
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-            Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
             BoldLabel("Course")
             Text(course, style = MaterialTheme.typography.bodyMedium)
 
             Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-            Icon(Icons.Outlined.SatelliteAlt, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("Speed")
-            Text(speed, style = MaterialTheme.typography.bodyMedium)
-        }
-
-        // 5行目: [衛星] GNSS used/total / [電波] C/N0
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.SatelliteAlt, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
-            Spacer(Modifier.width(6.dp))
-            BoldLabel("GNSS")
-            Text(gnss, style = MaterialTheme.typography.bodyMedium)
-
-            Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
-            Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
+            androidx.compose.material3.Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(ICON_SIZE))
             Spacer(Modifier.width(6.dp))
             BoldLabel("C/N0")
             Text(cn0, style = MaterialTheme.typography.bodyMedium)

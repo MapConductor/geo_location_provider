@@ -24,8 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.text.KeyboardOptions   // ★ 修正: foundation.text から
-import androidx.compose.ui.text.input.KeyboardType     // ★ KeyboardType は ui.text.input のまま
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
@@ -33,14 +33,14 @@ import com.mapconductor.plugin.provider.geolocation.ui.history.LocationHistoryLi
 
 /**
  * 画面エントリ。
- * - 設定行は [Interval][予測回数][Save&Apply] の順（2つの入力枠は同幅）
+ * - 設定行は [Interval][DR予測間隔(秒)][Save&Apply] の順（2つの入力枠は同幅）
  * - 履歴は VM から受け取って描画コンポーネントに records として渡す（UI側で Room に触れない）
  */
 @Composable
 fun GeoLocationProviderScreen(
     state: UiState,
     onButtonClick: () -> Unit,
-    onOpenDriveSettings: () -> Unit = {}
+//    onManualExportClick: () -> Unit
 ) {
     val ctx = LocalContext.current
     val intervalVm: IntervalSettingsViewModel = viewModel(
@@ -61,9 +61,9 @@ fun GeoLocationProviderScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-                HeaderArea(state)
+//                HeaderArea(state)
 
-                IntervalAndPredictArea(intervalVm, ctx)
+                IntervalAndDrArea(intervalVm, ctx)
 
                 HorizontalDivider(
                     thickness = DividerDefaults.Thickness,
@@ -79,6 +79,7 @@ fun GeoLocationProviderScreen(
     }
 }
 
+/** [Interval][DR予測間隔(秒)][Save&Apply] + 2つの枠は同幅(weight=1f) */
 @Composable
 private fun HeaderArea(state: UiState) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -91,14 +92,13 @@ private fun HeaderArea(state: UiState) {
     }
 }
 
-/** [Interval][予測回数][Save&Apply] + 2つの枠は同幅(weight=1f) */
 @Composable
-private fun IntervalAndPredictArea(
+private fun IntervalAndDrArea(
     vm: IntervalSettingsViewModel,
     ctx: Context
 ) {
     val sec by vm.secondsText.collectAsState()
-    val cnt by vm.predictCountText.collectAsState()
+    val dr by vm.drIntervalText.collectAsState()
 
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
 
@@ -106,6 +106,7 @@ private fun IntervalAndPredictArea(
             value = sec,
             onValueChange = { vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3)) },
             label = { Text("GPS取得間隔") },
+//            supportingText = { Text("最小5秒") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)
@@ -114,9 +115,10 @@ private fun IntervalAndPredictArea(
         Spacer(modifier = Modifier.width(8.dp))
 
         OutlinedTextField(
-            value = cnt,
-            onValueChange = { vm.onPredictCountChanged(it.filter { c -> c.isDigit() }.take(2)) },
-            label = { Text("予測回数") },
+            value = dr,
+            onValueChange = { vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3)) },
+            label = { Text("DR予測間隔(秒)") },
+//            supportingText = { Text("最小5秒、上限はGPS間隔の半分（切り捨て）。GPS間隔の最小は5秒です。") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)

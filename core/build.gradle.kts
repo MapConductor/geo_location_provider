@@ -39,4 +39,5 @@ dependencies {
 
     // DeadReckoning engine（今回追加）
     implementation(project(":deadreckoning"))
+    implementation(project(":storageservice"))
 }

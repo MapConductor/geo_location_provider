@@ -1,6 +1,10 @@
 plugins {
-    alias(libs.plugins.android.application)
+    // AGP は親の classpath 版を使う（version を書かない）
+    id("com.android.library")
+    // これらは version catalog の alias を使う
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.room)
 }
 
 android {
@@ -8,13 +12,9 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.mapconductor.plugin.provider.storageservice"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        consumerProguardFiles(file("consumer-rules.pro"))
     }
 
     buildTypes {
@@ -26,21 +26,30 @@ android {
             )
         }
     }
+
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 }
 
 dependencies {
+    // ❌ 循環防止のため core へは依存しない
+    // implementation(project(":core"))  ← 追加しない
 
-    implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.androidx.junit)
-    androidTestImplementation(libs.androidx.espresso.core)
+    // Room をこのモジュールで完結させる
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // コルーチン
+    implementation(libs.kotlinx.coroutines.core)
+}
+
+room {
+    // Room スキーマ出力先
+    schemaDirectory("$projectDir/schemas")
 }

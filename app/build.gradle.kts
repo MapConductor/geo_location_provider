@@ -88,20 +88,9 @@ dependencies {
     implementation(project(":dataselector"))
     implementation(project(":datamanager"))
     implementation(project(":deadreckoning"))
+    implementation(project(":storageservice"))
 
     implementation("com.google.android.material:material:1.12.0")
-
-//    // Google Maps SDK - Version 19.2.0 (as used by MapConductor 1.0.0)
-//    implementation("com.google.android.gms:play-services-maps:19.2.0")
-//
-//    // MapConductor BOM for version management
-//    implementation(platform("com.mapconductor:mapconductor-bom:1.0.0"))
-//
-//    // MapConductor modules (versions managed by BOM)
-//    implementation("com.mapconductor:core")
-//    implementation("com.mapconductor:for-googlemaps")
-//
-////    implementation("com.mapconductor:marker-strategy")
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.navigation:navigation-compose:2.8.0")
@@ -109,7 +98,6 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-//    implementation(platform(libs.compose.bom))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
