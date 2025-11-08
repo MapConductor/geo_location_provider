@@ -1,6 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.algorithm
 
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import kotlin.math.abs
 import kotlin.math.max
@@ -47,13 +47,13 @@ fun snapToGrid(
         val right = g + halfWindowMs
 
         // 左端までポインタを進める
-        while (p < records.size && records[p].createdAt < left) p++
+        while (p < records.size && records[p].timeMillis < left) p++
 
         var bestIdx = -1
         var bestAbs = Long.MAX_VALUE
         var q = p
         while (q < records.size) {
-            val t = records[q].createdAt
+            val t = records[q].timeMillis
             if (t > right) break
             val ad = abs(t - g)
             if (ad < bestAbs) {
@@ -66,7 +66,7 @@ fun snapToGrid(
 
         if (bestIdx >= 0) {
             val s = records[bestIdx]
-            out.add(SelectedSlot(idealMs = g, sample = s, deltaMs = s.createdAt - g))
+            out.add(SelectedSlot(idealMs = g, sample = s, deltaMs = s.timeMillis - g))
         } else {
             out.add(SelectedSlot(idealMs = g, sample = null, deltaMs = null))
         }
@@ -76,7 +76,7 @@ fun snapToGrid(
 
 /** ダイレクト抽出（グリッド無し） → SelectedSlot に変換（ideal=createdAt, delta=0）。 */
 fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
-    records.map { SelectedSlot(idealMs = it.createdAt, sample = it, deltaMs = 0L) }
+    records.map { SelectedSlot(idealMs = it.timeMillis, sample = it, deltaMs = 0L) }
 
 /** デフォルト100。指定があれば 1 以上のみ有効。 */
 fun effectiveLimit(maxCount: Int?): Int? =

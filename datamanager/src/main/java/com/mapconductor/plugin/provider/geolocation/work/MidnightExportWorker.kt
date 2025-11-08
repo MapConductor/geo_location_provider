@@ -10,7 +10,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+
+// ▼ サンプル( LocationSample )は storageservice 側のDB
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase as StorageDb
+
+// ▼ ExportedDay は geolocation 側に残っている前提でこちらを使う
+import com.mapconductor.plugin.provider.geolocation.room.AppDatabase as LegacyDb
 import com.mapconductor.plugin.provider.geolocation.room.ExportedDay
 import com.mapconductor.plugin.provider.geolocation.room.ExportedDayDao
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
@@ -28,13 +33,8 @@ import java.util.concurrent.TimeUnit
 /**
  * 定時バックアップ（前日以前のバックログ処理も包含）
  *
- * 仕様:
- *  - 初回シード時は「昨日までの最大365日」を ExportedDay に ensure して網羅
- *  - 1日単位で GeoJSON を ZIP 出力 → Drive へアップロード（設定が有効な場合）
- *  - 結果に関わらず ZIP は必ず削除
- *  - アップロード成功時のみ、その日の LocationSample を DB から削除
- *  - 失敗/未設定時は Room を保持し、lastError に理由を保存
- *  - 実行後は翌日0:00に再スケジュール
+ * - LocationSample は storageservice の DB から読む
+ * - ExportedDay 系は geolocation の DB を使う（移行が終わるまでの暫定）
  */
 class MidnightExportWorker(
     appContext: Context,
@@ -45,9 +45,13 @@ class MidnightExportWorker(
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
     override suspend fun doWork(): Result {
-        val db = AppDatabase.get(applicationContext)
-        val sampleDao = db.locationSampleDao()
-        val dayDao: ExportedDayDao = db.exportedDayDao()
+        // サンプル用 DAO（storageservice 側）
+        val sdb = StorageDb.get(applicationContext)
+        val sampleDao = sdb.locationSampleDao()
+
+        // Export 管理用 DAO（geolocation 側）
+        val ldb = LegacyDb.get(applicationContext)
+        val dayDao: ExportedDayDao = ldb.exportedDayDao()
 
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
@@ -55,7 +59,7 @@ class MidnightExportWorker(
         // --- 初回シード：昨日までの最大365日を ensure（列名に依存しない方式） ---
         var oldest = dayDao.oldestNotUploaded()
         if (oldest == null) {
-            val backMaxDays = 365L // 必要に応じて調整可
+            val backMaxDays = 365L
             for (off in backMaxDays downTo 1L) {
                 val d = today.minusDays(off).toEpochDay()
                 if (d < todayEpochDay) {
@@ -73,14 +77,14 @@ class MidnightExportWorker(
             val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
             val baseName = "glp-${dateFmt.format(localDate)}"
 
-            // 1日のレコード取得（既存DAOのレンジAPIを使用）
+            // 1日のレコード取得（storageservice 側 DAO）
             val records = sampleDao.getInRangeAscOnce(
                 from = startMillis,
                 to = endMillis,
                 softLimit = 1_000_000
             )
 
-            // GeoJSON を ZIP でローカル生成（Downloads/.../baseName.zip）
+            // GeoJSON を ZIP でローカル生成
             val exported: Uri? = GeoJsonExporter.exportToDownloads(
                 context = applicationContext,
                 records = records,
@@ -88,7 +92,7 @@ class MidnightExportWorker(
                 compressAsZip = true
             )
 
-            // ローカル出力成功として印を付ける（空日でも成功扱い）
+            // ローカル出力成功の印（空日でも成功扱い）
             dayDao.markExportedLocal(target.epochDay)
 
             // アップロード（設定が揃っている場合のみ）
@@ -116,7 +120,6 @@ class MidnightExportWorker(
                 when (val up = uploader.upload(exported, prefs.folderId!!, "$baseName.zip")) {
                     is UploadResult.Success -> {
                         uploadSucceeded = true
-                        // fileId 等を保持したい場合は第二引数に保存
                         dayDao.markUploaded(target.epochDay, null)
                     }
                     is UploadResult.Failure -> {
@@ -133,15 +136,15 @@ class MidnightExportWorker(
                 }
             }
 
-            // ZIP は必ず削除（成功/失敗とも）
+            // ZIP は必ず削除
             exported?.let { safeDelete(it) }
 
-            // アップロード成功時のみ、当日のレコードを丸ごと削除
+            // 成功時のみ当日のレコードを削除（storageservice 側の DAO）
             if (uploadSucceeded && records.isNotEmpty()) {
                 try {
                     sampleDao.deleteAll(records)
                 } catch (_: Throwable) {
-                    // 削除失敗は致命ではないため握りつぶす（次周で再度対象になる）
+                    // 失敗は致命ではない（次周で再対象）
                 }
             }
 

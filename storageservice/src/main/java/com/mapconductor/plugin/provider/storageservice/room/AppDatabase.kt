@@ -16,17 +16,14 @@ abstract class AppDatabase : RoomDatabase() {
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
 
-        // ★ DB名を geolocation.db → storageservice.db に変更（coreと切り離す）
-        private const val DB_NAME = "storageservice.db"
-
         fun get(ctx: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     ctx.applicationContext,
                     AppDatabase::class.java,
-                    DB_NAME
+                    // ★ LocationSample 用の“唯一のDB名”
+                    "geolocation.db"
                 )
-                    // 安定運用に移ったらマイグレーション実装へ切替を推奨
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }

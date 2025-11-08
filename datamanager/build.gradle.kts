@@ -26,6 +26,7 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":dataselector"))
+    implementation(project(":storageservice"))
 
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.work.runtime.ktx)

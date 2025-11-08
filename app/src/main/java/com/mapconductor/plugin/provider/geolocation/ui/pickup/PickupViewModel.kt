@@ -3,8 +3,8 @@ package com.mapconductor.plugin.provider.geolocation.ui.pickup
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -116,7 +116,7 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
             val toQueryInclusive = min(nowMs, end + W)
             val records = dao.findBetween(fromQuery, toQueryInclusive + 1) // [from, to]
 
-            val slots = snapToGrid(records, grid, W) { it.createdAt }
+            val slots = snapToGrid(records, grid, W) { it.timeMillis }
             val hits = slots.count { it.sample != null }
 
             val fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.JAPAN)
@@ -167,7 +167,7 @@ class PickupViewModel(app: Application) : AndroidViewModel(app) {
             val toQueryInclusive = min(nowMs, nowMs + W) // +W しても nowMs を上限に
             val records = dao.findBetween(fromQuery, toQueryInclusive + 1)
 
-            val slots = snapToGrid(records, grid, W) { it.createdAt }
+            val slots = snapToGrid(records, grid, W) { it.timeMillis }
             val hits = slots.count { it.sample != null }
             val shortage = hits < wanted
 

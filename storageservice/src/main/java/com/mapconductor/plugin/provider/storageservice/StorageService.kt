@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.Flow
 /**
  * Room への直接アクセスを“ここ”に集約する薄いファサード。
  * - Service / ViewModel / UI からは AppDatabase/DAO を直接参照しない
- * - 将来、独立モジュール化しても呼び口はそのまま
  */
 object StorageService {
 

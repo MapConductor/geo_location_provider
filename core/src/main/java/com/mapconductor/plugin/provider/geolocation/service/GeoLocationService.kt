@@ -25,6 +25,7 @@ import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.storageservice.StorageService
+import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,10 +33,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.max
 import kotlin.math.min
@@ -73,7 +74,7 @@ class GeoLocationService : Service() {
 
     // DR（リアルタイム）タイカー
     private var drTickerJob: Job? = null
-    @Volatile private var drIntervalSec: Int = 5  // 新・UI連携がなくても動く既定値
+    @Volatile private var drIntervalSec: Int = 5  // 既定値
 
     // 重複挿入抑制（GPS/DR）
     @Volatile private var lastInsertMillis: Long = 0L
@@ -94,6 +95,34 @@ class GeoLocationService : Service() {
         gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
         dr = DeadReckoningImpl(applicationContext).also { it.start() }
         ensureChannel()
+
+        // ---- 起動直後の乖離対策（storageserviceの設定を使用） ----
+        // 1) 同期で現在値を即取得して反映（app へ依存せず）
+        runBlocking {
+            try {
+                val sec = withTimeout(700) {
+                    SettingsRepository.intervalSecFlow(applicationContext).first()
+                }
+                updateIntervalMs = max(5_000L, sec * 1_000L)
+            } catch (_: Throwable) {
+                // タイムアウト/失敗時は既定値(30s)を維持
+            }
+        }
+        // 2) 以降は変更を購読して即反映
+        serviceScope.launch {
+            SettingsRepository.intervalSecFlow(applicationContext)
+                .distinctUntilChanged()
+                .collect { sec ->
+                    val ms = max(5_000L, sec * 1_000L)
+                    if (ms != updateIntervalMs) {
+                        updateIntervalMs = ms
+                        if (isRunning.get()) {
+                            restartLocationUpdates()
+                        }
+                    }
+                }
+        }
+        // ---- ここまで ----
     }
 
     override fun onDestroy() {
@@ -147,7 +176,8 @@ class GeoLocationService : Service() {
         try { fusedClient.removeLocationUpdates(callback) } catch (_: Throwable) {}
         val req = LocationRequest.Builder(updateIntervalMs)
             .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-            .setMinUpdateIntervalMillis(updateIntervalMs)
+            .setMinUpdateIntervalMillis(updateIntervalMs) // 乖離抑制
+            .setMinUpdateDistanceMeters(0f)               // 間隔優先
             .setWaitForAccurateLocation(false)
             .build()
         fusedClient.requestLocationUpdates(req, callback, mainLooper)
@@ -213,7 +243,7 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 2) DRへ Fix を通知（基準更新のみ。タイマ同期はしない）
+        // 2) DRへ Fix を通知（基準更新のみ）
         lastFixMillis = now
         serviceScope.launch(Dispatchers.Default) {
             try {
@@ -231,7 +261,7 @@ class GeoLocationService : Service() {
 
         // 3) バックフィル：直前Fix→今回Fixの間を DR間隔(秒)で分割し保存
         if (lastFix != null) {
-            val stepMs = (drIntervalSec * 1000L).coerceAtLeast(5000L) // 安全のため最小5秒
+            val stepMs = (drIntervalSec * 1000L).coerceAtLeast(5000L)
             val targets = generateSequence(lastFix + stepMs) { it + stepMs }
                 .takeWhile { it < now - 100L }
                 .toList()
@@ -335,7 +365,6 @@ class GeoLocationService : Service() {
         val clamped = max(5, sec)
         drIntervalSec = clamped
         if (isRunning.get()) {
-            // すぐ反映（タイマ同期はしないが、周期は新値へ）
             startDrTicker()
         }
     }

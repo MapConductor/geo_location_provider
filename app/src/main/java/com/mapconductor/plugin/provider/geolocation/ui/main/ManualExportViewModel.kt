@@ -8,7 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
-import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult

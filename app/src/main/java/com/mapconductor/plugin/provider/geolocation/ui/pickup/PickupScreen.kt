@@ -15,8 +15,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.geolocation.room.AppDatabase
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation.condition.SortOrder
@@ -199,15 +199,15 @@ private fun PickupListBySlots(slots: List<SelectedSlot>) {
 @Composable
 private fun PickupRowFromSlot(index: Int, slot: SelectedSlot) {
     val sample: LocationSample? = slot.sample
-    val time   = sample?.let { Formatters.timeJst(it.createdAt) } ?: "-"
+    val time   = sample?.let { Formatters.timeJst(it.timeMillis) } ?: "-"
     val prov   = sample?.let { Formatters.providerText(it.provider) } ?: "-"
-    val bat    = sample?.let { Formatters.batteryText(it.batteryPct, it.isCharging) } ?: "-"
+    val bat    = sample?.let { Formatters.batteryText(it.batteryPercent, it.isCharging) } ?: "-"
     val loc    = sample?.let { Formatters.latLonAcc(it.lat, it.lon, it.accuracy) } ?: "-"
-    val head   = sample?.let { Formatters.headingText(it.headingDeg) } ?: "-"
-    val course = sample?.let { Formatters.courseText(it.courseDeg) } ?: "-"
-    val speed  = sample?.let { Formatters.speedText(it.speedMps) } ?: "-"
+    val head   = sample?.let { Formatters.headingText(it.headingDeg.toFloat()) } ?: "-"
+    val course = sample?.let { Formatters.courseText(it.courseDeg.toFloat()) } ?: "-"
+    val speed  = sample?.let { Formatters.speedText(it.speedMps.toFloat()) } ?: "-"
     val gnss   = sample?.let { Formatters.gnssUsedTotal(it.gnssUsed, it.gnssTotal) } ?: "-"
-    val cn0    = sample?.let { Formatters.cn0Text(it.gnssCn0Mean) } ?: "-"
+    val cn0    = sample?.let { Formatters.cn0Text(it.timeMillis.toFloat()) } ?: "-"
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),

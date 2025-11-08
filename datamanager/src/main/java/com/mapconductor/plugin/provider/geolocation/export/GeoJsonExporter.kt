@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import java.io.BufferedOutputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
@@ -115,17 +115,17 @@ object GeoJsonExporter {
             // 既存プロパティ
             sb.append("\"accuracy\":").append(r.accuracy)
             r.provider?.let { sb.append(",\"provider\":\"").append(it).append('"') }
-            sb.append(",\"battery_pct\":").append(r.batteryPct)
+            sb.append(",\"battery_pct\":").append(r.batteryPercent)
             sb.append(",\"is_charging\":").append(if (r.isCharging) "true" else "false")
-            sb.append(",\"created_at\":").append(r.createdAt)
+            sb.append(",\"created_at\":").append(r.timeMillis)
 
             // ▼ 追加プロパティ（null は出力しない）
-            r.headingDeg?.let   { sb.append(",\"heading_deg\":").append(it) }
-            r.courseDeg?.let    { sb.append(",\"course_deg\":").append(it) }
-            r.speedMps?.let     { sb.append(",\"speed_mps\":").append(it) }
-            r.gnssUsed?.let     { sb.append(",\"gnss_used\":").append(it) }
-            r.gnssTotal?.let    { sb.append(",\"gnss_total\":").append(it) }
-            r.gnssCn0Mean?.let  { sb.append(",\"gnss_cn0_mean\":").append(it) }
+            r.headingDeg.let   { sb.append(",\"heading_deg\":").append(it) }
+            r.courseDeg.let    { sb.append(",\"course_deg\":").append(it) }
+            r.speedMps.let     { sb.append(",\"speed_mps\":").append(it) }
+            r.gnssUsed.let     { sb.append(",\"gnss_used\":").append(it) }
+            r.gnssTotal.let    { sb.append(",\"gnss_total\":").append(it) }
+            r.cn0.let  { sb.append(",\"gnss_cn0_mean\":").append(it) }
 
             sb.append("}}")
         }

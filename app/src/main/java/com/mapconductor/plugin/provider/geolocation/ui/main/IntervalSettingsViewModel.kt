@@ -8,8 +8,8 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.geolocation.SettingsStore
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,7 +30,11 @@ class IntervalSettingsViewModel(
     private val appContext: Context
 ) : ViewModel() {
 
-    private val store = SettingsStore(appContext)
+    // Repository のルールに合わせた最小値（5秒）
+    private companion object {
+        const val MIN_INTERVAL_SEC = 5
+        const val MIN_DR_INTERVAL_SEC = 5
+    }
 
     private val _secondsText = MutableStateFlow("30")
     val secondsText: StateFlow<String> = _secondsText.asStateFlow()
@@ -42,12 +46,12 @@ class IntervalSettingsViewModel(
     val imuAvailable: StateFlow<Boolean> = _imuAvailable.asStateFlow()
 
     init {
-        // 既存値を DataStore から読み込み
+        // 既存値を DataStore（SettingsRepository）から読み込み
         viewModelScope.launch(Dispatchers.IO) {
-            val gpsSec = (store.currentIntervalMs() / 1000L).toInt()
-                .coerceAtLeast(SettingsStore.MIN_INTERVAL_SEC)
-            val drSec = store.currentDrIntervalSec()
-                .coerceAtLeast(SettingsStore.MIN_DR_INTERVAL_SEC)
+            val gpsSec = (SettingsRepository.currentIntervalMs(appContext) / 1000L).toInt()
+                .coerceAtLeast(MIN_INTERVAL_SEC)
+            val drSec = SettingsRepository.currentDrIntervalSec(appContext)
+                .coerceAtLeast(MIN_DR_INTERVAL_SEC)
 
             _secondsText.value = gpsSec.toString()
             _drIntervalText.value = drSec.toString()
@@ -81,9 +85,10 @@ class IntervalSettingsViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             // 1) GPS Interval 保存 + 反映
             val sec = _secondsText.value.toIntOrNull() ?: 30
-            val clampedSec = max(SettingsStore.MIN_INTERVAL_SEC, sec)
+            val clampedSec = max(MIN_INTERVAL_SEC, sec)
             val ms = clampedSec * 1000L
-            store.setUpdateIntervalMs(ms)
+            // SettingsStore.setUpdateIntervalMs(ms) → Repository では秒で保存
+            SettingsRepository.setIntervalSec(appContext, clampedSec)
             applyIntervalToService(ms)
 
             // 2) DR Interval 検証 → 保存 + 反映 or ロールバック
@@ -95,7 +100,7 @@ class IntervalSettingsViewModel(
 
             val gpsSec = clampedSec
             val upper = floor(gpsSec / 2.0).toInt()        // 上限
-            val lower = SettingsStore.MIN_DR_INTERVAL_SEC  // 下限=5
+            val lower = MIN_DR_INTERVAL_SEC                // 下限=5
             if (upper < lower) {
                 rollbackDrIntervalWithToast("現在のGPS間隔ではDR間隔を設定できません（GPSは最小10秒以上にしてください）")
                 return@launch
@@ -107,13 +112,13 @@ class IntervalSettingsViewModel(
             }
 
             // 保存 + サービス適用
-            store.setDrIntervalSec(drInput)
+            SettingsRepository.setDrIntervalSec(appContext, drInput)
             applyDrIntervalToService(drInput)
         }
     }
 
     private suspend fun rollbackDrIntervalWithToast(message: String) {
-        val saved = store.currentDrIntervalSec()
+        val saved = SettingsRepository.currentDrIntervalSec(appContext)
         _drIntervalText.value = saved.toString()
         launchToast(message)
     }

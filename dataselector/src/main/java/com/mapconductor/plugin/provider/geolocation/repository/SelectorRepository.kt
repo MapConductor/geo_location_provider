@@ -1,7 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.repository
 
-import com.mapconductor.plugin.provider.geolocation.room.LocationSample
-import com.mapconductor.plugin.provider.geolocation.room.LocationSampleDao
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
+import com.mapconductor.plugin.provider.storageservice.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation.algorithm.buildTargetsInclusive
 import com.mapconductor.plugin.provider.geolocation.algorithm.directToSlots
 import com.mapconductor.plugin.provider.geolocation.algorithm.effectiveLimit

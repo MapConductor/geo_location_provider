@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.storageservice.room
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -31,4 +32,57 @@ interface LocationSampleDao {
         """
     )
     fun latestOneFlow(): Flow<LocationSample?>
+
+    /** 全件（昇順；GeoJSON など時系列用途, suspend） */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        ORDER BY timeMillis ASC, id ASC
+        """
+    )
+    suspend fun findAll(): List<LocationSample>
+
+
+    /**
+     * 期間抽出（[from, to) ; createdAt は epoch millis）
+     * JST の 0:00 切りで使用（昇順）
+     */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        WHERE timeMillis >= :from AND timeMillis < :to
+        ORDER BY timeMillis ASC, id ASC
+        """
+    )
+    suspend fun findBetween(from: Long, to: Long): List<LocationSample>
+
+    /**
+     * 指定期間[from, to) のレコードを timeMillis 昇順で最大 softLimit 件取得。
+     * Worker の日次エクスポートで使用。
+     *
+     * NOTE:
+     *  - エンティティに tableName を付けている場合は、FROM のテーブル名を実名に合わせてください。
+     *    例) @Entity(tableName = "location_samples") → FROM location_samples
+     */
+    @Query(
+        """
+        SELECT * 
+        FROM location_samples
+        WHERE timeMillis >= :from AND timeMillis < :to
+        ORDER BY timeMillis ASC
+        LIMIT :softLimit
+        """
+    )
+    suspend fun getInRangeAscOnce(
+        from: Long,
+        to: Long,
+        softLimit: Int
+    ): List<LocationSample>
+
+    /**
+     * 渡したレコードをまとめて削除。
+     * （アップロード成功後のクリーンアップで使用）
+     */
+    @Delete
+    suspend fun deleteAll(items: List<LocationSample>)
 }
