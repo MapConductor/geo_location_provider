@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.SignalCellularAlt
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +42,6 @@ fun LocationHistoryList(
     records: List<LocationSample>,
     modifier: Modifier = Modifier
 ) {
-    // 空プレースホルダ
     if (records.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -53,15 +53,27 @@ fun LocationHistoryList(
         return
     }
 
-    LazyColumn(
-        modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(vertical = 4.dp)
-    ) {
-        items(records) { item ->
-            HistoryRow(item = item, modifier = Modifier.fillMaxWidth())
-            Divider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+    LazyColumn(modifier = modifier.fillMaxSize()) {
+        items(records, key = { it.id }) { item ->
+            HistoryRow(item)
+            HorizontalDivider()
         }
     }
+//    LazyColumn(
+//        modifier = modifier.fillMaxSize(),
+//        contentPadding = PaddingValues(vertical = 4.dp)
+//    ) {
+//        items(
+//            items = records,
+//            key = { it.id } // ★ 追加
+//        ) { item ->
+//            HistoryRow(item = item, modifier = Modifier.fillMaxWidth())
+//            Divider(
+//                thickness = 0.5.dp,
+//                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+//            )
+//        }
+//    }
 }
 
 /** 1レコード行 */

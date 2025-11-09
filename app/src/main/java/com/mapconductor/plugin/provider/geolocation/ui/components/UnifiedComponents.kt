@@ -25,24 +25,24 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@Composable
-fun LocationHistoryList(
-    modifier: Modifier = Modifier,
-    vm: HistoryViewModel = viewModel()
-) {
-    val rows = vm.latest.collectAsState(initial = emptyList()).value
-    val baseFmt = remember { SimpleDateFormat("yyyy/MM/dd(EEE) HH:mm:ss", Locale.JAPAN) }
-
-    // ★ 初回に測ったアイテム高さ(px)を保持（可変LIMITを使う場合の計測用）
-    val itemHeightPxState = remember { mutableStateOf<Int?>(null) }
-
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(bottom = 24.dp)
-    ) {
-        items(items = rows, key = { it.id }) { s ->
-            HistoryRow(item = s)
-            HorizontalDivider(thickness = 0.5.dp, color = DividerDefaults.color)
-        }
-    }
-}
+//@Composable
+//fun LocationHistoryList(
+//    modifier: Modifier = Modifier,
+//    vm: HistoryViewModel = viewModel()
+//) {
+//    val rows = vm.latest.collectAsState(initial = emptyList()).value
+//    val baseFmt = remember { SimpleDateFormat("yyyy/MM/dd(EEE) HH:mm:ss", Locale.JAPAN) }
+//
+//    // ★ 初回に測ったアイテム高さ(px)を保持（可変LIMITを使う場合の計測用）
+//    val itemHeightPxState = remember { mutableStateOf<Int?>(null) }
+//
+//    LazyColumn(
+//        modifier = modifier,
+//        contentPadding = PaddingValues(bottom = 24.dp)
+//    ) {
+//        items(items = rows, key = { it.id }) { s ->
+//            HistoryRow(item = s)
+//            HorizontalDivider(thickness = 0.5.dp, color = DividerDefaults.color)
+//        }
+//    }
+//}

@@ -1,11 +1,18 @@
 package com.mapconductor.plugin.provider.storageservice.room
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "location_samples")
+@Entity(
+    tableName = "location_samples",
+    indices = [
+        Index(value = ["timeMillis", "provider"], unique = true)
+    ]
+)
 data class LocationSample(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0L,
     val timeMillis: Long = System.currentTimeMillis(),
 
     val lat: Double,

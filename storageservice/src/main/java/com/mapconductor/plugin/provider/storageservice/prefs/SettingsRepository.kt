@@ -11,7 +11,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
-val Context.settingsDataStore by preferencesDataStore(name = "geolocation_settings")
+// ★ この拡張は “このファイルだけ” で可視化（他ファイルで二重定義されないように）
+private val Context.settingsDataStore by preferencesDataStore(name = "geolocation_settings")
+
 object SettingsRepository {
     // 旧仕様に合わせた既定値 / 下限
     private const val DEFAULT_INTERVAL_SEC = 30      // GPS取得間隔 既定
@@ -26,23 +28,27 @@ object SettingsRepository {
     // ---------- Flow ----------
     /** GPS取得間隔(秒) Flow（既定・下限を反映） */
     fun intervalSecFlow(context: Context): Flow<Int> =
-        context.settingsDataStore.data.map { prefs ->
+        context.applicationContext.settingsDataStore.data.map { prefs ->
             (prefs[KEY_INTERVAL_SEC] ?: DEFAULT_INTERVAL_SEC).coerceAtLeast(MIN_INTERVAL_SEC)
         }
 
     /** DR間隔(秒) Flow（既定・下限を反映） */
     fun drIntervalSecFlow(context: Context): Flow<Int> =
-        context.settingsDataStore.data.map { prefs ->
+        context.applicationContext.settingsDataStore.data.map { prefs ->
             (prefs[KEY_DR_INTERVAL_SEC] ?: DEFAULT_DR_SEC).coerceAtLeast(MIN_DR_SEC)
         }
 
     // ---------- Write ----------
     suspend fun setIntervalSec(context: Context, sec: Int) {
-        context.settingsDataStore.edit { it[KEY_INTERVAL_SEC] = sec.coerceAtLeast(MIN_INTERVAL_SEC) }
+        context.applicationContext.settingsDataStore.edit {
+            it[KEY_INTERVAL_SEC] = sec.coerceAtLeast(MIN_INTERVAL_SEC)
+        }
     }
 
     suspend fun setDrIntervalSec(context: Context, sec: Int) {
-        context.settingsDataStore.edit { it[KEY_DR_INTERVAL_SEC] = sec.coerceAtLeast(MIN_DR_SEC) }
+        context.applicationContext.settingsDataStore.edit {
+            it[KEY_DR_INTERVAL_SEC] = sec.coerceAtLeast(MIN_DR_SEC)
+        }
     }
 
     // ---------- Sync getters（既存コード互換用） ----------

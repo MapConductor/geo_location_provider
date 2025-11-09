@@ -10,24 +10,25 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface LocationSampleDao {
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(sample: LocationSample): Long
 
     /** 最新 N 件（Flow）。同一時刻がある場合でも順序が安定するよう id を二次キーに使用 */
-    @Query(
-        """
-        SELECT * FROM location_samples
-        ORDER BY timeMillis DESC
-        LIMIT :limit
-        """
-    )
+    @Query("""
+    SELECT * FROM location_samples
+    ORDER BY
+      timeMillis DESC,
+      CASE WHEN provider = 'gps' THEN 0 ELSE 1 END,  -- ★ 同一時刻ならGPSを先
+      id DESC                                        -- ★ 二次キーで安定化
+    LIMIT :limit
+""")
     fun latestFlow(limit: Int): Flow<List<LocationSample>>
 
-    /** 最新 1 件（Flow） */
+    /** 最後の1件（Flow） */
     @Query(
         """
         SELECT * FROM location_samples
-        ORDER BY timeMillis DESC
+        ORDER BY timeMillis DESC, id DESC
         LIMIT 1
         """
     )
@@ -78,6 +79,9 @@ interface LocationSampleDao {
         to: Long,
         softLimit: Int
     ): List<LocationSample>
+
+    @Query("SELECT COUNT(*) FROM location_samples")
+    suspend fun countAll(): Long
 
     /**
      * 渡したレコードをまとめて削除。
