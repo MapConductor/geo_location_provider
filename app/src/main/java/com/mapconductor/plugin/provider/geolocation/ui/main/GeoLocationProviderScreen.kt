@@ -105,7 +105,7 @@ private fun IntervalAndDrArea(
         OutlinedTextField(
             value = sec,
             onValueChange = { vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3)) },
-            label = { Text("GPS取得間隔") },
+            label = { Text("GPS取得間隔(>5秒)") },
 //            supportingText = { Text("最小5秒") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
@@ -117,7 +117,7 @@ private fun IntervalAndDrArea(
         OutlinedTextField(
             value = dr,
             onValueChange = { vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3)) },
-            label = { Text("DR予測間隔(秒)") },
+            label = { Text("DR予測間隔(>5秒)") },
 //            supportingText = { Text("最小5秒、上限はGPS間隔の半分（切り捨て）。GPS間隔の最小は5秒です。") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,

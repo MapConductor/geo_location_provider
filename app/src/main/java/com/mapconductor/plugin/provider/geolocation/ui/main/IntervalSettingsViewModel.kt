@@ -92,28 +92,34 @@ class IntervalSettingsViewModel(
             applyIntervalToService(ms)
 
             // 2) DR Interval 検証 → 保存 + 反映 or ロールバック
-            val drInput = _drIntervalText.value.toIntOrNull()
-            if (drInput == null) {
+            val drInterval = _drIntervalText.value.toIntOrNull()
+            if (drInterval == null) {
                 rollbackDrIntervalWithToast("数値を入力してください")
                 return@launch
             }
 
-            val gpsSec = clampedSec
-            val upper = floor(gpsSec / 2.0).toInt()        // 上限
+            val gpsInterval = clampedSec
+            val upper = floor(gpsInterval / 2.0).toInt()        // 上限
             val lower = MIN_DR_INTERVAL_SEC                // 下限=5
             if (upper < lower) {
                 rollbackDrIntervalWithToast("現在のGPS間隔ではDR間隔を設定できません（GPSは最小10秒以上にしてください）")
                 return@launch
             }
 
-            if (drInput < lower || drInput > upper) {
+            if (drInterval < lower || drInterval > upper) {
                 rollbackDrIntervalWithToast("DR予測間隔は5秒以上、かつGPS間隔の半分以下にしてください（上限: ${upper}秒）。")
                 return@launch
             }
 
             // 保存 + サービス適用
-            SettingsRepository.setDrIntervalSec(appContext, drInput)
-            applyDrIntervalToService(drInput)
+            SettingsRepository.setDrIntervalSec(appContext, drInterval)
+            applyDrIntervalToService(drInterval)
+
+            // 成功トースト（例：適用された値を表示）
+            launchToast(
+                "設定を保存して適用しました\n" +
+                "GPS間隔: ${gpsInterval}秒 / DR間隔: ${drInterval}秒"
+            )
         }
     }
 
