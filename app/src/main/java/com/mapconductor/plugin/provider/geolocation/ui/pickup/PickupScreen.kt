@@ -15,7 +15,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase as StorageDb
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
@@ -37,7 +37,7 @@ fun PickupScreen() {
     // ▼ dataselector：DAO → Repository → UseCase
     // -----------------------------
     val app = LocalContext.current.applicationContext as Application
-    val dao = remember { StorageDb.get(app).locationSampleDao() }
+    val dao = remember { AppDatabase.get(app).locationSampleDao() }
     val repo = remember { SelectorRepository(dao) }
     val buildSelectedSlots = remember { BuildSelectedSlots(repo) }
 

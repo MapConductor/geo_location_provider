@@ -3,7 +3,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.pickup
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase as StorageDb
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,7 +53,7 @@ sealed class PickupUiState {
 class PickupViewModel(app: Application) : AndroidViewModel(app) {
 
     private val zoneId: ZoneId = ZoneId.of("Asia/Tokyo")
-    private val dao = StorageDb.get(app).locationSampleDao()
+    private val dao = AppDatabase.get(app).locationSampleDao()
 
     private val _input = MutableStateFlow(PickupInput())
     val input: StateFlow<PickupInput> = _input

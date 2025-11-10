@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation.room
+package com.mapconductor.plugin.provider.storageservice.room
 
 import androidx.room.*
 

@@ -12,12 +12,11 @@ import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 
 // ▼ サンプル( LocationSample )は storageservice 側のDB
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase as StorageDb
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 
 // ▼ ExportedDay は geolocation 側に残っている前提でこちらを使う
-import com.mapconductor.plugin.provider.geolocation.room.AppDatabase as LegacyDb
-import com.mapconductor.plugin.provider.geolocation.room.ExportedDay
-import com.mapconductor.plugin.provider.geolocation.room.ExportedDayDao
+import com.mapconductor.plugin.provider.storageservice.room.ExportedDay
+import com.mapconductor.plugin.provider.storageservice.room.ExportedDayDao
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
@@ -46,11 +45,11 @@ class MidnightExportWorker(
 
     override suspend fun doWork(): Result {
         // サンプル用 DAO（storageservice 側）
-        val sdb = StorageDb.get(applicationContext)
+        val sdb = AppDatabase.get(applicationContext)
         val sampleDao = sdb.locationSampleDao()
 
         // Export 管理用 DAO（geolocation 側）
-        val ldb = LegacyDb.get(applicationContext)
+        val ldb = AppDatabase.get(applicationContext)
         val dayDao: ExportedDayDao = ldb.exportedDayDao()
 
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
