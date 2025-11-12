@@ -14,7 +14,6 @@ import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters.LoggingList
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 
-
 @Composable
 fun LocationHistoryList(
     records: List<LocationSample>,
@@ -30,7 +29,6 @@ fun LocationHistoryList(
         }
         return
     }
-
 
     LazyColumn(modifier = modifier.fillMaxSize()) {
         items(records, key = { it.id }) { item ->

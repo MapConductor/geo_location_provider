@@ -48,15 +48,19 @@ class SelectorRepository(
         }
 
         // グリッド列（両端含む）
-        val targets = buildTargetsInclusive(from, to, T)
+        val targets = if (cond.order == SortOrder.NewestFirst) {
+            // 「新しい方から」のときは To をアンカーに等間隔で構成
+            buildTargetsInclusiveAnchoredToEnd(from, to, T)
+        } else {
+            // 従来どおり From をアンカー
+            buildTargetsInclusive(from, to, T)
+        }
 
         // 候補の一括取得： [from-W, to+W)  ※ DAO は半開区間 toExcl のため +1ms で inclusive
         val fromQ = from - W
         val toQExcl = (to + W) + 1L
-
         val ascAll = dao.findBetween(fromQ, toQExcl)
 
-        // 精度で前処理
         val cand = filterByAccuracy(ascAll, cond.minAccuracy)
 
         // 吸着
@@ -64,7 +68,7 @@ class SelectorRepository(
 
         // 最終順序
         when (cond.order) {
-            SortOrder.OldestFirst -> {} // 既に昇順（targets 自体が from→to）
+            SortOrder.OldestFirst -> {} // 既に昇順（targets 自体が from→to or to アンカーで昇順生成）
             SortOrder.NewestFirst -> slots = slots.asReversed()
         }
 
@@ -111,5 +115,29 @@ class SelectorRepository(
                 src.asReversed()
             }
         }
+    }
+
+    /**
+     * To(期間終了)をアンカーにした等間隔グリッド（両端含む）を生成する。
+     * 例: from=10:00, to=13:45, T=30分 → [10:15, 10:45, …, 13:45]
+     * snapToGrid は昇順の grid を想定しているため、昇順で返す。
+     */
+    private fun buildTargetsInclusiveAnchoredToEnd(
+        fromInclusive: Long,
+        toInclusive: Long,
+        intervalMs: Long
+    ): List<Long> {
+        if (intervalMs <= 0L) return emptyList()
+        if (toInclusive < fromInclusive) return emptyList()
+        val span = toInclusive - fromInclusive
+        val steps = (span / intervalMs)  // 切り捨て回数
+        val first = toInclusive - steps * intervalMs
+        val out = ArrayList<Long>(((span / intervalMs) + 2).toInt())
+        var g = first
+        while (g <= toInclusive) {
+            out.add(g)
+            g += intervalMs
+        }
+        return out
     }
 }

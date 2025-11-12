@@ -87,8 +87,6 @@ fun PickupScreen() {
         modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text("Pickup（統一）", style = MaterialTheme.typography.titleMedium)
-
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
                 value = fromDate, onValueChange = { fromDate = it },
