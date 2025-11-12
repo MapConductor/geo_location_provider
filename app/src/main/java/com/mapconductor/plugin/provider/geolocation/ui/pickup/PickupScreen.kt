@@ -5,24 +5,21 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
-import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation.condition.SortOrder
 import com.mapconductor.plugin.provider.geolocation.repository.SelectorRepository
 import com.mapconductor.plugin.provider.geolocation.usecase.BuildSelectedSlots
-import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters.LoggingList
 import kotlinx.coroutines.launch
 import java.text.Normalizer
 import java.time.*
@@ -87,8 +84,8 @@ fun PickupScreen() {
 
     // ====== 画面 ======
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         Text("Pickup（統一）", style = MaterialTheme.typography.titleMedium)
 
@@ -189,86 +186,10 @@ fun PickupScreen() {
 private fun PickupListBySlots(slots: List<SelectedSlot>) {
     LazyColumn(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         itemsIndexed(slots) { idx, slot ->
-            PickupRowFromSlot(index = idx + 1, slot = slot)
-            Divider()
+            LoggingList(slot)
+            HorizontalDivider()
         }
     }
-}
-
-/* ====== 行表示（フォーマットは既存 Formatters を使用）====== */
-@Composable
-private fun PickupRowFromSlot(index: Int, slot: SelectedSlot) {
-    val sample: LocationSample? = slot.sample
-    val time   = sample?.let { Formatters.timeJst(it.timeMillis) } ?: "-"
-    val prov   = sample?.let { Formatters.providerText(it.provider) } ?: "-"
-    val bat    = sample?.let { Formatters.batteryText(it.batteryPercent, it.isCharging) } ?: "-"
-    val loc    = sample?.let { Formatters.latLonAcc(it.lat, it.lon, it.accuracy) } ?: "-"
-    val head   = sample?.let { Formatters.headingText(it.headingDeg.toFloat()) } ?: "-"
-    val course = sample?.let { Formatters.courseText(it.courseDeg.toFloat()) } ?: "-"
-    val speed  = sample?.let { Formatters.speedText(it.speedMps.toFloat()) } ?: "-"
-    val gnss   = sample?.let { Formatters.gnssUsedTotal(it.gnssUsed, it.gnssTotal) } ?: "-"
-    val cn0    = sample?.let { Formatters.cn0Text(it.timeMillis.toFloat()) } ?: "-"
-
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        // 理想時刻（グリッド）と Δ 表示（sample がある場合のみ）
-        val idealJst = Formatters.timeJst(slot.idealMs)
-        val delta    = slot.deltaMs?.let { d ->
-            val sign = if (d >= 0) "+" else "-"
-            val ad = kotlin.math.abs(d)
-            val sec = ad / 1000
-            "$sign${sec}s"
-        } ?: null
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Ideal"); Text(idealJst, style = MaterialTheme.typography.bodyMedium)
-            if (delta != null) {
-                Spacer(Modifier.width(12.dp))
-                Icon(Icons.Outlined.Timeline, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp)); BoldLabel("Δ"); Text(delta, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.AccessTime, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Time"); Text(time, style = MaterialTheme.typography.bodyMedium)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.SettingsInputAntenna, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Provider"); Text(prov, style = MaterialTheme.typography.bodyMedium)
-            Text(" / ", style = MaterialTheme.typography.bodyMedium)
-            Icon(Icons.Outlined.BatteryFull, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Battery"); Text(bat, style = MaterialTheme.typography.bodyMedium)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.Public, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Location"); Text(loc, style = MaterialTheme.typography.bodyMedium)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CompassCalibration, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Heading"); Text(head, style = MaterialTheme.typography.bodyMedium)
-            Text(" / ", style = MaterialTheme.typography.bodyMedium)
-            Icon(Icons.Outlined.Explore, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Course"); Text(course, style = MaterialTheme.typography.bodyMedium)
-            Text(" / ", style = MaterialTheme.typography.bodyMedium)
-            Icon(Icons.Outlined.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("Speed"); Text(speed, style = MaterialTheme.typography.bodyMedium)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.SatelliteAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("GNSS"); Text(gnss, style = MaterialTheme.typography.bodyMedium)
-            Text(" / ", style = MaterialTheme.typography.bodyMedium)
-            Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); BoldLabel("C/N0"); Text(cn0, style = MaterialTheme.typography.bodyMedium)
-        }
-    }
-}
-
-@Composable private fun BoldLabel(label: String) {
-    Text("$label : ", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
