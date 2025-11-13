@@ -87,7 +87,6 @@ class IntervalSettingsViewModel(
             val sec = _secondsText.value.toIntOrNull() ?: 30
             val clampedSec = max(MIN_INTERVAL_SEC, sec)
             val ms = clampedSec * 1000L
-            // SettingsStore.setUpdateIntervalMs(ms) → Repository では秒で保存
             SettingsRepository.setIntervalSec(appContext, clampedSec)
             applyIntervalToService(ms)
 

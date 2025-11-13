@@ -143,24 +143,22 @@ object Formatters {
 
             // 2行目: Ideal / Δ
             if ((slot.idealMs != 0L) || (slot.deltaMs != 0L)) {
-                // Ideal=0,Delta=0なら主画面なのでこの行は非表示あ
-//                if (prov == "DeadReckoning") {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Schedule, contentDescription = null,
+                // Ideal=0,Delta=0なら主画面なのでこの行は非表示
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Outlined.Schedule, contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE))
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Ideal")
+                    Text(idealJst, style = MaterialTheme.typography.bodyMedium)
+                    if (delta != null) {
+                        Spacer(Modifier.width(SPACER_SIZE))
+                        Icon(Icons.Outlined.Timeline, contentDescription = null,
                             modifier = Modifier.size(ICON_SIZE))
                         Spacer(Modifier.width(SPACER_SIZE))
-                        BoldLabel("Ideal")
-                        Text(idealJst, style = MaterialTheme.typography.bodyMedium)
-                        if (delta != null) {
-                            Spacer(Modifier.width(SPACER_SIZE))
-                            Icon(Icons.Outlined.Timeline, contentDescription = null,
-                                modifier = Modifier.size(ICON_SIZE))
-                            Spacer(Modifier.width(SPACER_SIZE))
-                            BoldLabel("Δ")
-                            Text(delta, style = MaterialTheme.typography.bodyMedium)
-                        }
+                        BoldLabel("Δ")
+                        Text(delta, style = MaterialTheme.typography.bodyMedium)
                     }
-//                }
+                }
             }
 
             // 3行目: [時計] 時刻 / [電池] Battery
