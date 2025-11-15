@@ -17,33 +17,45 @@ import com.mapconductor.plugin.provider.geolocation.util.ServiceStateIndicator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun ServiceToggleAction() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
+    // true = 動作中 → Stop 表示 / false = 停止中 → Start 表示
     val runningState = remember { mutableStateOf(false) }
-    val busyState = remember { mutableStateOf(false) } // 二重タップ防止
+
+    // 二重タップ防止用
+    val busyState = remember { mutableStateOf(false) }
+
     val scope = remember { CoroutineScope(Dispatchers.Main + Job()) }
 
-    // 初回・復帰時に“実態”を問い合わせ（保存しない）
+    // ★ 状態問い合わせ中でもボタンは有効のままにする
+    //   → 初期状態からグレーにならないようにする
     fun refreshState() {
         scope.launch {
-            busyState.value = true
-            val running = ServiceStateIndicator.isRunning(context, GeoLocationService::class.java)
+            val running = ServiceStateIndicator.isRunning(
+                context,
+                GeoLocationService::class.java
+            )
             runningState.value = running
-            busyState.value = false
         }
     }
 
-    LaunchedEffect(Unit) { refreshState() }
+    // 初回に一度だけ実態を問い合わせる
+    LaunchedEffect(Unit) {
+        refreshState()
+    }
 
+    // 画面復帰時にも状態を取り直す
     LaunchedEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, ev ->
-            if (ev == Lifecycle.Event.ON_RESUME) refreshState()
+            if (ev == Lifecycle.Event.ON_RESUME) {
+                refreshState()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
     }
@@ -61,7 +73,7 @@ fun ServiceToggleAction() {
                     }
                 )
             } else {
-                // 開始：前景サービスとして開始（5秒以内に startForeground 必須）
+                // 開始：前景サービスとして開始
                 ContextCompat.startForegroundService(
                     context,
                     Intent(context, GeoLocationService::class.java).apply {
@@ -72,8 +84,9 @@ fun ServiceToggleAction() {
 
             // 少し待ってから再プローブ（Stop/Start の実反映を確認）
             scope.launch {
-                delay(500) // 端末差に合わせ 400–1000ms で調整
+                delay(500) // 端末差に合わせて必要なら調整
                 refreshState()
+                busyState.value = false
             }
         },
         enabled = !busyState.value

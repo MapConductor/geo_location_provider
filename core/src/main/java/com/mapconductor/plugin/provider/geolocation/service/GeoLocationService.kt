@@ -174,11 +174,24 @@ class GeoLocationService : Service() {
     private fun stopLocation() {
         if (!isRunning.getAndSet(false)) return
         Log.d(TAG, "stopLocation")
+
+        // FGS を外す
         stopForeground(STOP_FOREGROUND_DETACH)
-        try { fusedClient.removeLocationUpdates(callback) } catch (t: Throwable) {
+
+        // 位置更新を停止
+        try {
+            fusedClient.removeLocationUpdates(callback)
+        } catch (t: Throwable) {
             Log.w(TAG, "removeLocationUpdates", t)
         }
+
+        // DR のタイカー停止
         stopDrTicker()
+
+        // ★重要★
+        // Start/Stop ボタン側は「サービスに bind できるかどうか」で
+        // 動作中判定をしているため、ここでサービス自体を終了しておく。
+        stopSelf()
     }
 
     // ------------------------
