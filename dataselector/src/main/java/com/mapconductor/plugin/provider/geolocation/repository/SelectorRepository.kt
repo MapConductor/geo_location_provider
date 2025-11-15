@@ -1,7 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.repository
 
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
-import com.mapconductor.plugin.provider.storageservice.room.LocationSampleDao
 import com.mapconductor.plugin.provider.geolocation.algorithm.buildTargetsInclusive
 import com.mapconductor.plugin.provider.geolocation.algorithm.directToSlots
 import com.mapconductor.plugin.provider.geolocation.algorithm.effectiveLimit
@@ -11,14 +10,13 @@ import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation.condition.SortOrder
 
 /**
- * LocationSampleDao を用いた抽出/補完の実装。
- * - 今日限定のクリップは行わない（from/to はそのまま使う。null は無制限）
- * - from > to は正規化（入れ替え）
+ * LocationSampleSource を用いた抽出/補完の実装。
+ * - from > to は正規化（SelectorCondition.normalized() 側で実施）
  * - intervalSec が null → ダイレクト抽出（グリッド無し）
  * - intervalSec が指定 → グリッド吸着（±T/2、欠測は sample=null）
  */
 class SelectorRepository(
-    private val dao: LocationSampleDao
+    private val source: LocationSampleSource
 ) {
     suspend fun select(condRaw: SelectorCondition): List<SelectedSlot> {
         val cond = condRaw.normalized()
@@ -28,9 +26,8 @@ class SelectorRepository(
 
         // ダイレクト抽出（グリッド無し）
         if (cond.intervalSec == null) {
-            val asc = fetchAsc(from, to)       // DAO は昇順返却
+            val asc = fetchAsc(from, to)       // 取得元は昇順返却
             val filtered = filterByAccuracy(asc, cond.minAccuracy)
-
             val limited = limitAndOrderForDirect(filtered, cond)
             return directToSlots(limited)
         }
@@ -47,29 +44,28 @@ class SelectorRepository(
             return directToSlots(limited)
         }
 
-        // グリッド列（両端含む）
-        val targets = if (cond.order == SortOrder.NewestFirst) {
-            // 「新しい方から」のときは To をアンカーに等間隔で構成
-            buildTargetsInclusiveAnchoredToEnd(from, to, T)
-        } else {
-            // 従来どおり From をアンカー
-            buildTargetsInclusive(from, to, T)
-        }
+        // ★ グリッドは Oldest/Newest を問わず同じ列を使う
+        //    → 最後のソートだけで方向を変える
+        val targets = buildTargetsInclusive(from, to, T)
 
-        // 候補の一括取得： [from-W, to+W)  ※ DAO は半開区間 toExcl のため +1ms で inclusive
+        // 候補の一括取得： [from-W, to+W)  ※ 取得元は半開区間 toExcl のため +1ms で inclusive
         val fromQ = from - W
         val toQExcl = (to + W) + 1L
-        val ascAll = dao.findBetween(fromQ, toQExcl)
+        val ascAll = source.findBetween(fromQ, toQExcl)
 
         val cand = filterByAccuracy(ascAll, cond.minAccuracy)
 
-        // 吸着
+        // 吸着（昇順 grid を前提）
         var slots = snapToGrid(cand, targets, W)
 
         // 最終順序
         when (cond.order) {
-            SortOrder.OldestFirst -> {} // 既に昇順（targets 自体が from→to or to アンカーで昇順生成）
-            SortOrder.NewestFirst -> slots = slots.asReversed()
+            SortOrder.OldestFirst -> {
+                // そのまま（targets が from→to 昇順）
+            }
+            SortOrder.NewestFirst -> {
+                slots = slots.asReversed()
+            }
         }
 
         // 最終件数制御（欠測行も件数にカウント）
@@ -83,7 +79,7 @@ class SelectorRepository(
     private suspend fun fetchAsc(from: Long?, to: Long?): List<LocationSample> {
         val f = from ?: Long.MIN_VALUE
         val tExcl = ((to ?: Long.MAX_VALUE - 1L) + 1L) // 半開区間の上端
-        return dao.findBetween(f, tExcl)
+        return source.findBetween(f, tExcl)
     }
 
     private fun filterByAccuracy(
@@ -96,7 +92,7 @@ class SelectorRepository(
 
     /**
      * ダイレクト抽出の最終順序・件数制御。
-     * - DAO は昇順返却（OldestFirst）。NewestFirst の場合は末尾から取る。
+     * - 昇順返却（OldestFirst）。NewestFirst の場合は末尾から取る。
      * - limit は最終出力件数（null/<=0 なら無制限）
      */
     private fun limitAndOrderForDirect(
@@ -115,29 +111,5 @@ class SelectorRepository(
                 src.asReversed()
             }
         }
-    }
-
-    /**
-     * To(期間終了)をアンカーにした等間隔グリッド（両端含む）を生成する。
-     * 例: from=10:00, to=13:45, T=30分 → [10:15, 10:45, …, 13:45]
-     * snapToGrid は昇順の grid を想定しているため、昇順で返す。
-     */
-    private fun buildTargetsInclusiveAnchoredToEnd(
-        fromInclusive: Long,
-        toInclusive: Long,
-        intervalMs: Long
-    ): List<Long> {
-        if (intervalMs <= 0L) return emptyList()
-        if (toInclusive < fromInclusive) return emptyList()
-        val span = toInclusive - fromInclusive
-        val steps = (span / intervalMs)  // 切り捨て回数
-        val first = toInclusive - steps * intervalMs
-        val out = ArrayList<Long>(((span / intervalMs) + 2).toInt())
-        var g = first
-        while (g <= toInclusive) {
-            out.add(g)
-            g += intervalMs
-        }
-        return out
     }
 }
