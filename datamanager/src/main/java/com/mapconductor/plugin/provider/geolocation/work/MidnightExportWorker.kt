@@ -10,18 +10,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-
-// ▼ サンプル( LocationSample )は storageservice 側のDB
 import com.mapconductor.plugin.provider.storageservice.StorageService
-
-// ▼ ExportedDay は geolocation 側に残っている前提でこちらを使う
-import com.mapconductor.plugin.provider.storageservice.room.ExportedDay
-import com.mapconductor.plugin.provider.storageservice.room.ExportedDayDao
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
@@ -33,8 +26,8 @@ import java.util.concurrent.TimeUnit
 /**
  * 定時バックアップ（前日以前のバックログ処理も包含）
  *
- * - LocationSample は storageservice の DB から読む
- * - ExportedDay 系は geolocation の DB を使う（移行が終わるまでの暫定）
+ * - LocationSample / ExportedDay ともに storageservice の DB を使用し、
+ *   ここからは StorageService 経由でのみアクセスする。
  */
 class MidnightExportWorker(
     appContext: Context,
@@ -45,31 +38,23 @@ class MidnightExportWorker(
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
 
     override suspend fun doWork(): Result {
-        // サンプル用 DAO（storageservice 側）
-        val sdb = AppDatabase.get(applicationContext)
-        val sampleDao = sdb.locationSampleDao()
-
-        // Export 管理用 DAO（geolocation 側）
-        val ldb = AppDatabase.get(applicationContext)
-        val dayDao: ExportedDayDao = ldb.exportedDayDao()
-
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
-        // --- 初回シード：昨日までの最大365日を ensure（列名に依存しない方式） ---
-        var oldest = dayDao.oldestNotUploaded()
+        // --- 初回シード：昨日までの最大365日を ensure --- //
+        var oldest = StorageService.oldestNotUploadedDay(applicationContext)
         if (oldest == null) {
             val backMaxDays = 365L
             for (off in backMaxDays downTo 1L) {
                 val d = today.minusDays(off).toEpochDay()
                 if (d < todayEpochDay) {
-                    dayDao.ensure(ExportedDay(epochDay = d))
+                    StorageService.ensureExportedDay(applicationContext, d)
                 }
             }
-            oldest = dayDao.oldestNotUploaded()
+            oldest = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
-        // --- バックログ処理ループ（今日以降は対象外） ---
+        // --- バックログ処理ループ（今日以降は対象外） --- //
         while (oldest != null && oldest.epochDay < todayEpochDay) {
             val target = oldest
             val localDate = LocalDate.ofEpochDay(target.epochDay)
@@ -77,8 +62,9 @@ class MidnightExportWorker(
             val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
             val baseName = "glp-${dateFmt.format(localDate)}"
 
-            // 1日のレコード取得（storageservice 側 DAO）
-            val records = sampleDao.getInRangeAscOnce(
+            // 1日のレコード取得（storageservice 側 DB を StorageService 経由で読む）
+            val records = StorageService.getLocationsBetween(
+                ctx = applicationContext,
                 from = startMillis,
                 to = endMillis,
                 softLimit = 1_000_000
@@ -93,7 +79,7 @@ class MidnightExportWorker(
             )
 
             // ローカル出力成功の印（空日でも成功扱い）
-            dayDao.markExportedLocal(target.epochDay)
+            StorageService.markExportedLocal(applicationContext, target.epochDay)
 
             // アップロード（設定が揃っている場合のみ）
             val prefs = AppPrefs.snapshot(applicationContext)
@@ -108,19 +94,19 @@ class MidnightExportWorker(
 
             if (exported == null) {
                 lastError = "No file exported"
-                dayDao.markError(target.epochDay, lastError)
+                StorageService.markExportError(applicationContext, target.epochDay, lastError)
             } else if (uploader == null) {
                 lastError = when {
                     !engineOk -> "Upload not configured (engine=${prefs.engine})"
                     !folderOk -> "Upload not configured (folderId missing)"
                     else -> "Uploader disabled"
                 }
-                dayDao.markError(target.epochDay, lastError)
+                StorageService.markExportError(applicationContext, target.epochDay, lastError)
             } else {
                 when (val up = uploader.upload(exported, prefs.folderId!!, "$baseName.zip")) {
                     is UploadResult.Success -> {
                         uploadSucceeded = true
-                        dayDao.markUploaded(target.epochDay, null)
+                        StorageService.markUploaded(applicationContext, target.epochDay, null)
                     }
                     is UploadResult.Failure -> {
                         lastError = buildString {
@@ -131,7 +117,7 @@ class MidnightExportWorker(
                                 append(up.body.take(300))
                             }
                         }.ifBlank { "Upload failure" }
-                        dayDao.markError(target.epochDay, lastError)
+                        StorageService.markExportError(applicationContext, target.epochDay, lastError)
                     }
                 }
             }
@@ -139,17 +125,17 @@ class MidnightExportWorker(
             // ZIP は必ず削除
             exported?.let { safeDelete(it) }
 
-            // 成功時のみ当日のレコードを削除（storageservice 側の DAO）
+            // 成功時のみ当日のレコードを削除（storageservice 側の DB）
             if (uploadSucceeded && records.isNotEmpty()) {
                 try {
-                    sampleDao.deleteAll(records)
+                    StorageService.deleteLocations(applicationContext, records)
                 } catch (_: Throwable) {
                     // 失敗は致命ではない（次周で再対象）
                 }
             }
 
             // 次の未アップロード日へ
-            oldest = dayDao.oldestNotUploaded()
+            oldest = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
         // 実行後は翌日0:00に再スケジュール
