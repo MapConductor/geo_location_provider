@@ -12,7 +12,7 @@ import androidx.work.WorkerParameters
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 
 // ▼ サンプル( LocationSample )は storageservice 側のDB
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.StorageService
 
 // ▼ ExportedDay は geolocation 側に残っている前提でこちらを使う
 import com.mapconductor.plugin.provider.storageservice.room.ExportedDay
@@ -21,6 +21,7 @@ import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId

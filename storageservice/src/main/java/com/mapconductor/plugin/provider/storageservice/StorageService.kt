@@ -14,20 +14,43 @@ import kotlinx.coroutines.withContext
  */
 object StorageService {
 
-    /** 直近 N 件（降順） */
-    fun latestFlow(ctx: Context, limit: Int): Flow<List<LocationSample>> =
-        AppDatabase.get(ctx).locationSampleDao().latestFlow(limit)
-
-    /** 最後の1件（Flow） */
-    fun latestOneFlow(ctx: Context): Flow<LocationSample?> {
+    /**
+     * 最新 N 件を Flow で監視する。
+     * 履歴画面（HistoryViewModel）などから利用。
+     */
+    fun latestFlow(ctx: Context, limit: Int): Flow<List<LocationSample>> {
         val dao = AppDatabase.get(ctx).locationSampleDao()
-        return dao.latestOneFlow()
+        return dao.latestFlow(limit)
     }
 
-    /** 1件挿入 */
-//    suspend fun insertLocation(ctx: Context, sample: LocationSample) {
-//        AppDatabase.get(ctx).locationSampleDao().insert(sample)
-//    }
+    /**
+     * 全 LocationSample を時系列昇順で取得。
+     * 呼び出し側からは DB/DAO を意識させない。
+     */
+    suspend fun getAllLocations(ctx: Context): List<LocationSample> =
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).locationSampleDao()
+            dao.findAll()
+        }
+
+    /**
+     * 指定期間 [fromMillis, toMillis) の LocationSample を取得。
+     * ManualExportViewModel / DriveSettingsScreen などの日次処理から利用。
+     */
+    suspend fun getLocationsBetween(
+        ctx: Context,
+        fromMillis: Long,
+        toMillis: Long
+    ): List<LocationSample> =
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).locationSampleDao()
+            dao.findBetween(fromMillis, toMillis)
+        }
+
+    /**
+     * LocationSample を 1 件挿入。
+     * 既存どおり、簡易なトレースログも出す。
+     */
     suspend fun insertLocation(ctx: Context, sample: LocationSample): Long =
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).locationSampleDao()
@@ -40,5 +63,15 @@ object StorageService {
             Log.d("DB/TRACE", "count-after=$after rowId=$rowId")
 
             rowId
+        }
+
+    /**
+     * 渡された LocationSample 群をまとめて削除。
+     * （今後 MidnightExportWorker から利用予定）
+     */
+    suspend fun deleteLocations(ctx: Context, items: List<LocationSample>) =
+        withContext(Dispatchers.IO) {
+            val dao = AppDatabase.get(ctx).locationSampleDao()
+            dao.deleteAll(items)
         }
 }

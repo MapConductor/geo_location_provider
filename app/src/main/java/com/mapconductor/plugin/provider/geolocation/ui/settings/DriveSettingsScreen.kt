@@ -5,8 +5,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
@@ -34,7 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
@@ -45,20 +45,21 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveSettingsScreen(
-    vm: com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsViewModel =
-        viewModel<com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsViewModel>(),
+    vm: DriveSettingsViewModel =
+        viewModel<DriveSettingsViewModel>(),
     onBack: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
+
     val status by vm.status.collectAsState()
     val folderId by vm.folderId.collectAsState()
     val account by vm.accountEmail.collectAsState()
@@ -69,12 +70,14 @@ fun DriveSettingsScreen(
     ) { res -> vm.onSignInResult(res.data) }
 
     val lastRefreshText = remember(lastRefresh) {
-        if (lastRefresh > 0) {
+        if (lastRefresh > 0L) {
             val dt = Instant.ofEpochMilli(lastRefresh)
                 .atZone(ZoneId.systemDefault())
                 .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
             "Token refreshed: $dt"
-        } else null
+        } else {
+            null
+        }
     }
 
     Scaffold(
@@ -88,10 +91,10 @@ fun DriveSettingsScreen(
                 }
             )
         }
-    ) { inner ->
+    ) { padding ->
         Column(
-            Modifier
-                .padding(inner)
+            modifier = Modifier
+                .padding(padding)
                 .padding(16.dp)
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -100,23 +103,40 @@ fun DriveSettingsScreen(
             OutlinedTextField(
                 value = folderId,
                 onValueChange = { vm.updateFolderId(it) },
-                label = { Text("Folder ID") },
+                label = { Text("Folder ID / URL") },
                 modifier = Modifier.fillMaxWidth()
             )
             Text(text = "Account: $account")
-            if (lastRefreshText != null) Text(text = lastRefreshText)
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { launcher.launch(vm.buildSignInIntent()) }) { Text("Sign in") }
-                Button(onClick = { vm.getToken() }) { Text("Get Token") }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { vm.callAboutGet() }) { Text("About.get") }
-                OutlinedButton(onClick = { vm.validateFolder() }) { Text("Validate Folder") }
-                Button(onClick = { vm.uploadSampleNow() }) { Text("Sample Upload") } // 任意：動作確認
+            if (lastRefreshText != null) {
+                Text(text = lastRefreshText, style = MaterialTheme.typography.bodySmall)
             }
 
-            HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = { launcher.launch(vm.buildSignInIntent()) }) {
+                    Text("Sign in")
+                }
+                Button(onClick = { vm.getToken() }) {
+                    Text("Get Token")
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = { vm.callAboutGet() }) {
+                    Text("About.get")
+                }
+                OutlinedButton(onClick = { vm.validateFolder() }) {
+                    Text("Validate Folder")
+                }
+                Button(onClick = { vm.uploadSampleNow() }) {
+                    Text("Sample Upload")
+                }
+            }
+
+            HorizontalDivider(
+                modifier = Modifier,
+                thickness = DividerDefaults.Thickness,
+                color = DividerDefaults.color
+            )
+
             Text(text = status, style = MaterialTheme.typography.bodyMedium)
 
             // --- バックアップ操作（最終仕様） ---
@@ -149,12 +169,18 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                     MidnightExportWorker.runNow(ctx)
                     uiMsg = "前日以前のバックアップを開始しました。"
                 }
-            }) { Text("前日以前をBackup") }
+            }) {
+                Text("前日以前をBackup")
+            }
 
-            Button(onClick = { showPreviewChoice = true }) { Text("今日のPreview") }
+            Button(onClick = { showPreviewChoice = true }) {
+                Text("今日のPreview")
+            }
         }
 
-        if (uiMsg.isNotEmpty()) Text(uiMsg, style = MaterialTheme.typography.bodySmall)
+        if (uiMsg.isNotEmpty()) {
+            Text(uiMsg, style = MaterialTheme.typography.bodySmall)
+        }
     }
 
     // 「今日のPreview」の選択ダイアログ
@@ -162,7 +188,14 @@ private fun BackupSection(modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { showPreviewChoice = false },
             title = { Text("今日のPreview") },
-            text = { Text("アップロードしますか？\nアップロードする場合はローカル（GeoJSON/zip）は削除します。アップロードしない場合はDownloadsに保存します。Roomのデータは削除しません。") },
+            text = {
+                Text(
+                    "アップロードしますか？\n" +
+                            "アップロードする場合はローカル（GeoJSON/zip）は削除します。" +
+                            "アップロードしない場合はDownloadsに保存します。" +
+                            "Roomのデータは削除しません。"
+                )
+            },
             confirmButton = {
                 Button(onClick = {
                     showPreviewChoice = false
@@ -171,7 +204,9 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                         val msg = runTodayPreviewIO(ctx, upload = true)
                         withContext(Dispatchers.Main) { uiMsg = msg }
                     }
-                }) { Text("アップロードする") }
+                }) {
+                    Text("アップロードする")
+                }
             },
             dismissButton = {
                 OutlinedButton(onClick = {
@@ -181,7 +216,9 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                         val msg = runTodayPreviewIO(ctx, upload = false)
                         withContext(Dispatchers.Main) { uiMsg = msg }
                     }
-                }) { Text("アップロードしない") }
+                }) {
+                    Text("アップロードしない")
+                }
             }
         )
     }
@@ -197,9 +234,8 @@ private suspend fun runTodayPreviewIO(
     val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
     val todayEpochDay = today0.toLocalDate().toEpochDay()
 
-    val db = AppDatabase.get(ctx)
-    val dao = db.locationSampleDao()
-    val all = dao.findAll()
+    // ★ ここだけ変更：AppDatabase 直参照 → StorageService 経由
+    val all = StorageService.getAllLocations(ctx)
 
     // エンティティのタイムスタンプを安全に取得（フィールド名の違いに対応）
     fun extractMillis(rec: Any): Long {
@@ -223,10 +259,13 @@ private suspend fun runTodayPreviewIO(
 
     val todays = all.filter { rec ->
         val millis = extractMillis(rec)
-        if (millis <= 0L) false
-        else ZonedDateTime.ofInstant(Instant.ofEpochMilli(millis), zone)
-            .toLocalDate()
-            .toEpochDay() == todayEpochDay
+        if (millis <= 0L) {
+            false
+        } else {
+            ZonedDateTime.ofInstant(Instant.ofEpochMilli(millis), zone)
+                .toLocalDate()
+                .toEpochDay() == todayEpochDay
+        }
     }
 
     if (todays.isEmpty()) {
@@ -268,6 +307,7 @@ private suspend fun runTodayPreviewIO(
                 success = true
                 break
             }
+
             is UploadResult.Failure -> {
                 if (attempt < 4) {
                     delay(15_000L * (1 shl attempt)) // 15s,30s,60s,120s

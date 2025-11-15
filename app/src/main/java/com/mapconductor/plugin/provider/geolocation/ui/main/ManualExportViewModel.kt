@@ -8,7 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
-import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
+import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
@@ -22,7 +22,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** 今日のPreview：アップロード有無の選択 */
+/**
+ * 今日分（0:00〜現在）のログを 1 ファイルにまとめてエクスポートする ViewModel。
+ *
+ * - Downloads に ZIP を作成
+ * - オプションで Drive にアップロード（ZIP 削除）
+ */
 enum class TodayPreviewMode {
     /** アップロードする（成功/失敗に関わらず ZIP を削除。Room は削除しない） */
     UPLOAD_AND_DELETE_LOCAL,
@@ -46,7 +51,6 @@ class ManualExportViewModel(
      */
     fun backupToday(mode: TodayPreviewMode) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dao = AppDatabase.get(appContext).locationSampleDao()
 
             // 今日0:00〜現在
             val zone = ZoneId.of("Asia/Tokyo")
@@ -55,11 +59,11 @@ class ManualExportViewModel(
             val startMillis = today0.toInstant().toEpochMilli()
             val endMillis = now.toInstant().toEpochMilli()
 
-            // DAO に findBetween がある前提。無ければ findAll でフィルタに差し替えてください。
+            // DAO には findBetween がある前提だが、UI 層からは StorageService 経由でアクセスする
             val todays = try {
-                dao.findBetween(startMillis, endMillis)
+                StorageService.getLocationsBetween(appContext, startMillis, endMillis)
             } catch (_: Throwable) {
-                dao.findAll().filter { rec ->
+                StorageService.getAllLocations(appContext).filter { rec ->
                     // エンティティのフィールド名が異なる場合に備え、反射で安全取得
                     val candidates = arrayOf(
                         "timestampMillis", "timeMillis", "createdAtMillis",
@@ -101,7 +105,7 @@ class ManualExportViewModel(
 
                 when (mode) {
                     TodayPreviewMode.SAVE_TO_DOWNLOADS_ONLY -> {
-                        // そのまま保存して終了（ZIP保持、Room保持）
+                        // 単に保存だけ。Room は削除しない。
                         withContext(Dispatchers.Main) {
                             Toast.makeText(appContext, "保存しました（Downloads）", Toast.LENGTH_SHORT).show()
                         }
@@ -137,22 +141,30 @@ class ManualExportViewModel(
                             }
                         }
 
-                        // 成功/失敗に関係なく ZIP は削除。Room は保持
+                        // ZIP は成功/失敗に関わらず必ず削除（Room は削除しない）
                         runCatching { appContext.contentResolver.delete(outUri, null, null) }
 
                         withContext(Dispatchers.Main) {
                             if (success) {
-                                Toast.makeText(appContext, "今日分をアップロードしました（ZIP削除済）", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    appContext,
+                                    "アップロードに成功しました（ZIPは削除済み／Roomは削除していません）",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             } else {
-                                Toast.makeText(appContext, "今日分のアップロードに失敗しました（再試行も不成功）。ZIPは破棄しました", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    appContext,
+                                    "アップロードに失敗しました（ZIPは削除済み／Roomは削除していません）",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
                         }
                     }
                 }
             } finally {
-                // 念のため（UPLOAD_AND_DELETE_LOCAL のみ二重削除になっても OK / 保存のみは保持）
-                if (mode == TodayPreviewMode.UPLOAD_AND_DELETE_LOCAL && outUri != null) {
-                    runCatching { appContext.contentResolver.delete(outUri, null, null) }
+                // 念のため URI をクリーンアップ（既に削除済みなら no-op）
+                if (outUri != null && mode == TodayPreviewMode.SAVE_TO_DOWNLOADS_ONLY) {
+                    // 保存モードでは ZIP を残す仕様なので、ここでは削除しない
                 }
             }
         }
