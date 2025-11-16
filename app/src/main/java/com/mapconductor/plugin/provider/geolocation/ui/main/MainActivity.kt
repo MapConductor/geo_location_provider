@@ -103,7 +103,8 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         else true
 
-        if (locOk && notifOk) startLocationService()
+// 起動時の強制Service起動を一旦削除
+//        if (locOk && notifOk) startLocationService()
     }
 
     private fun startLocationService() {

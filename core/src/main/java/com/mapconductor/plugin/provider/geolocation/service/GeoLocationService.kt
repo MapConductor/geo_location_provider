@@ -89,6 +89,8 @@ class GeoLocationService : Service() {
 
     fun getUpdateIntervalMs(): Long = updateIntervalMs
 
+    fun isLocationRunning(): Boolean = isRunning.get()
+
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {

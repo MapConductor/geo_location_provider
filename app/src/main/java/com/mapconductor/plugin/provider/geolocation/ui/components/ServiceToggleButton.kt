@@ -28,13 +28,12 @@ fun ServiceToggleAction() {
     // true = 動作中 → Stop 表示 / false = 停止中 → Start 表示
     val runningState = remember { mutableStateOf(false) }
 
-    // 二重タップ防止用
+    // 二重タップ防止
     val busyState = remember { mutableStateOf(false) }
 
+    // 状態問い合わせ用のスコープ
     val scope = remember { CoroutineScope(Dispatchers.Main + Job()) }
 
-    // ★ 状態問い合わせ中でもボタンは有効のままにする
-    //   → 初期状態からグレーにならないようにする
     fun refreshState() {
         scope.launch {
             val running = ServiceStateIndicator.isRunning(
@@ -45,7 +44,7 @@ fun ServiceToggleAction() {
         }
     }
 
-    // 初回に一度だけ実態を問い合わせる
+    // 初回起動時に一度だけ実態を問い合わせ
     LaunchedEffect(Unit) {
         refreshState()
     }
@@ -65,15 +64,20 @@ fun ServiceToggleAction() {
             if (busyState.value) return@IconButton
             busyState.value = true
 
-            if (runningState.value) {
-                // 停止：onStartCommand(ACTION_STOP) に確実に届く経路
+            // ★ここがポイント：UI は先に反転する
+            val currentlyRunning = runningState.value
+            val targetRunning = !currentlyRunning
+            runningState.value = targetRunning
+
+            if (currentlyRunning) {
+                // 停止要求
                 context.startService(
                     Intent(context, GeoLocationService::class.java).apply {
                         action = GeoLocationService.ACTION_STOP
                     }
                 )
             } else {
-                // 開始：前景サービスとして開始
+                // 起動要求
                 ContextCompat.startForegroundService(
                     context,
                     Intent(context, GeoLocationService::class.java).apply {
@@ -82,9 +86,9 @@ fun ServiceToggleAction() {
                 )
             }
 
-            // 少し待ってから再プローブ（Stop/Start の実反映を確認）
+            // 少し待ってから“本当の状態”を再取得して補正
             scope.launch {
-                delay(500) // 端末差に合わせて必要なら調整
+                delay(500) // 必要なら 700〜1000 に伸ばしてもよい
                 refreshState()
                 busyState.value = false
             }
