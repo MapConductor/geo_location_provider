@@ -1,5 +1,5 @@
 plugins {
-    alias(libs.plugins.android.library)
+    id("com.android.library")
     alias(libs.plugins.kotlin.android)
 }
 
@@ -19,21 +19,18 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "17"
     }
 }
 
 dependencies {
     // Depend on datamanager for GoogleDriveTokenProvider interface
     implementation(project(":datamanager"))
-
-    // AppAuth library for OAuth 2.0
-    implementation("net.openid:appauth:0.11.1")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
