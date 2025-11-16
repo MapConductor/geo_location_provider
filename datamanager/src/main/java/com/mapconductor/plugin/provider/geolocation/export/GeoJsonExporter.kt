@@ -121,12 +121,11 @@ object GeoJsonExporter {
 
             // ▼ 追加プロパティ（null は出力しない）
             r.headingDeg.let   { sb.append(",\"heading_deg\":").append(it) }
-            r.courseDeg.let    { sb.append(",\"course_deg\":").append(it) }
+            r.courseDeg?.let   { sb.append(",\"course_deg\":").append(it) }
             r.speedMps.let     { sb.append(",\"speed_mps\":").append(it) }
             r.gnssUsed.let     { sb.append(",\"gnss_used\":").append(it) }
             r.gnssTotal.let    { sb.append(",\"gnss_total\":").append(it) }
-            r.cn0.let  { sb.append(",\"gnss_cn0_mean\":").append(it) }
-
+            r.cn0.let          { sb.append(",\"gnss_cn0_mean\":").append(it) }
             sb.append("}}")
         }
         sb.append("]}")

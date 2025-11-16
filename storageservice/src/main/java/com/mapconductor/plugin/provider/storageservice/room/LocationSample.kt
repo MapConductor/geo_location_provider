@@ -24,8 +24,8 @@ data class LocationSample(
 
     /** 方位（デバイス北基準の真方位） */
     val headingDeg: Double,
-    /** 進行方向（Location.bearing） */
-    val courseDeg: Double,
+    /** 進行方向（Location.bearing）。null の場合は未計算/不明 */
+    val courseDeg: Double?,
     /** m/s */
     val speedMps: Double,
 

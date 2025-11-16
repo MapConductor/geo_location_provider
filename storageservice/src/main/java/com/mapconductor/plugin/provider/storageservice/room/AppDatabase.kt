@@ -12,14 +12,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * storageservice の統合 AppDatabase。
  * - DB 名: geolocation.db
  * - エンティティ: LocationSample, ExportedDay
- * - バージョン: 6（v5 -> v6 で exported_days を追加）
+ * - バージョン: 7（v6 -> v7 で courseDeg を nullable 化）
  */
 @Database(
     entities = [
         LocationSample::class,
         ExportedDay::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -49,7 +49,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_2_3,
                         MIGRATION_3_4,
                         MIGRATION_4_5,
-                        MIGRATION_5_6
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
                     )
                     .build()
                 INSTANCE = inst
@@ -57,27 +58,35 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        // --- v1 -> v2（現状 no-op） ---
+        // --- v1 -> v2 --------------------------------------------------------
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // no-op
+                // 旧バージョンは使っていない前提で、最低限の安全策のみ
+                addColumnIfMissing(db, "location_samples", "batteryPercent", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(db, "location_samples", "isCharging", "INTEGER NOT NULL DEFAULT 0")
             }
         }
 
-        // --- v2 -> v3：headingDeg を存在チェック付きで追加 ---
+        // --- v2 -> v3 --------------------------------------------------------
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                addColumnIfMissing(db, "location_samples", "headingDeg", "REAL")
+                // ここで gnssUsed / gnssTotal / cn0 を追加していた想定
+                addColumnIfMissing(db, "location_samples", "gnssUsed", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(db, "location_samples", "gnssTotal", "INTEGER NOT NULL DEFAULT 0")
+                addColumnIfMissing(db, "location_samples", "cn0", "REAL NOT NULL DEFAULT 0.0")
             }
         }
 
-        // --- v3 -> v4：旧ユニーク索引(timeMillis 単独)を整理 ---
+        // --- v3 -> v4：一部カラムの最低限の安全整備 -------------------------
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                val oldIdx = findUniqueIndexOnSingleColumn(db, "location_samples", "timeMillis")
-                if (oldIdx != null) {
-                    db.execSQL("DROP INDEX IF EXISTS `$oldIdx`")
-                    Log.d("DB/Migration", "dropped old unique index: $oldIdx")
+                // timeMillis, provider などの基本カラムが揃っている前提で、
+                // index の前の下準備だけ行うイメージ。
+                if (!hasColumn(db, "location_samples", "timeMillis")) {
+                    db.execSQL("ALTER TABLE `location_samples` ADD COLUMN `timeMillis` INTEGER NOT NULL DEFAULT 0")
+                }
+                if (!hasColumn(db, "location_samples", "provider")) {
+                    db.execSQL("ALTER TABLE `location_samples` ADD COLUMN `provider` TEXT NOT NULL DEFAULT 'gps'")
                 }
                 // 複合 UNIQUE 作成は v4->v5 で
             }
@@ -125,6 +134,62 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // --- v6 -> v7：courseDeg を nullable 化するため location_samples を再構築 ---
+        // ＊実テーブルをコピーして NOT NULL 制約を外す
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 新テーブルを作成（courseDeg の NOT NULL 制約を外した定義）
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `location_samples_new`(
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `timeMillis` INTEGER NOT NULL,
+                        `lat` REAL NOT NULL,
+                        `lon` REAL NOT NULL,
+                        `accuracy` REAL NOT NULL,
+                        `provider` TEXT NOT NULL,
+                        `headingDeg` REAL NOT NULL,
+                        `courseDeg` REAL,
+                        `speedMps` REAL NOT NULL,
+                        `gnssUsed` INTEGER NOT NULL,
+                        `gnssTotal` INTEGER NOT NULL,
+                        `cn0` REAL NOT NULL,
+                        `batteryPercent` INTEGER NOT NULL,
+                        `isCharging` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+
+                // 既存データをコピー
+                db.execSQL(
+                    """
+                    INSERT INTO `location_samples_new`(
+                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,
+                        `provider`,`headingDeg`,`courseDeg`,`speedMps`,
+                        `gnssUsed`,`gnssTotal`,`cn0`,`batteryPercent`,`isCharging`
+                    )
+                    SELECT
+                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,
+                        `provider`,`headingDeg`,`courseDeg`,`speedMps`,
+                        `gnssUsed`,`gnssTotal`,`cn0`,`batteryPercent`,`isCharging`
+                    FROM `location_samples`
+                    """.trimIndent()
+                )
+
+                // 旧テーブルを差し替え
+                db.execSQL("DROP TABLE `location_samples`")
+                db.execSQL("ALTER TABLE `location_samples_new` RENAME TO `location_samples`")
+
+                // 複合 UNIQUE インデックスを再作成
+                db.execSQL(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS `index_location_samples_timeMillis_provider`
+                    ON `location_samples`(`timeMillis`,`provider`)
+                    """.trimIndent()
+                )
+            }
+        }
+
         // --------- helpers ---------
         private fun addColumnIfMissing(
             db: SupportSQLiteDatabase,
@@ -148,23 +213,24 @@ abstract class AppDatabase : RoomDatabase() {
             db.query("PRAGMA table_info(`$table`)").use { c ->
                 val nameIdx = c.getColumnIndex("name")
                 while (c.moveToNext()) {
-                    if (nameIdx >= 0 && c.getString(nameIdx) == column) return true
+                    if (c.getString(nameIdx) == column) return true
                 }
             }
             return false
         }
 
-        private fun hasIndex(db: SupportSQLiteDatabase, indexName: String): Boolean {
-            db.query("PRAGMA index_list(`location_samples`)").use { list ->
-                val nameIdx = list.getColumnIndex("name")
-                while (list.moveToNext()) {
-                    if (indexName == list.getString(nameIdx)) return true
+        private fun hasIndex(db: SupportSQLiteDatabase, name: String): Boolean {
+            db.query("PRAGMA index_list(`location_samples`)").use { c ->
+                val nameIdx = c.getColumnIndex("name")
+                while (c.moveToNext()) {
+                    if (c.getString(nameIdx) == name) return true
                 }
             }
             return false
         }
 
-        private fun findUniqueIndexOnSingleColumn(
+        @Suppress("unused")
+        private fun findUniqueIndexOn(
             db: SupportSQLiteDatabase,
             table: String,
             column: String

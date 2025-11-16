@@ -57,16 +57,6 @@ class GeoLocationService : Service() {
         /** 新：DR 予測間隔の更新 (sec) */
         const val ACTION_UPDATE_DR_INTERVAL = "ACTION_UPDATE_DR_INTERVAL"
         const val EXTRA_DR_INTERVAL_SEC = "EXTRA_DR_INTERVAL_SEC"
-
-        // Default values
-        private const val DEFAULT_UPDATE_INTERVAL_MS = 30_000L // 30 seconds
-        private const val DEFAULT_DR_INTERVAL_SEC = 5 // 5 seconds
-        private const val MIN_UPDATE_INTERVAL_MS = 5_000L // 5 seconds minimum
-
-        // Notification
-        private const val NOTIFICATION_ID = 1
-        private const val CHANNEL_ID = "geo_location_service"
-        private const val CHANNEL_NAME = "Location Service"
     }
 
     inner class LocalBinder : Binder() {
@@ -81,14 +71,13 @@ class GeoLocationService : Service() {
     private lateinit var gnssSampler: GnssStatusSampler
     private var dr: DeadReckoning? = null
 
-    @Volatile private var updateIntervalMs: Long = DEFAULT_UPDATE_INTERVAL_MS
-    // AtomicBoolean already provides memory visibility guarantees, @Volatile is redundant
-    private var isRunning = AtomicBoolean(false)
+    @Volatile private var updateIntervalMs: Long = 30_000L
+    @Volatile private var isRunning = AtomicBoolean(false)
     @Volatile private var lastFixMillis: Long? = null // 直近の Fix 時刻（予測の基点に使用）
 
     // DR（リアルタイム）タイカー
     private var drTickerJob: Job? = null
-    @Volatile private var drIntervalSec: Int = DEFAULT_DR_INTERVAL_SEC
+    @Volatile private var drIntervalSec: Int = 5  // 既定値
 
     // 重複挿入抑制（GPS/DR）
     @Volatile private var lastInsertMillis: Long = 0L
@@ -98,8 +87,12 @@ class GeoLocationService : Service() {
     @Volatile private var lastDrInsertSig: Long = 0L
     private val drInsertLock = Any()
 
-    fun getUpdateIntervalMs(): Long = updateIntervalMs
+    // Course(進行方向) 推定用の前回位置 & 直近 Course
+    @Volatile private var lastCourseDeg: Double = Double.NaN
+    @Volatile private var lastCourseLat: Double? = null
+    @Volatile private var lastCourseLon: Double? = null
 
+    fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
 
     override fun onBind(intent: Intent?): IBinder = binder
@@ -114,12 +107,22 @@ class GeoLocationService : Service() {
         ensureChannel()
 
         // ---- 起動直後の乖離対策（storageserviceの設定を使用） ----
-        // デフォルト値(30秒)で起動し、設定値は非同期で読み込む
+        runBlocking {
+            try {
+                val sec = withTimeout(700) {
+                    SettingsRepository.intervalSecFlow(applicationContext).first()
+                }
+                updateIntervalMs = max(5_000L, sec * 1_000L)
+                Log.d(TAG, "initial interval from settings = ${updateIntervalMs}ms")
+            } catch (t: Throwable) {
+                Log.w(TAG, "intervalSecFlow initial fetch failed, keep default 30s", t)
+            }
+        }
         serviceScope.launch {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
                 .collect { sec ->
-                    val ms = max(MIN_UPDATE_INTERVAL_MS, sec * 1_000L)
+                    val ms = max(5_000L, sec * 1_000L)
                     if (ms != updateIntervalMs) {
                         Log.d(TAG, "interval changed: ${updateIntervalMs}ms -> ${ms}ms")
                         updateIntervalMs = ms
@@ -169,7 +172,7 @@ class GeoLocationService : Service() {
     private fun startLocation() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(1, buildNotification())
         serviceScope.launch { restartLocationUpdates() }
         startDrTicker() // DR リアルタイムを開始
     }
@@ -222,7 +225,11 @@ class GeoLocationService : Service() {
     private val callback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val loc: Location = result.lastLocation ?: return
-            Log.d(TAG, "onLocationResult: lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}, speed=${loc.speed}, bear=${loc.bearing}")
+            Log.d(
+                TAG,
+                "onLocationResult: lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}, " +
+                        "speed=${loc.speed}, bear=${loc.bearing}"
+            )
             handleLocation(loc)
         }
     }
@@ -232,8 +239,59 @@ class GeoLocationService : Service() {
         val lastFix = lastFixMillis
 
         val headingDeg: Float = headingSensor.headingTrueDeg() ?: 0f
-        val courseDeg: Float = location.bearing.takeIf { !it.isNaN() } ?: 0f
         val speedMps: Float = max(0f, location.speed.takeIf { !it.isNaN() } ?: 0f)
+
+        // --- Course(進行方向) の推定 ---
+        val prevLat = lastCourseLat
+        val prevLon = lastCourseLon
+
+        val rawBearing = location.bearing
+        val hasBearing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            location.hasBearing()
+        } else {
+            !rawBearing.isNaN()
+        }
+
+        val courseDeg: Double = when {
+            // 1) provider が bearing を出してくれるなら、それを優先して使う
+            hasBearing && !rawBearing.isNaN() -> {
+                val normalized = ((rawBearing % 360f) + 360f) % 360f
+                lastCourseDeg = normalized.toDouble()
+                normalized.toDouble()
+            }
+
+            // 2) bearing が取れない場合は、直前の位置との差分から進行方向を推定
+            prevLat != null && prevLon != null -> {
+                val prev = Location(location.provider ?: "gps").apply {
+                    latitude = prevLat
+                    longitude = prevLon
+                }
+                val distance = prev.distanceTo(location) // [m]
+                if (distance >= 0.5f) {                  // ★ 閾値をかなり下げる（0.5m）
+                    val b = prev.bearingTo(location)
+                    if (!b.isNaN()) {
+                        val normalized = ((b % 360f) + 360f) % 360f
+                        lastCourseDeg = normalized.toDouble()
+                    }
+                }
+
+                if (lastCourseDeg.isNaN()) {
+                    Double.NaN   // まだ一度も決まっていない
+                } else {
+                    lastCourseDeg
+                }
+            }
+
+            // 3) それでも決められない場合は、前回の値を維持
+            !lastCourseDeg.isNaN() -> lastCourseDeg
+
+            // 4) 何も情報がない最初の一発目など → NaN
+            else -> Double.NaN
+        }
+
+        // 直近位置を更新（次回の course 計算用）
+        lastCourseLat = location.latitude
+        lastCourseLon = location.longitude
 
         val gnss = try { gnssSampler.snapshot() } catch (t: Throwable) {
             Log.w(TAG, "gnssSampler.snapshot()", t); null
@@ -253,7 +311,7 @@ class GeoLocationService : Service() {
                 accuracy = location.accuracy,
                 provider = "gps",
                 headingDeg = headingDeg.toDouble(),
-                courseDeg = courseDeg.toDouble(),
+                courseDeg = courseDeg,
                 speedMps = speedMps.toDouble(),
                 gnssUsed = used ?: -1,
                 gnssTotal = total ?: -1,
@@ -263,7 +321,10 @@ class GeoLocationService : Service() {
             )
             val sig = sig(
                 sample.lat, sample.lon, sample.accuracy,
-                sample.provider, sample.headingDeg, sample.courseDeg, sample.speedMps,
+                sample.provider,
+                sample.headingDeg,
+                courseDeg,                    // GPS はこの計算済み courseDeg を使う
+                sample.speedMps,
                 sample.gnssUsed, sample.gnssTotal, sample.cn0,
                 sample.batteryPercent, sample.isCharging
             )
@@ -278,12 +339,22 @@ class GeoLocationService : Service() {
             }
             if (!skip) {
                 serviceScope.launch(Dispatchers.IO) {
-                    Log.d("DB/TRACE", "before-insert provider=gps t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}")
+                    Log.d(
+                        "DB/TRACE",
+                        "before-insert provider=gps t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                    )
                     try {
                         StorageService.insertLocation(applicationContext, sample)
-                        Log.d("DB/TRACE", "after-insert ok provider=gps t=${sample.timeMillis}")
+                        Log.d(
+                            "DB/TRACE",
+                            "after-insert ok provider=gps t=${sample.timeMillis}"
+                        )
                     } catch (t: Throwable) {
-                        Log.e("DB/TRACE", "insert failed provider=gps t=${sample.timeMillis}", t)
+                        Log.e(
+                            "DB/TRACE",
+                            "insert failed provider=gps t=${sample.timeMillis}",
+                            t
+                        )
                     }
                 }
             } else {
@@ -324,11 +395,24 @@ class GeoLocationService : Service() {
                                 val pts: List<PredictedPoint> = try {
                                     d.predict(fromMillis = lastFix, toMillis = t)
                                 } catch (e: Throwable) {
-                                    Log.w(TAG, "dr.predict(backfill) from=$lastFix to=$t", e)
+                                    Log.w(
+                                        TAG,
+                                        "dr.predict(backfill) from=$lastFix to=$t",
+                                        e
+                                    )
                                     emptyList()
                                 }
                                 val p = pts.lastOrNull() ?: continue
                                 val bat = BatteryStatusReader.read(applicationContext)
+
+                                // ★ DR 用の heading / course を決定
+                                val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
+                                val courseForDr = if (!lastCourseDeg.isNaN()) {
+                                    lastCourseDeg
+                                } else {
+                                    headingForDr
+                                }
+
                                 val sample = LocationSample(
                                     id = 0,
                                     timeMillis = t,              // バックフィル対象の “過去時刻”
@@ -336,8 +420,8 @@ class GeoLocationService : Service() {
                                     lon = p.lon,
                                     accuracy = (p.accuracyM ?: 0f),
                                     provider = "dead_reckoning",
-                                    headingDeg = 0.0,            // ★ NOT NULL 対策
-                                    courseDeg = 0.0,             // ★ NOT NULL 対策
+                                    headingDeg = headingForDr,
+                                    courseDeg = courseForDr,
                                     speedMps = (p.speedMps ?: Float.NaN).toDouble(),
                                     gnssUsed = -1,
                                     gnssTotal = -1,
@@ -345,11 +429,21 @@ class GeoLocationService : Service() {
                                     batteryPercent = bat.percent,
                                     isCharging = bat.isCharging
                                 )
-                                Log.d("DB/TRACE", "before-insert provider=dead_reckoning(backfill) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}")
+                                Log.d(
+                                    "DB/TRACE",
+                                    "before-insert provider=dead_reckoning(backfill) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                                )
                                 StorageService.insertLocation(applicationContext, sample)
-                                Log.d("DB/TRACE", "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}")
+                                Log.d(
+                                    "DB/TRACE",
+                                    "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
+                                )
                             } catch (e: Throwable) {
-                                Log.e("DB/TRACE", "insert failed provider=dead_reckoning(backfill)", e)
+                                Log.e(
+                                    "DB/TRACE",
+                                    "insert failed provider=dead_reckoning(backfill)",
+                                    e
+                                )
                             }
                         }
                     }
@@ -380,6 +474,15 @@ class GeoLocationService : Service() {
                         val p = pts.lastOrNull()
                         if (p != null) {
                             val bat = BatteryStatusReader.read(applicationContext)
+
+                            // ★ DR 用の heading / course を決定（リアルタイム版）
+                            val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
+                            val courseForDr = if (!lastCourseDeg.isNaN()) {
+                                lastCourseDeg
+                            } else {
+                                headingForDr
+                            }
+
                             val sample = LocationSample(
                                 id = 0,
                                 timeMillis = now,
@@ -387,8 +490,8 @@ class GeoLocationService : Service() {
                                 lon = p.lon,
                                 accuracy = (p.accuracyM ?: 0f),
                                 provider = "dead_reckoning",
-                                headingDeg = 0.0,        // ★ NOT NULL 対策
-                                courseDeg = 0.0,         // ★ NOT NULL 対策
+                                headingDeg = headingForDr,
+                                courseDeg = courseForDr,
                                 speedMps = (p.speedMps ?: Float.NaN).toDouble(),
                                 gnssUsed = -1,
                                 gnssTotal = -1,
@@ -399,7 +502,10 @@ class GeoLocationService : Service() {
                             // 重複抑止（DR）
                             val sig = sig(
                                 sample.lat, sample.lon, sample.accuracy,
-                                sample.provider, sample.headingDeg, sample.courseDeg, sample.speedMps,
+                                sample.provider,
+                                sample.headingDeg,
+                                sample.courseDeg ?: 0.0,   // nullable ではないが 0.0 fallback 付き
+                                sample.speedMps,
                                 sample.gnssUsed, sample.gnssTotal, sample.cn0,
                                 sample.batteryPercent, sample.isCharging
                             )
@@ -413,12 +519,22 @@ class GeoLocationService : Service() {
                                 }
                             }
                             if (!skip) {
-                                Log.d("DB/TRACE", "before-insert provider=dead_reckoning(ticker) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}")
+                                Log.d(
+                                    "DB/TRACE",
+                                    "before-insert provider=dead_reckoning(ticker) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                                )
                                 try {
                                     StorageService.insertLocation(applicationContext, sample)
-                                    Log.d("DB/TRACE", "after-insert ok provider=dead_reckoning(ticker) t=${sample.timeMillis}")
+                                    Log.d(
+                                        "DB/TRACE",
+                                        "after-insert ok provider=dead_reckoning(ticker) t=${sample.timeMillis}"
+                                    )
                                 } catch (e: Throwable) {
-                                    Log.e("DB/TRACE", "insert failed provider=dead_reckoning(ticker)", e)
+                                    Log.e(
+                                        "DB/TRACE",
+                                        "insert failed provider=dead_reckoning(ticker)",
+                                        e
+                                    )
                                 }
                             } else {
                                 Log.d("DB/TRACE", "dr insert skipped (dup guard)")
@@ -457,14 +573,14 @@ class GeoLocationService : Service() {
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel("geo", "Geo", NotificationManager.IMPORTANCE_LOW)
             mgr.createNotificationChannel(ch)
         }
     }
 
     private fun buildNotification(): Notification {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
+            Notification.Builder(this, "geo")
                 .setContentTitle("GeoLocation")
                 .setContentText("Running…")
                 .setSmallIcon(R.drawable.stat_notify_sync)

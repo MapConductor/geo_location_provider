@@ -97,7 +97,7 @@ object Formatters {
         val prov     = providerText(item.provider)
         val latlon   = latLonAcc(item.lat, item.lon, item.accuracy)
         val head     = headingText(item.headingDeg.toFloat())
-        val course   = courseText(item.courseDeg.toFloat())
+        val course   = courseText(item.courseDeg?.toFloat())
         val speed    = speedText(item.speedMps.toFloat())
         val gnss     = gnssUsedTotal(item.gnssUsed, item.gnssTotal)
         val cn0      = cn0Text(item.cn0.toFloat())
