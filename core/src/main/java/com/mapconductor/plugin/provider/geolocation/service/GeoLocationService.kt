@@ -103,17 +103,7 @@ class GeoLocationService : Service() {
         ensureChannel()
 
         // ---- 起動直後の乖離対策（storageserviceの設定を使用） ----
-        runBlocking {
-            try {
-                val sec = withTimeout(700) {
-                    SettingsRepository.intervalSecFlow(applicationContext).first()
-                }
-                updateIntervalMs = max(5_000L, sec * 1_000L)
-                Log.d(TAG, "initial interval from settings = ${updateIntervalMs}ms")
-            } catch (t: Throwable) {
-                Log.w(TAG, "intervalSecFlow initial fetch failed, keep default 30s", t)
-            }
-        }
+        // デフォルト値(30秒)で起動し、設定値は非同期で読み込む
         serviceScope.launch {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
