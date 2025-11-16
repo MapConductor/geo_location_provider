@@ -57,6 +57,16 @@ class GeoLocationService : Service() {
         /** 新：DR 予測間隔の更新 (sec) */
         const val ACTION_UPDATE_DR_INTERVAL = "ACTION_UPDATE_DR_INTERVAL"
         const val EXTRA_DR_INTERVAL_SEC = "EXTRA_DR_INTERVAL_SEC"
+
+        // Default values
+        private const val DEFAULT_UPDATE_INTERVAL_MS = 30_000L // 30 seconds
+        private const val DEFAULT_DR_INTERVAL_SEC = 5 // 5 seconds
+        private const val MIN_UPDATE_INTERVAL_MS = 5_000L // 5 seconds minimum
+
+        // Notification
+        private const val NOTIFICATION_ID = 1
+        private const val CHANNEL_ID = "geo_location_service"
+        private const val CHANNEL_NAME = "Location Service"
     }
 
     inner class LocalBinder : Binder() {
@@ -71,13 +81,14 @@ class GeoLocationService : Service() {
     private lateinit var gnssSampler: GnssStatusSampler
     private var dr: DeadReckoning? = null
 
-    @Volatile private var updateIntervalMs: Long = 30_000L
-    @Volatile private var isRunning = AtomicBoolean(false)
+    @Volatile private var updateIntervalMs: Long = DEFAULT_UPDATE_INTERVAL_MS
+    // AtomicBoolean already provides memory visibility guarantees, @Volatile is redundant
+    private var isRunning = AtomicBoolean(false)
     @Volatile private var lastFixMillis: Long? = null // 直近の Fix 時刻（予測の基点に使用）
 
     // DR（リアルタイム）タイカー
     private var drTickerJob: Job? = null
-    @Volatile private var drIntervalSec: Int = 5  // 既定値
+    @Volatile private var drIntervalSec: Int = DEFAULT_DR_INTERVAL_SEC
 
     // 重複挿入抑制（GPS/DR）
     @Volatile private var lastInsertMillis: Long = 0L
@@ -108,7 +119,7 @@ class GeoLocationService : Service() {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
                 .collect { sec ->
-                    val ms = max(5_000L, sec * 1_000L)
+                    val ms = max(MIN_UPDATE_INTERVAL_MS, sec * 1_000L)
                     if (ms != updateIntervalMs) {
                         Log.d(TAG, "interval changed: ${updateIntervalMs}ms -> ${ms}ms")
                         updateIntervalMs = ms
@@ -158,7 +169,7 @@ class GeoLocationService : Service() {
     private fun startLocation() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
-        startForeground(1, buildNotification())
+        startForeground(NOTIFICATION_ID, buildNotification())
         serviceScope.launch { restartLocationUpdates() }
         startDrTicker() // DR リアルタイムを開始
     }
@@ -446,14 +457,14 @@ class GeoLocationService : Service() {
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel("geo", "Geo", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW)
             mgr.createNotificationChannel(ch)
         }
     }
 
     private fun buildNotification(): Notification {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, "geo")
+            Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("GeoLocation")
                 .setContentText("Running…")
                 .setSmallIcon(R.drawable.stat_notify_sync)

@@ -129,8 +129,9 @@ class MidnightExportWorker(
             if (uploadSucceeded && records.isNotEmpty()) {
                 try {
                     StorageService.deleteLocations(applicationContext, records)
-                } catch (_: Throwable) {
+                } catch (e: Throwable) {
                     // 失敗は致命ではない（次周で再対象）
+                    Log.w(TAG, "Failed to delete uploaded records, will retry next time", e)
                 }
             }
 
@@ -148,7 +149,8 @@ class MidnightExportWorker(
     private fun scheduleNext(context: Context) {
         val delayMs = calcDelayUntilNextMidnightMillis()
         val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+            // Network is required for uploading to Google Drive
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
             .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)

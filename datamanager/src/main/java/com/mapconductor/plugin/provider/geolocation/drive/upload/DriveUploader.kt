@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
@@ -118,10 +119,42 @@ class ApiClientDriveUploader(
 
 /** エンジンに応じて Uploader を生成。NONE のときは null。*/
 object UploaderFactory {
-    fun create(context: Context, engine: UploadEngine): Uploader? =
+    /**
+     * Create an Uploader instance based on the specified engine.
+     *
+     * @param context Application context
+     * @param engine Upload engine to use
+     * @param tokenProvider Optional token provider. If not provided, uses legacy GoogleAuthRepository.
+     *                      For new code, it's recommended to provide a tokenProvider (AppAuth or CredentialManager).
+     */
+    fun create(
+        context: Context,
+        engine: UploadEngine,
+        tokenProvider: GoogleDriveTokenProvider? = null
+    ): Uploader? =
         when (engine) {
-            // 既定は Resumable 対応の KotlinDriveUploader（OkHttp直叩き版）を使いたい場合は、
-            // ここを KotlinDriveUploader(context) にしてください。
+            UploadEngine.KOTLIN -> {
+                // Use new KotlinDriveUploader with token provider if available
+                if (tokenProvider != null) {
+                    KotlinDriveUploader(context, tokenProvider)
+                } else {
+                    // Fallback to legacy GoogleAuthRepository for backward compatibility
+                    @Suppress("DEPRECATION")
+                    KotlinDriveUploader(context, GoogleAuthRepository(context))
+                }
+            }
+            UploadEngine.NONE   -> null
+        }
+
+    /**
+     * Legacy method for backward compatibility.
+     * Uses ApiClientDriveUploader instead of KotlinDriveUploader.
+     *
+     * @deprecated Use create(context, engine, tokenProvider) instead
+     */
+    @Deprecated("Use create(context, engine, tokenProvider) for better flexibility")
+    fun createLegacy(context: Context, engine: UploadEngine): Uploader? =
+        when (engine) {
             UploadEngine.KOTLIN -> ApiClientDriveUploader(context)
             UploadEngine.NONE   -> null
         }

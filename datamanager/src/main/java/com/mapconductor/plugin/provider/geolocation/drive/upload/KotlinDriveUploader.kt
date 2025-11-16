@@ -6,7 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.drive.net.DriveHttp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,7 +23,8 @@ import java.io.IOException
 import java.net.URLEncoder
 
 class KotlinDriveUploader(
-    private val context: Context
+    private val context: Context,
+    private val tokenProvider: GoogleDriveTokenProvider
 ) : Uploader {
 
     private val baseUploadUrl = "https://www.googleapis.com/upload/drive/v3/files"
@@ -32,7 +33,7 @@ class KotlinDriveUploader(
 
     override suspend fun upload(uri: Uri, folderId: String, fileName: String?): UploadResult =
         withContext(Dispatchers.IO) {
-            val token = GoogleAuthRepository(context).getAccessTokenOrNull()
+            val token = tokenProvider.getAccessToken()
                 ?: return@withContext UploadResult.Failure(
                     code = 401, body = "Sign-in required", message = "No access token"
                 )

@@ -108,15 +108,109 @@ DRIVE_FULL_SCOPE=false
 
 ### 3. Prepare Google Drive Integration
 
-1) Create a project in Google Cloud Console
-2) Configure the OAuth consent screen and publish it
-3) Create an OAuth Client ID for **Android**
-4) Place `google-services.json` under `app/` (do not commit)
-5) Use the following scopes:
-    - `https://www.googleapis.com/auth/drive.file` (access to files created/opened by the app)
-    - `https://www.googleapis.com/auth/drive.metadata.readonly` (folder ID validation, etc.)
+This library supports **multiple authentication implementations**. Choose the one that best fits your needs:
 
-> `google-services.json` differs by developer/environment, so **always place it locally**.
+#### Option 1: AppAuth (Recommended for most cases)
+**Standards-compliant OAuth 2.0 with PKCE**
+
+1) Add dependency to your app module:
+```gradle
+implementation(project(":auth-appauth"))
+```
+
+2) Create OAuth 2.0 credentials in Google Cloud Console:
+   - Create a project
+   - Configure OAuth consent screen
+   - Create **Web application** credentials (not Android)
+   - Add authorized redirect URI: `com.yourapp:/oauth2redirect`
+
+3) Initialize the token provider:
+```kotlin
+val tokenProvider = AppAuthTokenProvider(
+    context = applicationContext,
+    clientId = "YOUR_CLIENT_ID.apps.googleusercontent.com",
+    redirectUri = "com.yourapp:/oauth2redirect"
+)
+
+// Start authorization
+val intent = tokenProvider.buildAuthorizationIntent()
+startActivityForResult(intent, REQUEST_CODE)
+
+// Handle response
+tokenProvider.handleAuthorizationResponse(data)
+
+// Use with uploader
+val uploader = KotlinDriveUploader(context, tokenProvider)
+```
+
+**Advantages:**
+- ✅ RFC 8252 compliant (OAuth 2.0 for native apps)
+- ✅ PKCE support for enhanced security
+- ✅ Works with any OAuth 2.0 provider
+- ✅ Long-term maintenance guaranteed
+
+#### Option 2: Credential Manager (Recommended for Android 14+)
+**Modern Android authentication (2025 standard)**
+
+1) Add dependency to your app module:
+```gradle
+implementation(project(":auth-credentialmanager"))
+```
+
+2) Create OAuth 2.0 credentials in Google Cloud Console:
+   - Create **Web application** credentials
+   - Note the client ID (server client ID)
+
+3) Initialize the token provider:
+```kotlin
+val tokenProvider = CredentialManagerTokenProvider(
+    context = applicationContext,
+    serverClientId = "YOUR_WEB_CLIENT_ID.apps.googleusercontent.com"
+)
+
+// Sign in
+val credential = tokenProvider.signIn()
+
+// Get token
+val token = tokenProvider.getAccessToken()
+```
+
+**Advantages:**
+- ✅ Google's 2025 recommended approach
+- ✅ Best integration with Android system
+- ✅ Separation of authentication and authorization
+
+**Note:** This implementation is currently a reference. Full integration with AuthorizationClient API is in progress.
+
+#### Option 3: Legacy (Deprecated, backward compatibility only)
+**Uses deprecated GoogleAuthUtil - Not recommended for new code**
+
+The existing `GoogleAuthRepository` is still available but marked as deprecated. It will continue to work but should not be used in new projects.
+
+```kotlin
+@Deprecated("Use AppAuth or Credential Manager instead")
+val tokenProvider = GoogleAuthRepository(context)
+```
+
+#### Required OAuth Scopes
+All implementations require these Google Drive scopes:
+- `https://www.googleapis.com/auth/drive.file` (access to files created/opened by the app)
+- `https://www.googleapis.com/auth/drive.metadata.readonly` (folder ID validation, etc.)
+
+#### Custom Implementation
+You can also implement your own `GoogleDriveTokenProvider`:
+
+```kotlin
+class MyCustomTokenProvider : GoogleDriveTokenProvider {
+    override suspend fun getAccessToken(): String? {
+        // Your custom implementation
+    }
+
+    override suspend fun refreshToken(): String? {
+        // Your custom implementation
+    }
+}
+```
 
 ### 4. Add Permissions (for confirmation)
 

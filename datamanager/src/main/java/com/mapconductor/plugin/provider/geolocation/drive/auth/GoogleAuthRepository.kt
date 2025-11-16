@@ -20,7 +20,21 @@ private const val DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.
 // ※フルアクセスにするなら ↓ を1本だけ使う（代替案）
 // private const val DRIVE_FULL_SCOPE     = "https://www.googleapis.com/auth/drive"
 
-class GoogleAuthRepository(private val context: Context) {
+/**
+ * Legacy implementation of GoogleDriveTokenProvider using deprecated GoogleAuthUtil.
+ *
+ * @deprecated This implementation uses deprecated GoogleAuthUtil.getToken() which will be
+ * removed in future Android versions. Consider migrating to:
+ * - Credential Manager + AuthorizationClient (recommended for Android 14+)
+ * - AppAuth library (cross-platform OAuth 2.0)
+ *
+ * This is kept for backward compatibility but should not be used in new code.
+ */
+@Deprecated(
+    message = "Use Credential Manager or AppAuth instead",
+    replaceWith = ReplaceWith("CredentialManagerTokenProvider or AppAuthTokenProvider")
+)
+class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvider {
     private val tag = "DriveAuth"
 
     // ★ 複数スコープ要求（drive.file + drive.metadata.readonly）
@@ -48,7 +62,7 @@ class GoogleAuthRepository(private val context: Context) {
             }
         }
 
-    suspend fun getAccessTokenOrNull(): String? =
+    override suspend fun getAccessToken(): String? =
         withContext(Dispatchers.IO) {
             val acct = GoogleSignIn.getLastSignedInAccount(context) ?: return@withContext null
             val email = acct.email ?: return@withContext null
@@ -70,6 +84,16 @@ class GoogleAuthRepository(private val context: Context) {
                 null
             }
         }
+
+    override suspend fun refreshToken(): String? {
+        // GoogleAuthUtil doesn't have explicit refresh mechanism
+        // It handles token refresh internally when getToken is called
+        return getAccessToken()
+    }
+
+    // Backward compatibility
+    @Deprecated("Use getAccessToken() instead", ReplaceWith("getAccessToken()"))
+    suspend fun getAccessTokenOrNull(): String? = getAccessToken()
 
     fun signOut(activity: Activity) {
         GoogleSignIn.getClient(activity, gso).signOut()
