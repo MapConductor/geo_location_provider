@@ -6,8 +6,9 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -18,47 +19,30 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 /**
- * Credential Manager-based implementation of GoogleDriveTokenProvider.
+ * Google Drive 用のトークンを Android Credential Manager + AuthorizationClient で取得する実装。
  *
- * This is the recommended approach for Android 14+ (API 34+) as of 2025.
- * It uses the new Android Credential Manager API for authentication and
- * AuthorizationClient for authorization (accessing Google Drive API).
+ * 役割:
+ * - Credential Manager を使った Google アカウントのサインイン
+ * - Identity API (AuthorizationClient) を使った Drive 向けアクセストークンの取得
  *
- * Key Features:
- * - Modern Android authentication (replaces legacy Google Sign-In)
- * - Separation of authentication (sign-in) and authorization (API access)
- * - Better security and user experience
- * - Integration with system credential providers
+ * 利用イメージ:
  *
- * Architecture:
- * 1. Authentication: Credential Manager + GetGoogleIdOption
- *    - Signs in the user and gets basic profile info
- *    - Sets the default Google account for the app
+ * val provider = CredentialManagerTokenProvider(
+ *     context = activity,
+ *     serverClientId = "YOUR_OAUTH_CLIENT_ID"
+ * )
  *
- * 2. Authorization: GoogleSignInClient with requestScopes
- *    - Requests OAuth scopes for Google Drive API access
- *    - Uses the account from step 1 as default
- *    - Returns access tokens for API calls
+ * // 1. どこかの画面でサインイン（UIあり）
+ * val idCred = provider.signIn()
  *
- * Usage:
- * ```
- * val tokenProvider = CredentialManagerTokenProvider(context, serverClientId)
+ * // 2. サインイン済み状態でトークン取得（UIなし）
+ * val token = provider.getAccessToken()
  *
- * // First, authenticate the user
- * val signedIn = tokenProvider.signIn(activity)
- *
- * // Then get access token for Drive API
- * val token = tokenProvider.getAccessToken()
- * ```
- *
- * Requirements:
- * - minSdk 26 (Credential Manager has compatibility support)
- * - Google Cloud Console setup with OAuth 2.0 credentials
- * - Web application client ID (server client ID)
- *
- * @param context Application context
- * @param serverClientId OAuth 2.0 Web application client ID from Google Cloud Console
- * @param scopes List of OAuth scopes to request (defaults to Drive file access)
+ * 注意:
+ * - signIn() は Activity コンテキストで呼ぶこと（Credential Manager の制約）
+ * - getAccessToken() は「既にスコープ許可済み」の場合にのみ成功する。
+ *   ユーザー操作が必要な場合は hasResolution()==true となり、ここでは null を返す。
+ *   その場合はアプリ側で AuthorizationClient.authorize() の解決付きフローを組むこと。
  */
 class CredentialManagerTokenProvider(
     private val context: Context,
@@ -73,21 +57,24 @@ class CredentialManagerTokenProvider(
         private const val TAG = "CredentialManagerAuth"
     }
 
-    private val credentialManager = CredentialManager.create(context)
-
-    private val googleSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-        .requestEmail()
-        .requestScopes(*scopes.map { Scope(it) }.toTypedArray())
-        .build()
+    private val credentialManager: CredentialManager = CredentialManager.create(context)
 
     /**
-     * Sign in the user using Credential Manager.
+     * GoogleSignInOptions は signOut() 時のクライアント生成にだけ使う。
+     * アクセストークン自体は AuthorizationClient から取得する。
+     */
+    private val googleSignInOptions: GoogleSignInOptions =
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(*scopes.map { Scope(it) }.toTypedArray())
+            .build()
+
+    /**
+     * Credential Manager を使ってサインインする。
      *
-     * This should be called from an Activity context.
-     * After successful sign-in, the user's Google account becomes the default
-     * account for the app, and can be used for authorization requests.
-     *
-     * @return GoogleIdTokenCredential if sign-in succeeded, null otherwise
+     * - Activity コンテキストで呼ぶこと（context には Activity を渡す前提）
+     * - 成功時は GoogleIdTokenCredential を返す（idToken, subject 等が取れる）
+     * - ここでは Drive スコープまではまだ要求しない（後で AuthorizationClient で要求）
      */
     suspend fun signIn(): GoogleIdTokenCredential? = withContext(Dispatchers.IO) {
         try {
@@ -114,6 +101,7 @@ class CredentialManagerTokenProvider(
                         null
                     }
                 }
+
                 else -> {
                     Log.w(TAG, "Unexpected credential class: ${result.credential}")
                     null
@@ -125,56 +113,65 @@ class CredentialManagerTokenProvider(
         }
     }
 
+    /**
+     * Drive 用のアクセストークンを Identity Authorization API から取得する。
+     *
+     * 前提:
+     * - ユーザーが既にサインインしていて、要求するスコープが許可済みなら
+     *   -> hasResolution() == false となり、ここから直接 accessToken が取れる。
+     * - まだスコープが許可されていない / ユーザー操作が必要な場合
+     *   -> hasResolution() == true となる。この場合このメソッドは null を返し、
+     *      アプリ側で ActivityResult 等を使って解決付き authorize() を実行すべき。
+     */
     override suspend fun getAccessToken(): String? = withContext(Dispatchers.IO) {
         try {
-            // Get the last signed-in account (from Credential Manager sign-in)
-            val account: GoogleSignInAccount = GoogleSignIn.getLastSignedInAccount(context)
-                ?: return@withContext null
+            val authClient = Identity.getAuthorizationClient(context)
 
-            // Check if we already have the required scopes
-            val hasScopes = scopes.all { scope ->
-                GoogleSignIn.hasPermissions(account, Scope(scope))
-            }
+            val requestedScopes = scopes.map { Scope(it) }
 
-            if (!hasScopes) {
-                Log.w(TAG, "Missing required scopes, need to request authorization")
+            val request = AuthorizationRequest.Builder()
+                .setRequestedScopes(requestedScopes)
+                .build()
+
+            val result = authClient.authorize(request).await()
+
+            if (result.hasResolution()) {
+                // ここでユーザー操作を伴うフローを開始するのはライブラリの責務外とする。
+                Log.w(
+                    TAG,
+                    "Authorization requires user interaction (hasResolution==true). " +
+                            "Handle this in the app layer."
+                )
                 return@withContext null
             }
 
-            // Request fresh access token (uses silent sign-in)
-            val client = GoogleSignIn.getClient(context, googleSignInOptions)
-            val refreshedAccount = client.silentSignIn().await()
-
-            // Note: GoogleSignInAccount doesn't directly expose the access token
-            // You need to use GoogleAuthUtil or AuthorizationClient to get the actual token
-            // For now, we'll use a simplified approach
-            Log.d(TAG, "Account refreshed: ${refreshedAccount.email}")
-
-            // TODO: Use AuthorizationClient to get actual access token
-            // This is a placeholder - in production, you'd need to:
-            // 1. Use com.google.android.gms.auth.api.identity.AuthorizationClient
-            // 2. Call authorize() with the required scopes
-            // 3. Extract the access token from AuthorizationResult
-
-            null // Placeholder - implement AuthorizationClient integration
+            val token = result.accessToken
+            if (token.isNullOrBlank()) {
+                Log.w(TAG, "AuthorizationResult.accessToken is null or blank")
+                null
+            } else {
+                Log.d(TAG, "Access token acquired (length=${token.length})")
+                token
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get access token", e)
             null
         }
     }
 
+    /**
+     * Token refresh は AuthorizationClient.authorize() に丸投げできるので、
+     * 単純に getAccessToken() を呼び直す。
+     */
     override suspend fun refreshToken(): String? {
-        // In Credential Manager approach, refreshing is handled by getAccessToken()
         return getAccessToken()
     }
 
-    override suspend fun isAuthenticated(): Boolean {
-        val account = GoogleSignIn.getLastSignedInAccount(context)
-        return account != null
-    }
-
     /**
-     * Sign out the user.
+     * サインアウト。
+     *
+     * ここでは簡易的に GoogleSignInClient の signOut() だけ呼ぶ。
+     * ＋必要ならアプリ側で CredentialManager の clearCredentialState() なども併用すること。
      */
     suspend fun signOut() = withContext(Dispatchers.IO) {
         try {
