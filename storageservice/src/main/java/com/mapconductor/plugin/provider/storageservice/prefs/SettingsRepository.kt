@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 
-// ★ この拡張は “このファイルだけ” で可視化（他ファイルで二重定義されないように）
 private val Context.settingsDataStore by preferencesDataStore(name = "geolocation_settings")
 
 object SettingsRepository {

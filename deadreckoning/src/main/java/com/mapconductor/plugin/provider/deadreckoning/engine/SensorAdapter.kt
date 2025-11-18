@@ -8,8 +8,6 @@ import android.hardware.SensorManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.launch
-import kotlin.math.sqrt
 
 internal class SensorAdapter(
     private val context: Context,
