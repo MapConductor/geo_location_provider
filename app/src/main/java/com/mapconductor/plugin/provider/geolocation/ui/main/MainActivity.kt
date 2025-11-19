@@ -6,9 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
+import android.app.Activity
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,13 +44,14 @@ import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.auth.DriveCredentialManagerHolder
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material3.*
 import androidx.navigation.compose.currentBackStackEntryAsState
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
@@ -160,24 +160,12 @@ private fun AppRoot(
     val scope = rememberCoroutineScope()
 
     // 直接利用するリポジトリ/クライアント
-    val authRepo = remember { GoogleAuthRepository(ctx.applicationContext) }
+    val credentialProvider = remember { DriveCredentialManagerHolder.get(ctx.applicationContext) }
     val driveApi = remember { DriveApiClient(context = ctx) }
     val prefs = remember { DrivePrefsRepository(ctx.applicationContext) }
 
     val showMsg: (String) -> Unit = { msg ->
         scope.launch { snackbarHostState.showSnackbar(msg) }
-    }
-
-    // Sign-in ランチャ
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { res ->
-        scope.launch(Dispatchers.IO) {
-            val acct = authRepo.handleSignInResult(res.data)
-            launch(Dispatchers.Main) {
-                showMsg(acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed")
-            }
-        }
     }
 
     var driveMenu by remember { mutableStateOf(false) }
@@ -210,7 +198,25 @@ private fun AppRoot(
                             text = { Text("Sign in") },
                             onClick = {
                                 driveMenu = false
-                                launcher.launch(authRepo.buildSignInIntent())
+                                val activity = ctx as? Activity
+                                if (activity == null) {
+                                    showMsg("Activity context is required for sign-in")
+                                } else {
+                                    scope.launch {
+                                        val credential = credentialProvider.signIn(activity)
+                                        val email = if (credential != null) {
+                                            credentialProvider.getLastSignedInEmail()
+                                        } else {
+                                            null
+                                        }
+                                        if (!email.isNullOrBlank()) {
+                                            withContext(Dispatchers.IO) { prefs.setAccountEmail(email) }
+                                            showMsg("Signed in: $email")
+                                        } else {
+                                            showMsg("Sign-in failed")
+                                        }
+                                    }
+                                }
                             }
                         )
                         DropdownMenuItem(
@@ -218,7 +224,7 @@ private fun AppRoot(
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
+                                    val token = credentialProvider.getAccessToken()
                                     launch(Dispatchers.Main) {
                                         if (token != null) {
                                             prefs.markTokenRefreshed(System.currentTimeMillis())
@@ -235,7 +241,7 @@ private fun AppRoot(
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
+                                    val token = credentialProvider.getAccessToken()
                                     val msg = if (token == null) {
                                         "No token"
                                     } else {
@@ -254,7 +260,7 @@ private fun AppRoot(
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
+                                    val token = credentialProvider.getAccessToken()
                                     val msg = if (token == null) {
                                         "No token"
                                     } else {
