@@ -1,11 +1,14 @@
 package com.mapconductor.plugin.provider.geolocation.auth.credentialmanager
 
+import android.accounts.Account
+import android.app.Activity
 import android.content.Context
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
+import com.google.android.gms.auth.GoogleAuthUtil
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
@@ -89,7 +92,7 @@ class CredentialManagerTokenProvider(
      *
      * @return GoogleIdTokenCredential if sign-in succeeded, null otherwise
      */
-    suspend fun signIn(): GoogleIdTokenCredential? = withContext(Dispatchers.IO) {
+    suspend fun signIn(activity: Activity): GoogleIdTokenCredential? = withContext(Dispatchers.Main) {
         try {
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
@@ -101,7 +104,7 @@ class CredentialManagerTokenProvider(
                 .build()
 
             val result: GetCredentialResponse = credentialManager.getCredential(
-                context = context,
+                context = activity,
                 request = request
             )
 
@@ -127,36 +130,31 @@ class CredentialManagerTokenProvider(
 
     override suspend fun getAccessToken(): String? = withContext(Dispatchers.IO) {
         try {
-            // Get the last signed-in account (from Credential Manager sign-in)
             val account: GoogleSignInAccount = GoogleSignIn.getLastSignedInAccount(context)
-                ?: return@withContext null
+                ?: run {
+                    Log.w(TAG, "No signed-in account")
+                    return@withContext null
+                }
 
-            // Check if we already have the required scopes
+            val email = account.email
+            if (email.isNullOrBlank()) {
+                Log.w(TAG, "Signed-in account does not expose email")
+                return@withContext null
+            }
+
             val hasScopes = scopes.all { scope ->
                 GoogleSignIn.hasPermissions(account, Scope(scope))
             }
-
             if (!hasScopes) {
                 Log.w(TAG, "Missing required scopes, need to request authorization")
                 return@withContext null
             }
 
-            // Request fresh access token (uses silent sign-in)
-            val client = GoogleSignIn.getClient(context, googleSignInOptions)
-            val refreshedAccount = client.silentSignIn().await()
+            val oauthScope = "oauth2:" + scopes.joinToString(" ")
+            val googleAccount: Account = account.account ?: Account(email, "com.google")
 
-            // Note: GoogleSignInAccount doesn't directly expose the access token
-            // You need to use GoogleAuthUtil or AuthorizationClient to get the actual token
-            // For now, we'll use a simplified approach
-            Log.d(TAG, "Account refreshed: ${refreshedAccount.email}")
-
-            // TODO: Use AuthorizationClient to get actual access token
-            // This is a placeholder - in production, you'd need to:
-            // 1. Use com.google.android.gms.auth.api.identity.AuthorizationClient
-            // 2. Call authorize() with the required scopes
-            // 3. Extract the access token from AuthorizationResult
-
-            null // Placeholder - implement AuthorizationClient integration
+            @Suppress("DEPRECATION")
+            GoogleAuthUtil.getToken(context, googleAccount, oauthScope)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to get access token", e)
             null
@@ -172,6 +170,9 @@ class CredentialManagerTokenProvider(
         val account = GoogleSignIn.getLastSignedInAccount(context)
         return account != null
     }
+
+    fun getLastSignedInEmail(): String? =
+        GoogleSignIn.getLastSignedInAccount(context)?.email
 
     /**
      * Sign out the user.

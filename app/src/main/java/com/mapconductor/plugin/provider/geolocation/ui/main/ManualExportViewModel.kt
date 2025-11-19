@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.auth.DriveCredentialManagerHolder
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
@@ -38,6 +39,8 @@ enum class TodayPreviewMode {
 class ManualExportViewModel(
     private val appContext: Context
 ) : ViewModel() {
+
+    private val tokenProvider = DriveCredentialManagerHolder.get(appContext)
 
     /**
      * 仕様（確定版）:
@@ -113,7 +116,7 @@ class ManualExportViewModel(
                     TodayPreviewMode.UPLOAD_AND_DELETE_LOCAL -> {
                         val prefs = AppPrefs.snapshot(appContext)
                         val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
-                        val uploader = UploaderFactory.create(appContext, prefs.engine)
+                        val uploader = UploaderFactory.create(appContext, prefs.engine, tokenProvider)
 
                         if (uploader == null || folderId.isNullOrBlank()) {
                             withContext(Dispatchers.Main) {

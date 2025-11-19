@@ -1,7 +1,6 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import android.app.Activity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,11 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.auth.DriveCredentialManagerHolder
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import kotlinx.coroutines.Dispatchers
@@ -59,15 +60,13 @@ fun DriveSettingsScreen(
     onBack: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialProvider = remember { DriveCredentialManagerHolder.get(ctx.applicationContext) }
 
     val status by vm.status.collectAsState()
     val folderId by vm.folderId.collectAsState()
     val account by vm.accountEmail.collectAsState()
     val lastRefresh by vm.tokenLastRefresh.collectAsState()
-
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { res -> vm.onSignInResult(res.data) }
 
     val lastRefreshText = remember(lastRefresh) {
         if (lastRefresh > 0L) {
@@ -112,8 +111,23 @@ fun DriveSettingsScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { launcher.launch(vm.buildSignInIntent()) }) {
-                    Text("Sign in")
+                Button(onClick = {
+                    val activity = ctx as? Activity
+                    if (activity == null) {
+                        vm.postStatus("Activity context is required for sign-in")
+                    } else {
+                        scope.launch {
+                            val credential = credentialProvider.signIn(activity)
+                            val email = if (credential != null) {
+                                credentialProvider.getLastSignedInEmail()
+                            } else {
+                                null
+                            }
+                            vm.onCredentialSignInCompleted(email)
+                        }
+                    }
+                }) {
+                    Text("Sign in (Credential Manager)")
                 }
                 Button(onClick = { vm.getToken() }) {
                     Text("Get Token")
@@ -200,10 +214,10 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                 Button(onClick = {
                     showPreviewChoice = false
                     // アップロードする：IOスレッドで実行
-                    scope.launch(Dispatchers.IO) {
-                        val msg = runTodayPreviewIO(ctx, upload = true)
-                        withContext(Dispatchers.Main) { uiMsg = msg }
-                    }
+                        scope.launch(Dispatchers.IO) {
+                            val msg = runTodayPreviewIO(ctx, upload = true, credentialProvider)
+                            withContext(Dispatchers.Main) { uiMsg = msg }
+                        }
                 }) {
                     Text("アップロードする")
                 }
@@ -212,10 +226,10 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                 OutlinedButton(onClick = {
                     showPreviewChoice = false
                     // アップロードしない：IOスレッドで実行
-                    scope.launch(Dispatchers.IO) {
-                        val msg = runTodayPreviewIO(ctx, upload = false)
-                        withContext(Dispatchers.Main) { uiMsg = msg }
-                    }
+                        scope.launch(Dispatchers.IO) {
+                            val msg = runTodayPreviewIO(ctx, upload = false, credentialProvider)
+                            withContext(Dispatchers.Main) { uiMsg = msg }
+                        }
                 }) {
                     Text("アップロードしない")
                 }
@@ -227,7 +241,8 @@ private fun BackupSection(modifier: Modifier = Modifier) {
 /** 今日(0:00〜現在) 分のみを対象に Preview 実行（IO処理本体：UIから呼ぶ） */
 private suspend fun runTodayPreviewIO(
     ctx: android.content.Context,
-    upload: Boolean
+    upload: Boolean,
+    tokenProvider: GoogleDriveTokenProvider
 ): String = withContext(Dispatchers.IO) {
     val zone = ZoneId.of("Asia/Tokyo")
     val nowJst = ZonedDateTime.now(zone)
@@ -291,7 +306,7 @@ private suspend fun runTodayPreviewIO(
     // ここから「アップロードする」経路
     val snapshot = AppPrefs.snapshot(ctx)
     val folderId = DriveFolderId.extractFromUrlOrId(snapshot.folderId)
-    val uploader = UploaderFactory.create(ctx, snapshot.engine)
+    val uploader = UploaderFactory.create(ctx, snapshot.engine, tokenProvider)
 
     if (uploader == null || folderId.isNullOrBlank()) {
         // ZIPは削除（Roomは残す）

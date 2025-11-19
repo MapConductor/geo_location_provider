@@ -9,7 +9,8 @@ import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.auth.DriveCredentialManagerHolder
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
@@ -22,7 +23,8 @@ import kotlinx.coroutines.launch
 
 class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = DrivePrefsRepository(app)
-    private val auth = GoogleAuthRepository(app)
+    private val tokenProvider: GoogleDriveTokenProvider =
+        DriveCredentialManagerHolder.get(app.applicationContext)
     private val api = DriveApiClient(context = app.applicationContext)
 
     val folderId: StateFlow<String> =
@@ -35,14 +37,19 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
-    fun buildSignInIntent() = auth.buildSignInIntent()
-
-    fun onSignInResult(data: android.content.Intent?) {
+    fun onCredentialSignInCompleted(email: String?) {
         viewModelScope.launch(Dispatchers.IO) {
-            val acct = auth.handleSignInResult(data)
-            if (acct?.email != null) prefs.setAccountEmail(acct.email!!)
-            _status.value = acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed"
+            if (!email.isNullOrBlank()) {
+                prefs.setAccountEmail(email)
+                _status.value = "Signed in: $email"
+            } else {
+                _status.value = "Sign-in failed"
+            }
         }
+    }
+
+    fun postStatus(message: String) {
+        _status.value = message
     }
 
     fun updateFolderId(idOrUrl: String) {
@@ -52,7 +59,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun getToken() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
+            val token = tokenProvider.getAccessToken()
             _status.value = if (token != null) {
                 prefs.markTokenRefreshed(System.currentTimeMillis())
                 "Token OK: ${token.take(12)}…"
@@ -64,7 +71,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun callAboutGet() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
+            val token = tokenProvider.getAccessToken()
             if (token == null) { _status.value = "No token"; return@launch }
             when (val r = api.aboutGet(token)) {
                 is ApiResult.Success     -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
@@ -77,7 +84,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Validate Folder: URL/ID から id と resourceKey を抽出して検証＆保存 */
     fun validateFolder() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
+            val token = tokenProvider.getAccessToken()
             if (token == null) { _status.value = "No token"; return@launch }
 
             val raw = folderId.value
@@ -119,14 +126,14 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** ★ P8テスト：サンプルテキストを作って Drive にアップロード */
     fun uploadSampleNow() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
+            val token = tokenProvider.getAccessToken()
             if (token == null) { _status.value = "Sign-in required"; return@launch }
 
             val raw = folderId.value
             val parentId = DriveFolderId.extractFromUrlOrId(raw)
             if (parentId.isNullOrBlank()) { _status.value = "Folder URL/ID is empty"; return@launch }
 
-            val uploader = UploaderFactory.create(getApplication(), UploadEngine.KOTLIN)
+            val uploader = UploaderFactory.create(getApplication(), UploadEngine.KOTLIN, tokenProvider)
                 ?: run { _status.value = "Uploader not available"; return@launch }
 
             val now = System.currentTimeMillis()

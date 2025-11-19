@@ -89,6 +89,7 @@ dependencies {
     implementation(project(":datamanager"))
     implementation(project(":deadreckoning"))
     implementation(project(":storageservice"))
+    implementation(project(":auth-credentialmanager"))
 
     implementation("com.google.android.material:material:1.12.0")
 
