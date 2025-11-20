@@ -32,6 +32,9 @@ dependencies {
     // Depend on datamanager for GoogleDriveTokenProvider interface
     implementation(project(":datamanager"))
 
+    // AppAuth (OAuth 2.0 for native apps)
+    implementation("net.openid:appauth:0.11.1")
+
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
