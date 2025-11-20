@@ -7,18 +7,15 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -41,16 +38,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
-import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
-import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -102,9 +95,6 @@ class MainActivity : ComponentActivity() {
         val notifOk = if (Build.VERSION.SDK_INT >= 33)
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         else true
-
-// 起動時の強制Service起動を一旦削除
-//        if (locOk && notifOk) startLocationService()
     }
 
     private fun startLocationService() {
@@ -154,32 +144,13 @@ private fun AppRoot(
     content: @Composable () -> Unit
 ) {
     val navController = rememberNavController()
-
     val snackbarHostState = remember { SnackbarHostState() }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-
-    // 直接利用するリポジトリ/クライアント
-    val authRepo = remember { GoogleAuthRepository(ctx.applicationContext) }
-    val driveApi = remember { DriveApiClient(context = ctx) }
     val prefs = remember { DrivePrefsRepository(ctx.applicationContext) }
-
     val showMsg: (String) -> Unit = { msg ->
         scope.launch { snackbarHostState.showSnackbar(msg) }
     }
-
-    // Sign-in ランチャ（Legacy GoogleAuthRepository 用）
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { res ->
-        scope.launch(Dispatchers.IO) {
-            val acct = authRepo.handleSignInResult(res.data)
-            launch(Dispatchers.Main) {
-                showMsg(acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed")
-            }
-        }
-    }
-
     var driveMenu by remember { mutableStateOf(false) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderInput by remember { mutableStateOf("") }
@@ -207,106 +178,10 @@ private fun AppRoot(
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Sign in (legacy)") },
+                            text = { Text("Upload設定") },
                             onClick = {
                                 driveMenu = false
-                                launcher.launch(authRepo.buildSignInIntent())
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Get Token (legacy)") },
-                            onClick = {
-                                driveMenu = false
-                                scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
-                                    launch(Dispatchers.Main) {
-                                        if (token != null) {
-                                            prefs.markTokenRefreshed(System.currentTimeMillis())
-                                            showMsg("Token OK: ${token.take(12)}…")
-                                        } else {
-                                            showMsg("Token failed")
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("About.get (legacy)") },
-                            onClick = {
-                                driveMenu = false
-                                scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
-                                    val msg = if (token == null) {
-                                        "No token"
-                                    } else {
-                                        when (val r = driveApi.aboutGet(token)) {
-                                            is ApiResult.Success      -> "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
-                                            is ApiResult.HttpError    -> "About ${r.code}: ${r.body}"
-                                            is ApiResult.NetworkError -> "About network: ${r.exception.message}"
-                                        }
-                                    }
-                                    launch(Dispatchers.Main) { showMsg(msg) }
-                                }
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Validate Folder (legacy)") },
-                            onClick = {
-                                driveMenu = false
-                                scope.launch(Dispatchers.IO) {
-                                    val token = authRepo.getAccessTokenOrNull()
-                                    val msg = if (token == null) {
-                                        "No token"
-                                    } else {
-                                        val raw = prefs.folderIdFlow.first()
-                                        val id  = extractFromUrlOrId(raw)
-                                        val rk: String = (DriveFolderId.extractResourceKey(raw) as? String).orEmpty()
-                                        if (id.isNullOrBlank()) {
-                                            "Invalid folder URL/ID"
-                                        } else {
-                                            prefs.setFolderResourceKey(rk)
-                                            when (val r = driveApi.validateFolder(token, id, rk)) {
-                                                is ApiResult.Success -> {
-                                                    var resolvedId = r.data.id
-                                                    var detail = r.data
-                                                    if (!detail.shortcutTargetId.isNullOrBlank()) {
-                                                        when (val r2 = driveApi.validateFolder(token, detail.shortcutTargetId!!, null)) {
-                                                            is ApiResult.Success      -> { resolvedId = r2.data.id; detail = r2.data }
-                                                            is ApiResult.HttpError    -> "Shortcut target ${r2.code}: ${r2.body}"
-                                                            is ApiResult.NetworkError -> "Shortcut target network: ${r2.exception.message}"
-                                                            else -> null
-                                                        }?.let { launch(Dispatchers.Main) { showMsg(it.toString()) }; return@launch }
-                                                    }
-                                                    if (!detail.isFolder) {
-                                                        "Not a folder: ${detail.mimeType}"
-                                                    } else if (!detail.canAddChildren) {
-                                                        "No write permission for this folder"
-                                                    } else {
-                                                        prefs.setFolderId(resolvedId!!)
-                                                        "Folder OK: ${detail.name} ($resolvedId)"
-                                                    }
-                                                }
-                                                is ApiResult.HttpError    -> "Folder ${r.code}: ${r.body}"
-                                                is ApiResult.NetworkError -> "Folder network: ${r.exception.message}"
-                                            }
-                                        }
-                                    }
-                                    launch(Dispatchers.Main) { showMsg(msg) }
-                                }
-                            }
-                        )
-
-                        HorizontalDivider(
-                            Modifier,
-                            DividerDefaults.Thickness,
-                            DividerDefaults.color
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("Drive 設定（詳細）") },
-                            onClick = {
-                                driveMenu = false
-                                onOpenDriveSettings() // ← 外側の NavController（MainActivity 側）で drive_settings に遷移
+                                onOpenDriveSettings()
                             }
                         )
                     }

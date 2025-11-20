@@ -46,8 +46,9 @@ GeoLocationProvider は、Android 上で **位置情報を記録・保存・エ�
 - **MidnightExportWorker & MidnightExportScheduler**  
   WorkManager を用いたバックグラウンドタスク。毎日0時に前日分のデータを GeoJSON + ZIP にエクスポートし、Google Drive アップロードまでを自動で実行します。スケジューラは次回の実行予約を担います。
 
-- **GoogleAuthRepository & DriveApiClient**  
-  Google Drive 連携のための基盤。`GoogleAuthRepository` は OAuth 認証やトークン管理を行い、`DriveApiClient` は Drive API を呼び出してファイルアップロードやフォルダ検証を実行します。
+- **GoogleDriveTokenProvider / KotlinDriveUploader / DriveApiClient**  
+  Google Drive 連携の中核となるコンポーネント群。`GoogleDriveTokenProvider` はアクセストークン取得用の抽象インターフェース、`KotlinDriveUploader` は Drive へのアップロード処理、`DriveApiClient` はフォルダ検証などの REST 呼び出しを担当します。  
+  旧実装である `GoogleAuthRepository`（GoogleAuthUtil ベース）は後方互換のために残されていますが、新規コードでは利用しないことを推奨します。
 
 - **UI 画面群 (MainActivity, PickupScreen, DriveSettingsScreen など)**  
   Jetpack Compose で実装されたユーザーインターフェース。
