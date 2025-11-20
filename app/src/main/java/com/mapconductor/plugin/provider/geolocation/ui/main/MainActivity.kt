@@ -6,8 +6,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -168,7 +168,7 @@ private fun AppRoot(
         scope.launch { snackbarHostState.showSnackbar(msg) }
     }
 
-    // Sign-in ランチャ
+    // Sign-in ランチャ（Legacy GoogleAuthRepository 用）
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { res ->
@@ -207,14 +207,14 @@ private fun AppRoot(
                     TextButton(onClick = { driveMenu = true }) { Text("Drive") }
                     DropdownMenu(expanded = driveMenu, onDismissRequest = { driveMenu = false }) {
                         DropdownMenuItem(
-                            text = { Text("Sign in") },
+                            text = { Text("Sign in (legacy)") },
                             onClick = {
                                 driveMenu = false
                                 launcher.launch(authRepo.buildSignInIntent())
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Get Token") },
+                            text = { Text("Get Token (legacy)") },
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {
@@ -231,7 +231,7 @@ private fun AppRoot(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("About.get") },
+                            text = { Text("About.get (legacy)") },
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {
@@ -250,7 +250,7 @@ private fun AppRoot(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("Validate Folder") },
+                            text = { Text("Validate Folder (legacy)") },
                             onClick = {
                                 driveMenu = false
                                 scope.launch(Dispatchers.IO) {

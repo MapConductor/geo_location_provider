@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.drive.auth.DriveTokenProviderRegistry
 import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.util.LogTags
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
@@ -134,11 +135,10 @@ object UploaderFactory {
     ): Uploader? =
         when (engine) {
             UploadEngine.KOTLIN -> {
-                // Use new KotlinDriveUploader with token provider if available
-                if (tokenProvider != null) {
-                    KotlinDriveUploader(context, tokenProvider)
+                val provider = tokenProvider ?: DriveTokenProviderRegistry.getBackgroundProvider()
+                if (provider != null) {
+                    KotlinDriveUploader(context, provider)
                 } else {
-                    // Fallback to legacy GoogleAuthRepository for backward compatibility
                     @Suppress("DEPRECATION")
                     KotlinDriveUploader(context, GoogleAuthRepository(context))
                 }

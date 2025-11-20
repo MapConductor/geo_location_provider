@@ -46,8 +46,9 @@ It also provides a feature to **upload exported data to Google Drive**.
 - **MidnightExportWorker & MidnightExportScheduler**  
   Background tasks using WorkManager. Every day at midnight, they export the previous day’s data to GeoJSON + ZIP and upload it to Google Drive. The scheduler handles booking the next execution.
 
-- **GoogleAuthRepository & DriveApiClient**  
-  Foundation for Google Drive integration. `GoogleAuthRepository` manages OAuth authentication and tokens, while `DriveApiClient` calls the Drive API to upload files and validate folders.
+- **GoogleDriveTokenProvider, KotlinDriveUploader & DriveApiClient**  
+  Core building blocks for Google Drive integration. `GoogleDriveTokenProvider` is the abstraction for obtaining OAuth access tokens, `KotlinDriveUploader` performs the actual uploads to Drive, and `DriveApiClient` is used for REST calls such as folder validation.  
+  A legacy `GoogleAuthRepository` implementation (using deprecated GoogleAuthUtil) is still available for backward compatibility but should not be used in new code.
 
 - **UI Screens (MainActivity, PickupScreen, DriveSettingsScreen, etc.)**  
   User interface implemented with Jetpack Compose.

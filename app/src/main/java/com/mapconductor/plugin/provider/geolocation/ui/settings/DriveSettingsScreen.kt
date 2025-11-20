@@ -1,7 +1,5 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,10 +65,6 @@ fun DriveSettingsScreen(
     val account by vm.accountEmail.collectAsState()
     val lastRefresh by vm.tokenLastRefresh.collectAsState()
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { res -> vm.onSignInResult(res.data) }
-
     val lastRefreshText = remember(lastRefresh) {
         if (lastRefresh > 0L) {
             val dt = Instant.ofEpochMilli(lastRefresh)
@@ -114,9 +108,6 @@ fun DriveSettingsScreen(
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { launcher.launch(vm.buildSignInIntent()) }) {
-                    Text("Sign in")
-                }
                 Button(
                     onClick = {
                         scope.launch {
@@ -366,4 +357,3 @@ private suspend fun runTodayPreviewIO(
         "今日のアップロードに失敗しました（リトライ 5 回）。ZIP は削除し、Room は削除していません。"
     }
 }
-

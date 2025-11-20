@@ -10,7 +10,6 @@ import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
@@ -23,7 +22,6 @@ import kotlinx.coroutines.launch
 
 class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = DrivePrefsRepository(app)
-    private val auth = GoogleAuthRepository(app)
     private val api = DriveApiClient(context = app.applicationContext)
 
     val folderId: StateFlow<String> =
@@ -36,16 +34,6 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
-    fun buildSignInIntent() = auth.buildSignInIntent()
-
-    fun onSignInResult(data: android.content.Intent?) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val acct = auth.handleSignInResult(data)
-            if (acct?.email != null) prefs.setAccountEmail(acct.email!!)
-            _status.value = acct?.email?.let { "Signed in: $it" } ?: "Sign-in failed"
-        }
-    }
-
     fun setStatus(message: String) {
         _status.value = message
     }
@@ -54,22 +42,14 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { prefs.setFolderId(idOrUrl) }
     }
 
-    fun getToken() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
-            _status.value = if (token != null) {
-                prefs.markTokenRefreshed(System.currentTimeMillis())
-                "Token OK: ${token.take(12)}…"
-            } else {
-                "Token failed"
-            }
-        }
-    }
-
     fun callAboutGet() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
-            if (token == null) { _status.value = "No token"; return@launch }
+            val tokenProvider = CredentialManagerAuth.get(getApplication())
+            val token = tokenProvider.getAccessToken()
+            if (token == null) {
+                _status.value = "Sign-in required"
+                return@launch
+            }
             when (val r = api.aboutGet(token)) {
                 is ApiResult.Success      -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
                 is ApiResult.HttpError    -> _status.value = "About ${r.code}: ${r.body}"
@@ -78,16 +58,23 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Validate Folder: URL/ID から id と resourceKey を抽出して検証する。*/
+    /** Validate Folder: URL/ID から id と resourceKey を抽出して検証する。 */
     fun validateFolder() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
-            if (token == null) { _status.value = "No token"; return@launch }
+            val tokenProvider = CredentialManagerAuth.get(getApplication())
+            val token = tokenProvider.getAccessToken()
+            if (token == null) {
+                _status.value = "Sign-in required"
+                return@launch
+            }
 
             val raw = folderId.value
             val id = DriveFolderId.extractFromUrlOrId(raw)
             val rk = DriveFolderId.extractResourceKey(raw)
-            if (id.isNullOrBlank()) { _status.value = "Invalid folder URL/ID"; return@launch }
+            if (id.isNullOrBlank()) {
+                _status.value = "Invalid folder URL/ID"
+                return@launch
+            }
 
             prefs.setFolderResourceKey(rk)
 
@@ -110,8 +97,14 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
 
-                    if (!detail.isFolder) { _status.value = "Not a folder: ${detail.mimeType}"; return@launch }
-                    if (!detail.canAddChildren) { _status.value = "No write permission for this folder"; return@launch }
+                    if (!detail.isFolder) {
+                        _status.value = "Not a folder: ${detail.mimeType}"
+                        return@launch
+                    }
+                    if (!detail.canAddChildren) {
+                        _status.value = "No write permission for this folder"
+                        return@launch
+                    }
 
                     prefs.setFolderId(resolvedId)
                     _status.value = "Folder OK: ${detail.name} ($resolvedId)"
@@ -122,7 +115,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** サンプルテキストを作って Drive にアップロードする。*/
+    /** サンプルテキストを作って Drive にアップロードする。 */
     fun uploadSampleNow() {
         viewModelScope.launch(Dispatchers.IO) {
             val tokenProvider = CredentialManagerAuth.get(getApplication())
