@@ -19,11 +19,11 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 /**
- * Google Drive 用のトークンを Android Credential Manager + AuthorizationClient で取得する実装。
+ * Google Drive 用のト�EクンめEAndroid Credential Manager + AuthorizationClient で取得する実裁E��E
  *
  * 役割:
- * - Credential Manager を使った Google アカウントのサインイン
- * - Identity API (AuthorizationClient) を使った Drive 向けアクセストークンの取得
+ * - Credential Manager を使っぁEGoogle アカウント�Eサインイン
+ * - Identity API (AuthorizationClient) を使っぁEDrive 向けアクセスト�Eクンの取征E
  *
  * 利用イメージ:
  *
@@ -32,17 +32,17 @@ import kotlinx.coroutines.withContext
  *     serverClientId = "YOUR_OAUTH_CLIENT_ID"
  * )
  *
- * // 1. どこかの画面でサインイン（UIあり）
+ * // 1. どこかの画面でサインイン�E�EIあり�E�E
  * val idCred = provider.signIn()
  *
- * // 2. サインイン済み状態でトークン取得（UIなし）
+ * // 2. サインイン済み状態でト�Eクン取得！EIなし！E
  * val token = provider.getAccessToken()
  *
- * 注意:
- * - signIn() は Activity コンテキストで呼ぶこと（Credential Manager の制約）
- * - getAccessToken() は「既にスコープ許可済み」の場合にのみ成功する。
- *   ユーザー操作が必要な場合は hasResolution()==true となり、ここでは null を返す。
- *   その場合はアプリ側で AuthorizationClient.authorize() の解決付きフローを組むこと。
+ * 注愁E
+ * - signIn() は Activity コンチE��ストで呼ぶこと�E�Eredential Manager の制紁E��E
+ * - getAccessToken() は「既にスコープ許可済み」�E場合にのみ成功する、E
+ *   ユーザー操作が忁E��な場合�E hasResolution()==true となり、ここでは null を返す、E
+ *   そ�E場合�Eアプリ側で AuthorizationClient.authorize() の解決付きフローを絁E�Eこと、E
  */
 class CredentialManagerTokenProvider(
     private val context: Context,
@@ -60,68 +60,73 @@ class CredentialManagerTokenProvider(
     private val credentialManager: CredentialManager = CredentialManager.create(context)
 
     /**
-     * GoogleSignInOptions は signOut() 時のクライアント生成にだけ使う。
-     * アクセストークン自体は AuthorizationClient から取得する。
+     * GoogleSignInOptions は signOut() 時�Eクライアント生成にだけ使ぁE��E
+     * アクセスト�Eクン自体�E AuthorizationClient から取得する、E
      */
     private val googleSignInOptions: GoogleSignInOptions =
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestScopes(*scopes.map { Scope(it) }.toTypedArray())
-            .build()
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).apply {
+            requestEmail()
+
+            val scopeObjects = scopes.map { Scope(it) }
+            if (scopeObjects.isNotEmpty()) {
+                requestScopes(scopeObjects.first(), *scopeObjects.drop(1).toTypedArray())
+            }
+        }.build()
 
     /**
-     * Credential Manager を使ってサインインする。
+     * Credential Manager を使ってサインインする、E
      *
-     * - Activity コンテキストで呼ぶこと（context には Activity を渡す前提）
-     * - 成功時は GoogleIdTokenCredential を返す（idToken, subject 等が取れる）
-     * - ここでは Drive スコープまではまだ要求しない（後で AuthorizationClient で要求）
+     * - Activity コンチE��ストで呼ぶこと�E�Eontext には Activity を渡す前提！E
+     * - 成功時�E GoogleIdTokenCredential を返す�E�EdToken, subject 等が取れる！E
+     * - ここでは Drive スコープまではまだ要求しなぁE��後で AuthorizationClient で要求！E
      */
-    suspend fun signIn(): GoogleIdTokenCredential? = withContext(Dispatchers.IO) {
-        try {
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(serverClientId)
-                .build()
+    suspend fun signIn(activityContext: Context = context): GoogleIdTokenCredential? =
+        withContext(Dispatchers.IO) {
+            try {
+                val googleIdOption = GetGoogleIdOption.Builder()
+                    .setFilterByAuthorizedAccounts(false)
+                    .setServerClientId(serverClientId)
+                    .build()
 
-            val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
-                .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleIdOption)
+                    .build()
 
-            val result: GetCredentialResponse = credentialManager.getCredential(
-                context = context,
-                request = request
-            )
+                val result: GetCredentialResponse = credentialManager.getCredential(
+                    context = activityContext,
+                    request = request
+                )
 
-            when (val credential = result.credential) {
-                is CustomCredential -> {
-                    if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
-                        GoogleIdTokenCredential.createFrom(credential.data)
-                    } else {
-                        Log.w(TAG, "Unexpected credential type: ${credential.type}")
+                when (val credential = result.credential) {
+                    is CustomCredential -> {
+                        if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                            GoogleIdTokenCredential.createFrom(credential.data)
+                        } else {
+                            Log.w(TAG, "Unexpected credential type: ${credential.type}")
+                            null
+                        }
+                    }
+
+                    else -> {
+                        Log.w(TAG, "Unexpected credential class: ${result.credential}")
                         null
                     }
                 }
-
-                else -> {
-                    Log.w(TAG, "Unexpected credential class: ${result.credential}")
-                    null
-                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Sign-in failed", e)
+                null
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Sign-in failed", e)
-            null
         }
-    }
 
     /**
-     * Drive 用のアクセストークンを Identity Authorization API から取得する。
+     * Drive 用のアクセスト�EクンめEIdentity Authorization API から取得する、E
      *
      * 前提:
-     * - ユーザーが既にサインインしていて、要求するスコープが許可済みなら
-     *   -> hasResolution() == false となり、ここから直接 accessToken が取れる。
-     * - まだスコープが許可されていない / ユーザー操作が必要な場合
-     *   -> hasResolution() == true となる。この場合このメソッドは null を返し、
-     *      アプリ側で ActivityResult 等を使って解決付き authorize() を実行すべき。
+     * - ユーザーが既にサインインしてぁE��、要求するスコープが許可済みなめE
+     *   -> hasResolution() == false となり、ここから直接 accessToken が取れる、E
+     * - まだスコープが許可されてぁE��ぁE/ ユーザー操作が忁E��な場吁E
+     *   -> hasResolution() == true となる。この場合このメソチE��は null を返し、E
+     *      アプリ側で ActivityResult 等を使って解決付き authorize() を実行すべき、E
      */
     override suspend fun getAccessToken(): String? = withContext(Dispatchers.IO) {
         try {
@@ -136,7 +141,7 @@ class CredentialManagerTokenProvider(
             val result = authClient.authorize(request).await()
 
             if (result.hasResolution()) {
-                // ここでユーザー操作を伴うフローを開始するのはライブラリの責務外とする。
+                // ここでユーザー操作を伴ぁE��ローを開始する�Eはライブラリの責務外とする、E
                 Log.w(
                     TAG,
                     "Authorization requires user interaction (hasResolution==true). " +
@@ -160,18 +165,18 @@ class CredentialManagerTokenProvider(
     }
 
     /**
-     * Token refresh は AuthorizationClient.authorize() に丸投げできるので、
-     * 単純に getAccessToken() を呼び直す。
+     * Token refresh は AuthorizationClient.authorize() に丸投げできるので、E
+     * 単純に getAccessToken() を呼び直す、E
      */
     override suspend fun refreshToken(): String? {
         return getAccessToken()
     }
 
     /**
-     * サインアウト。
+     * サインアウト、E
      *
-     * ここでは簡易的に GoogleSignInClient の signOut() だけ呼ぶ。
-     * ＋必要ならアプリ側で CredentialManager の clearCredentialState() なども併用すること。
+     * ここでは簡易的に GoogleSignInClient の signOut() だけ呼ぶ、E
+     * �E�忁E��ならアプリ側で CredentialManager の clearCredentialState() なども併用すること、E
      */
     suspend fun signOut() = withContext(Dispatchers.IO) {
         try {

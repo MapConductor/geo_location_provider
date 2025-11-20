@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
@@ -45,8 +46,11 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun setStatus(message: String) {
+        _status.value = message
+    }
+
     fun updateFolderId(idOrUrl: String) {
-        // そのまま表示用に保存（URLでもOK）
         viewModelScope.launch { prefs.setFolderId(idOrUrl) }
     }
 
@@ -67,46 +71,48 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             val token = auth.getAccessTokenOrNull()
             if (token == null) { _status.value = "No token"; return@launch }
             when (val r = api.aboutGet(token)) {
-                is ApiResult.Success     -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
-                is ApiResult.HttpError   -> _status.value = "About ${r.code}: ${r.body}"
-                is ApiResult.NetworkError-> _status.value = "About network: ${r.exception.message}"
+                is ApiResult.Success      -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
+                is ApiResult.HttpError    -> _status.value = "About ${r.code}: ${r.body}"
+                is ApiResult.NetworkError -> _status.value = "About network: ${r.exception.message}"
             }
         }
     }
 
-    /** Validate Folder: URL/ID から id と resourceKey を抽出して検証＆保存 */
+    /** Validate Folder: URL/ID から id と resourceKey を抽出して検証する。*/
     fun validateFolder() {
         viewModelScope.launch(Dispatchers.IO) {
             val token = auth.getAccessTokenOrNull()
             if (token == null) { _status.value = "No token"; return@launch }
 
             val raw = folderId.value
-            val id  = DriveFolderId.extractFromUrlOrId(raw)
-            val rk  = DriveFolderId.extractResourceKey(raw)
+            val id = DriveFolderId.extractFromUrlOrId(raw)
+            val rk = DriveFolderId.extractResourceKey(raw)
             if (id.isNullOrBlank()) { _status.value = "Invalid folder URL/ID"; return@launch }
 
-            // resourceKey を DataStore に保存（アップロード時に利用）
             prefs.setFolderResourceKey(rk)
 
-            // 生ID + resourceKey 付きで検証
             when (val r = api.validateFolder(token, id, rk)) {
                 is ApiResult.Success -> {
                     var resolvedId = r.data.id
                     var detail = r.data
 
-                    // ショートカットなら、ターゲットへ追従して再検証（resourceKeyは不要）
                     if (!detail.shortcutTargetId.isNullOrBlank()) {
                         when (val r2 = api.validateFolder(token, detail.shortcutTargetId!!, null)) {
-                            is ApiResult.Success   -> { resolvedId = r2.data.id; detail = r2.data }
-                            is ApiResult.HttpError -> { _status.value = "Shortcut target ${r2.code}: ${r2.body}"; return@launch }
-                            is ApiResult.NetworkError -> { _status.value = "Shortcut target network: ${r2.exception.message}"; return@launch }
+                            is ApiResult.Success -> { resolvedId = r2.data.id; detail = r2.data }
+                            is ApiResult.HttpError -> {
+                                _status.value = "Shortcut target ${r2.code}: ${r2.body}"
+                                return@launch
+                            }
+                            is ApiResult.NetworkError -> {
+                                _status.value = "Shortcut target network: ${r2.exception.message}"
+                                return@launch
+                            }
                         }
                     }
 
                     if (!detail.isFolder) { _status.value = "Not a folder: ${detail.mimeType}"; return@launch }
                     if (!detail.canAddChildren) { _status.value = "No write permission for this folder"; return@launch }
 
-                    // 実体フォルダIDを保存
                     prefs.setFolderId(resolvedId)
                     _status.value = "Folder OK: ${detail.name} ($resolvedId)"
                 }
@@ -116,24 +122,40 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** ★ P8テスト：サンプルテキストを作って Drive にアップロード */
+    /** サンプルテキストを作って Drive にアップロードする。*/
     fun uploadSampleNow() {
         viewModelScope.launch(Dispatchers.IO) {
-            val token = auth.getAccessTokenOrNull()
-            if (token == null) { _status.value = "Sign-in required"; return@launch }
+            val tokenProvider = CredentialManagerAuth.get(getApplication())
+            val token = tokenProvider.getAccessToken()
+            if (token == null) {
+                _status.value = "Sign-in required"
+                return@launch
+            }
 
             val raw = folderId.value
             val parentId = DriveFolderId.extractFromUrlOrId(raw)
-            if (parentId.isNullOrBlank()) { _status.value = "Folder URL/ID is empty"; return@launch }
+            if (parentId.isNullOrBlank()) {
+                _status.value = "Folder URL/ID is empty"
+                return@launch
+            }
 
-            val uploader = UploaderFactory.create(getApplication(), UploadEngine.KOTLIN)
-                ?: run { _status.value = "Uploader not available"; return@launch }
+            val uploader = UploaderFactory.create(
+                getApplication(),
+                UploadEngine.KOTLIN,
+                tokenProvider = tokenProvider
+            ) ?: run {
+                _status.value = "Uploader not available"
+                return@launch
+            }
 
             val now = System.currentTimeMillis()
             val name = "drive-sample-$now.txt"
             val text = "Hello from GeoLocationProvider @ $now\n"
             val uri = createSampleTextInDownloads(getApplication(), name, text)
-                ?: run { _status.value = "Failed to create sample file"; return@launch }
+                ?: run {
+                    _status.value = "Failed to create sample file"
+                    return@launch
+                }
 
             when (val r = uploader.upload(uri, parentId, name)) {
                 is UploadResult.Success ->
@@ -152,11 +174,13 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         val values = android.content.ContentValues().apply {
             put(android.provider.MediaStore.Downloads.DISPLAY_NAME, displayName)
             put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
-            if (android.os.Build.VERSION.SDK_INT >= 29)
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
                 put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+            }
         }
         val uri = ctx.contentResolver.insert(
-            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            values
         ) ?: return null
 
         ctx.contentResolver.openOutputStream(uri)?.use { os ->
@@ -165,15 +189,15 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         } ?: return null
 
         if (android.os.Build.VERSION.SDK_INT >= 29) {
-            values.clear(); values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+            values.clear()
+            values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
             ctx.contentResolver.update(uri, values, null, null)
         }
         return uri
     }
 
-    /** 最終仕様：前日以前を即時バックアップ（Worker を直接起動） */
     fun runBacklogNow() {
-        // 旧: MidnightExportWorker.runBacklogNow(getApplication())
         MidnightExportWorker.runNow(getApplication())
     }
 }
+

@@ -37,7 +37,8 @@ dependencies {
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
 
     // Google Sign-In with Credential Manager
-    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // Public API (signIn) returns GoogleIdTokenCredential, so this must be exposed.
+    api("com.google.android.libraries.identity.googleid:googleid:1.1.1")
 
     // AuthorizationClient for OAuth scopes (Google Drive access)
     implementation("com.google.android.gms:play-services-auth:21.4.0")

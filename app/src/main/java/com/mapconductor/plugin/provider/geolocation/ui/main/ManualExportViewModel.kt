@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.CreationExtras
 import androidx.lifecycle.viewModelScope
+import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
@@ -111,9 +112,27 @@ class ManualExportViewModel(
                         }
                     }
                     TodayPreviewMode.UPLOAD_AND_DELETE_LOCAL -> {
+                        val tokenProvider = CredentialManagerAuth.get(appContext)
+                        val token = tokenProvider.getAccessToken()
+                        if (token == null) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(
+                                    appContext,
+                                    "Drive 認可が不足しています。設定画面から権限を付与してください。",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            runCatching { appContext.contentResolver.delete(outUri, null, null) }
+                            return@launch
+                        }
+
                         val prefs = AppPrefs.snapshot(appContext)
                         val folderId = DriveFolderId.extractFromUrlOrId(prefs.folderId)
-                        val uploader = UploaderFactory.create(appContext, prefs.engine)
+                        val uploader = UploaderFactory.create(
+                            appContext,
+                            prefs.engine,
+                            tokenProvider = tokenProvider
+                        )
 
                         if (uploader == null || folderId.isNullOrBlank()) {
                             withContext(Dispatchers.Main) {

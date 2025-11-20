@@ -33,13 +33,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
-import com.mapconductor.plugin.provider.storageservice.StorageService
-import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.storageservice.StorageService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -54,11 +55,12 @@ import java.time.temporal.ChronoUnit
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DriveSettingsScreen(
-    vm: DriveSettingsViewModel =
-        viewModel<DriveSettingsViewModel>(),
+    vm: DriveSettingsViewModel = viewModel(),
     onBack: () -> Unit = {}
 ) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val credentialManagerTokenProvider = remember { CredentialManagerAuth.get(ctx) }
 
     val status by vm.status.collectAsState()
     val folderId by vm.folderId.collectAsState()
@@ -115,10 +117,36 @@ fun DriveSettingsScreen(
                 Button(onClick = { launcher.launch(vm.buildSignInIntent()) }) {
                     Text("Sign in")
                 }
-                Button(onClick = { vm.getToken() }) {
-                    Text("Get Token")
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val credential = credentialManagerTokenProvider.signIn(ctx)
+                            if (credential != null) {
+                                vm.setStatus("Credential Manager sign-in completed")
+                            } else {
+                                vm.setStatus("Credential Manager sign-in failed")
+                            }
+                        }
+                    }
+                ) {
+                    Text("Sign in (CM)")
+                }
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val token = credentialManagerTokenProvider.getAccessToken()
+                            if (token != null) {
+                                vm.setStatus("CM Token OK: ${token.take(12)}…")
+                            } else {
+                                vm.setStatus("CM Token failed")
+                            }
+                        }
+                    }
+                ) {
+                    Text("Get Token (CM)")
                 }
             }
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick = { vm.callAboutGet() }) {
                     Text("About.get")
@@ -139,7 +167,7 @@ fun DriveSettingsScreen(
 
             Text(text = status, style = MaterialTheme.typography.bodyMedium)
 
-            // --- バックアップ操作（最終仕様） ---
+            // --- バックアップ操作（前日以前のバックログ + 今日のプレビュー） ---
             BackupSection(modifier = Modifier.fillMaxWidth())
         }
     }
@@ -147,10 +175,9 @@ fun DriveSettingsScreen(
 
 /**
  * 「前日以前をBackup」「今日のPreview」を提供するセクション。
- * - 前日以前をBackup: MidnightExportWorker に任せる（前日より前を日付ごとにアップロード、成功時はRoom削除／ZIPは常に削除）
- * - 今日のPreview: 0:00〜現在のデータをZIP化。アップロードする/しないを選択。
- *    - する: 最大5回試行（初回+4リトライ）、成功/失敗に関わらずZIP削除。Roomは削除しない
- *    - しない: ZIPをDownloadsに残すのみ。Roomは削除しない
+ *
+ * - 前日以前をBackup: MidnightExportWorker に任せる（前日より前を日付ごとにアップロード）
+ * - 今日のPreview: 0:00〜現在のデータを ZIP 化し、アップロード有無を選択可能
  */
 @Composable
 private fun BackupSection(modifier: Modifier = Modifier) {
@@ -191,15 +218,15 @@ private fun BackupSection(modifier: Modifier = Modifier) {
             text = {
                 Text(
                     "アップロードしますか？\n" +
-                            "アップロードする場合はローカル（GeoJSON/zip）は削除します。" +
-                            "アップロードしない場合はDownloadsに保存します。" +
-                            "Roomのデータは削除しません。"
+                        "アップロードする場合はローカルの GeoJSON/zip を削除します。\n" +
+                        "アップロードしない場合は Downloads に保存します。\n" +
+                        "Room のデータは削除しません。"
                 )
             },
             confirmButton = {
                 Button(onClick = {
                     showPreviewChoice = false
-                    // アップロードする：IOスレッドで実行
+                    // アップロードする: IO スレッドで実行
                     scope.launch(Dispatchers.IO) {
                         val msg = runTodayPreviewIO(ctx, upload = true)
                         withContext(Dispatchers.Main) { uiMsg = msg }
@@ -211,7 +238,7 @@ private fun BackupSection(modifier: Modifier = Modifier) {
             dismissButton = {
                 OutlinedButton(onClick = {
                     showPreviewChoice = false
-                    // アップロードしない：IOスレッドで実行
+                    // アップロードしない: IO スレッドで実行
                     scope.launch(Dispatchers.IO) {
                         val msg = runTodayPreviewIO(ctx, upload = false)
                         withContext(Dispatchers.Main) { uiMsg = msg }
@@ -224,7 +251,10 @@ private fun BackupSection(modifier: Modifier = Modifier) {
     }
 }
 
-/** 今日(0:00〜現在) 分のみを対象に Preview 実行（IO処理本体：UIから呼ぶ） */
+/**
+ * 今日(0:00〜現在)のみを対象に Preview 実行する処理本体。
+ * UI から呼び出す想定。
+ */
 private suspend fun runTodayPreviewIO(
     ctx: android.content.Context,
     upload: Boolean
@@ -234,7 +264,7 @@ private suspend fun runTodayPreviewIO(
     val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
     val todayEpochDay = today0.toLocalDate().toEpochDay()
 
-    // ★ ここだけ変更：AppDatabase 直参照 → StorageService 経由
+    // LocationSample エンティティを StorageService 経由で取得
     val all = StorageService.getAllLocations(ctx)
 
     // エンティティのタイムスタンプを安全に取得（フィールド名の違いに対応）
@@ -275,35 +305,46 @@ private suspend fun runTodayPreviewIO(
     val baseName = "glp-" + DateTimeFormatter.ofPattern("yyyyMMdd")
         .format(LocalDate.ofEpochDay(todayEpochDay))
 
-    // ZIP生成（Downloads/GeoLocationProvider）
+    // ZIP を Downloads/GeoLocationProvider に出力
     val outUri = GeoJsonExporter.exportToDownloads(
         context = ctx,
         records = todays,
         baseName = baseName,
         compressAsZip = true
-    ) ?: return@withContext "ZIPの作成に失敗しました。"
+    ) ?: return@withContext "ZIP の作成に失敗しました。"
 
     if (!upload) {
-        // 保存のみ（Roomは削除しない）
-        return@withContext "今日のデータをDownloadsに保存しました（$baseName.zip）。Roomは削除していません。"
+        // 保存のみ: Room は削除しない
+        return@withContext "今日のデータを Downloads に保存しました（${baseName}.zip）。Room は削除していません。"
     }
 
     // ここから「アップロードする」経路
+    val tokenProvider = CredentialManagerAuth.get(ctx)
+    val token = tokenProvider.getAccessToken()
+    if (token == null) {
+        runCatching { ctx.contentResolver.delete(outUri, null, null) }
+        return@withContext "Drive 認可が不足しています。設定画面から権限を付与してください。ZIP は削除しました。Room は削除していません。"
+    }
+
     val snapshot = AppPrefs.snapshot(ctx)
     val folderId = DriveFolderId.extractFromUrlOrId(snapshot.folderId)
-    val uploader = UploaderFactory.create(ctx, snapshot.engine)
+    val uploader = UploaderFactory.create(
+        ctx,
+        snapshot.engine,
+        tokenProvider = tokenProvider
+    )
 
     if (uploader == null || folderId.isNullOrBlank()) {
-        // ZIPは削除（Roomは残す）
+        // ZIP は削除、Room は残す
         runCatching { ctx.contentResolver.delete(outUri, null, null) }
-        return@withContext "アップロード設定が不足しています（engine/folderId）。ZIPは削除しました。Roomは削除していません。"
+        return@withContext "アップロード設定が不足しています（engine / folderId）。ZIP は削除しました。Room は削除していません。"
     }
 
     var success = false
     for (attempt in 0 until 5) {
         when (val result = uploader.upload(outUri, folderId, null)) {
             is UploadResult.Success -> {
-                // 成功：Preview なので Room は削除しない
+                // 成功しても Preview なので Room は削除しない
                 success = true
                 break
             }
@@ -316,12 +357,13 @@ private suspend fun runTodayPreviewIO(
         }
     }
 
-    // ZIPは成功/失敗に関わらず削除（Roomは削除しない）
+    // ZIP は成功/失敗に関わらず削除。Room は削除しない。
     runCatching { ctx.contentResolver.delete(outUri, null, null) }
 
     if (success) {
-        "今日のデータをアップロードしました（$baseName.zip）。ローカルZIPは削除、Roomは削除していません。"
+        "今日のデータをアップロードしました（${baseName}.zip）。ローカル ZIP は削除し、Room は削除していません。"
     } else {
-        "今日のアップロードに失敗しました（リトライ5回）。ZIPは削除、Roomは削除していません。"
+        "今日のアップロードに失敗しました（リトライ 5 回）。ZIP は削除し、Room は削除していません。"
     }
 }
+
