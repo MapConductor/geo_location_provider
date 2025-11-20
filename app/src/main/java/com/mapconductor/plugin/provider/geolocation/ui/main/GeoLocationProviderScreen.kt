@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -24,7 +25,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,14 +33,13 @@ import com.mapconductor.plugin.provider.geolocation.ui.history.LocationHistoryLi
 
 /**
  * 画面エントリ。
- * - 設定行は [Interval][DR予測間隔(秒)][Save&Apply] の順（2つの入力枠は同幅）
- * - 履歴は VM から受け取って描画コンポーネントに records として渡す（UI側で Room に触れない）
+ * - 設定行の [Interval][DR予測間隔][Save&Apply] 入力枠と、履歴一覧を表示する。
+ * - 履歴は VM から受け取り、UI 側では Room に直接触らない。
  */
 @Composable
 fun GeoLocationProviderScreen(
     state: UiState,
-    onButtonClick: () -> Unit,
-//    onManualExportClick: () -> Unit
+    onButtonClick: () -> Unit
 ) {
     val ctx = LocalContext.current
     val intervalVm: IntervalSettingsViewModel = viewModel(
@@ -57,12 +56,12 @@ fun GeoLocationProviderScreen(
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
-                modifier = Modifier.fillMaxSize().padding(12.dp),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-//                HeaderArea(state)
-
                 IntervalAndDrArea(intervalVm, ctx)
 
                 HorizontalDivider(
@@ -70,25 +69,19 @@ fun GeoLocationProviderScreen(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
 
-                // 履歴（UI側は Room に触れない設計）
-                Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                    LocationHistoryList(records = records, modifier = Modifier.fillMaxSize())
+                // 履歴。UI 側は Room に触れない設計。
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    LocationHistoryList(
+                        records = records,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
             }
         }
-    }
-}
-
-/** [Interval][DR予測間隔(秒)][Save&Apply] + 2つの枠は同幅(weight=1f) */
-@Composable
-private fun HeaderArea(state: UiState) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(text = state.title, style = MaterialTheme.typography.titleLarge)
-        Text(text = state.subtitle, style = MaterialTheme.typography.bodyMedium)
-        HorizontalDivider(
-            thickness = DividerDefaults.Thickness,
-            modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)
-        )
     }
 }
 
@@ -100,11 +93,15 @@ private fun IntervalAndDrArea(
     val sec by vm.secondsText.collectAsState()
     val dr by vm.drIntervalText.collectAsState()
 
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         OutlinedTextField(
             value = sec,
-            onValueChange = { vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3)) },
+            onValueChange = {
+                vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3))
+            },
             label = { Text("GPS取得間隔(>5秒)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
@@ -115,7 +112,9 @@ private fun IntervalAndDrArea(
 
         OutlinedTextField(
             value = dr,
-            onValueChange = { vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3)) },
+            onValueChange = {
+                vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3))
+            },
             label = { Text("DR予測間隔(>5秒)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
@@ -131,3 +130,4 @@ private fun IntervalAndDrArea(
 
     Spacer(modifier = Modifier.height(8.dp))
 }
+
