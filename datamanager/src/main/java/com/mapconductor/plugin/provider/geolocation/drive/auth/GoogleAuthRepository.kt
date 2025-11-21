@@ -14,10 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
-// --- 追加したいスコープ ---
 private const val DRIVE_FILE_SCOPE     = "https://www.googleapis.com/auth/drive.file"
 private const val DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.metadata.readonly"
-// ※フルアクセスにするなら ↓ を1本だけ使う（代替案）
 // private const val DRIVE_FULL_SCOPE     = "https://www.googleapis.com/auth/drive"
 
 /**
@@ -37,14 +35,11 @@ private const val DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.
 class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvider {
     private val tag = "DriveAuth"
 
-    // ★ 複数スコープ要求（drive.file + drive.metadata.readonly）
-    //   フル権限にするなら .requestScopes(Scope(DRIVE_FULL_SCOPE)) に置き換え
     private val gso: GoogleSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
         .requestEmail()
         .requestScopes(
             Scope(DRIVE_FILE_SCOPE),
             Scope(DRIVE_METADATA_SCOPE)
-            // Scope(DRIVE_FULL_SCOPE) // ← フル権限に切替える場合はこちらを使い、上2つは外す
         )
         .build()
 
@@ -54,7 +49,6 @@ class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvi
     suspend fun handleSignInResult(data: Intent?): GoogleSignInAccount? =
         withContext(Dispatchers.IO) {
             try {
-                // await() は kotlinx-coroutines-play-services に含まれる
                 GoogleSignIn.getSignedInAccountFromIntent(data).await()
             } catch (t: Throwable) {
                 Log.w(tag, "SignIn failed", t)
@@ -67,8 +61,6 @@ class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvi
             val acct = GoogleSignIn.getLastSignedInAccount(context) ?: return@withContext null
             val email = acct.email ?: return@withContext null
 
-            // ★ 複数スコープはスペース区切りで "oauth2:scope1 scope2" の形式に
-            //    フル権限にする場合は scopes = listOf(DRIVE_FULL_SCOPE)
             val scopes = listOf(
                 DRIVE_FILE_SCOPE,
                 DRIVE_METADATA_SCOPE
@@ -86,18 +78,17 @@ class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvi
         }
 
     override suspend fun refreshToken(): String? {
-        // GoogleAuthUtil doesn't have explicit refresh mechanism
-        // It handles token refresh internally when getToken is called
+        // GoogleAuthUtil 側でトークンの再取得が処理されるため、getAccessToken() を呼び直す。
         return getAccessToken()
     }
 
-    // Backward compatibility
     @Deprecated("Use getAccessToken() instead", ReplaceWith("getAccessToken()"))
     suspend fun getAccessTokenOrNull(): String? = getAccessToken()
 
     fun signOut(activity: Activity) {
         GoogleSignIn.getClient(activity, gso).signOut()
-        // 必要であれば revokeAccess() も：
+        // 必要であれば revokeAccess() も併用することを検討する。
         // GoogleSignIn.getClient(activity, gso).revokeAccess()
     }
 }
+

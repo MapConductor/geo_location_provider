@@ -24,7 +24,7 @@ class DrivePrefs(private val appContext: Context) {
         val ACCOUNT          = stringPreferencesKey("account_email")
         val ENGINE           = stringPreferencesKey("upload_engine")
         val TOKEN_TS         = longPreferencesKey("token_updated_at")
-        val FOLDER_RES_KEY   = stringPreferencesKey("folder_resource_key") // ★追加
+        val FOLDER_RES_KEY   = stringPreferencesKey("folder_resource_key")
     }
 
     // ---- Read Flows ----

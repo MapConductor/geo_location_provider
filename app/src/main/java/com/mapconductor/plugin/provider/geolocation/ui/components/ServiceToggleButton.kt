@@ -25,13 +25,13 @@ fun ServiceToggleAction() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // true = 動作中 → Stop 表示 / false = 停止中 → Start 表示
+    // true = 動作中（Stop 表示） / false = 停止中（Start 表示）
     val runningState = remember { mutableStateOf(false) }
 
     // 二重タップ防止
     val busyState = remember { mutableStateOf(false) }
 
-    // 状態問い合わせ用のスコープ
+    // 状態問い合わせ用の CoroutineScope
     val scope = remember { CoroutineScope(Dispatchers.Main + Job()) }
 
     fun refreshState() {
@@ -44,7 +44,7 @@ fun ServiceToggleAction() {
         }
     }
 
-    // 初回起動時に一度だけ実態を問い合わせ
+    // 初回起動時に一度だけ状態を問い合わせる
     LaunchedEffect(Unit) {
         refreshState()
     }
@@ -64,7 +64,7 @@ fun ServiceToggleAction() {
             if (busyState.value) return@IconButton
             busyState.value = true
 
-            // ★ここがポイント：UI は先に反転する
+            // UI は先にトグル状態を反転し、後からサービス側の状態で補正する
             val currentlyRunning = runningState.value
             val targetRunning = !currentlyRunning
             runningState.value = targetRunning
@@ -86,7 +86,7 @@ fun ServiceToggleAction() {
                 )
             }
 
-            // 少し待ってから“本当の状態”を再取得して補正
+            // 少し待ってから実際の状態を再取得して補正する
             scope.launch {
                 delay(500) // 必要なら 700〜1000 に伸ばしてもよい
                 refreshState()

@@ -13,18 +13,23 @@ interface LocationSampleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(sample: LocationSample): Long
 
-    /** 最新 N 件（Flow）。同一時刻がある場合でも順序が安定するよう id を二次キーに使用 */
-    @Query("""
-    SELECT * FROM location_samples
-    ORDER BY
-      timeMillis DESC,
-      CASE WHEN provider = 'gps' THEN 0 ELSE 1 END,  -- ★ 同一時刻ならGPSを先
-      id DESC                                        -- ★ 二次キーで安定化
-    LIMIT :limit
-""")
+    /**
+     * 最新 N 件を Flow で監視する。
+     * timeMillis が同一のレコードがある場合でも、provider と id を二次キーとして順序を安定させる。
+     */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        ORDER BY
+          timeMillis DESC,
+          CASE WHEN provider = 'gps' THEN 0 ELSE 1 END,
+          id DESC
+        LIMIT :limit
+        """
+    )
     fun latestFlow(limit: Int): Flow<List<LocationSample>>
 
-    /** 最後の1件（Flow） */
+    /** 最後の 1 件を Flow で監視する。 */
     @Query(
         """
         SELECT * FROM location_samples
@@ -34,7 +39,7 @@ interface LocationSampleDao {
     )
     fun latestOneFlow(): Flow<LocationSample?>
 
-    /** 全件（昇順；GeoJSON など時系列用途, suspend） */
+    /** 全件を timeMillis 昇順・id 昇順で取得（時系列用途向け）。 */
     @Query(
         """
         SELECT * FROM location_samples
@@ -43,10 +48,9 @@ interface LocationSampleDao {
     )
     suspend fun findAll(): List<LocationSample>
 
-
     /**
-     * 期間抽出（[from, to) ; createdAt は epoch millis）
-     * JST の 0:00 切りで使用（昇順）
+     * 期間 [from, to) のレコードを timeMillis 昇順・id 昇順で取得する。
+     * JST の 0:00 区切りなど、日付ベースの抽出に利用することを想定。
      */
     @Query(
         """
@@ -58,16 +62,12 @@ interface LocationSampleDao {
     suspend fun findBetween(from: Long, to: Long): List<LocationSample>
 
     /**
-     * 指定期間[from, to) のレコードを timeMillis 昇順で最大 softLimit 件取得。
-     * Worker の日次エクスポートで使用。
-     *
-     * NOTE:
-     *  - エンティティに tableName を付けている場合は、FROM のテーブル名を実名に合わせてください。
-     *    例) @Entity(tableName = "location_samples") → FROM location_samples
+     * 期間 [from, to) のレコードを timeMillis 昇順で最大 softLimit 件取得する。
+     * Worker による日次エクスポート処理での使用を想定。
      */
     @Query(
         """
-        SELECT * 
+        SELECT *
         FROM location_samples
         WHERE timeMillis >= :from AND timeMillis < :to
         ORDER BY timeMillis ASC
@@ -84,9 +84,10 @@ interface LocationSampleDao {
     suspend fun countAll(): Long
 
     /**
-     * 渡したレコードをまとめて削除。
-     * （アップロード成功後のクリーンアップで使用）
+     * 渡されたレコード群をまとめて削除する。
+     * 通常はアップロード成功後のクリーンアップ用途で使用する。
      */
     @Delete
     suspend fun deleteAll(items: List<LocationSample>)
 }
+
