@@ -31,6 +31,7 @@ interface Uploader {
  * 既存の DriveApiClient + GoogleAuthRepository を内部で利用する薄いラッパ。
  * ※ Resumable対応の実体（OkHttp直叩き版）KotlinDriveUploader とクラス名が衝突するため改名。
  */
+@Deprecated("Use KotlinDriveUploader via UploaderFactory with a modern GoogleDriveTokenProvider")
 class ApiClientDriveUploader(
     private val appContext: Context,
     private val client: DriveApiClient = DriveApiClient(appContext),

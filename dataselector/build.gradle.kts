@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.mapconductor.plugin.provider.geolocation"
+    namespace = "com.mapconductor.plugin.provider.geolocation.dataselector"
     compileSdk = 36
     defaultConfig { minSdk = 26 }
 
@@ -18,7 +18,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":core"))
     implementation(project(":storageservice"))
 
     implementation(libs.kotlinx.coroutines.android)

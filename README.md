@@ -58,6 +58,139 @@ It also provides a feature to **upload exported data to Google Drive**.
 
 ---
 
+## Public API Overview
+
+This project is designed as a reusable library plus a sample app. When embedding it into your own app, you typically depend on the following modules and types:
+
+### Modules and main entry points
+
+- **`:core`**
+  - `GeoLocationService` – Foreground service that records `LocationSample` into the database.
+  - `UploadEngine` – Enum used when configuring export/upload.
+- **`:storageservice`**
+  - `StorageService` – Single facade to Room (`LocationSample`, `ExportedDay`).
+  - `LocationSample`, `ExportedDay` – Primary entities for location logs and export status.
+  - `SettingsRepository` – Sampling/DR interval settings.
+- **`:dataselector`**
+  - `SelectorCondition`, `SelectedSlot`, `SortOrder` – Pickup/query domain model.
+  - `LocationSampleSource` – Abstraction over the source of `LocationSample`.
+  - `SelectorRepository`, `BuildSelectedSlots` – Core selection logic and a small use‑case wrapper.
+  - `SelectorPrefs` – DataStore facade for persisting selection conditions.
+- **`:datamanager`**
+  - `GeoJsonExporter` – Export `LocationSample` to GeoJSON + ZIP.
+  - `GoogleDriveTokenProvider` – Abstraction for Drive access tokens.
+  - `DriveTokenProviderRegistry` – Registry for background token provider.
+  - `Uploader`, `UploaderFactory` – High‑level Drive upload entry points.
+  - `DriveApiClient`, `DriveFolderId`, `UploadResult` – Drive REST helpers and result types.
+  - `MidnightExportWorker`, `MidnightExportScheduler` – Daily export pipeline.
+- **`:deadreckoning`**
+  - `DeadReckoning`, `GpsFix`, `PredictedPoint` – DR engine API used by `GeoLocationService`.
+- **`:auth-credentialmanager` / `:auth-appauth` (optional)**
+  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider` – Reference implementations of `GoogleDriveTokenProvider`.
+
+All other types (DAO, Room database, `*Repository` implementations, low‑level HTTP helpers, etc.) are considered **internal details** and may change without notice.
+
+### Minimal integration example
+
+The following snippets show a minimal, end‑to‑end integration in a host app.
+
+#### 1. Start the location service and observe history
+
+```kotlin
+// In your Activity
+private fun startLocationService() {
+    val intent = Intent(this, GeoLocationService::class.java)
+        .setAction(GeoLocationService.ACTION_START)
+    ContextCompat.startForegroundService(this, intent)
+}
+
+private fun stopLocationService() {
+    val intent = Intent(this, GeoLocationService::class.java)
+        .setAction(GeoLocationService.ACTION_STOP)
+    startService(intent)
+}
+```
+
+```kotlin
+// In a ViewModel
+class HistoryViewModel(app: Application) : AndroidViewModel(app) {
+    val latest: StateFlow<List<LocationSample>> =
+        StorageService.latestFlow(app.applicationContext, limit = 100)
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+}
+```
+
+#### 2. Run Pickup (selection) on stored samples
+
+```kotlin
+// Build a LocationSampleSource backed by StorageService
+class StorageSampleSource(
+    private val context: Context
+) : LocationSampleSource {
+    override suspend fun findBetween(fromInclusive: Long, toExclusive: Long): List<LocationSample> {
+        return StorageService.getLocationsBetween(context, fromInclusive, toExclusive)
+    }
+}
+
+suspend fun runPickup(context: Context): List<SelectedSlot> {
+    val source = StorageSampleSource(context.applicationContext)
+    val repo = SelectorRepository(source)
+    val useCase = BuildSelectedSlots(repo)
+
+    val cond = SelectorCondition(
+        fromMillis = /* startMs */,
+        toMillis = /* endMs */,
+        intervalSec = 60,         // 60‑second grid
+        limit = 1000,
+        order = SortOrder.OldestFirst
+    )
+    return useCase(cond)
+}
+```
+
+#### 3. Configure Drive upload and daily export
+
+```kotlin
+// In your Application class
+class MyApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+
+        // Example: reuse CredentialManagerTokenProvider from :auth-credentialmanager
+        val provider = CredentialManagerTokenProvider(
+            context = this,
+            serverClientId = BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
+        )
+
+        // Register background provider for MidnightExportWorker
+        DriveTokenProviderRegistry.registerBackgroundProvider(provider)
+
+        // Schedule daily export at midnight
+        MidnightExportScheduler.scheduleNext(this)
+    }
+}
+```
+
+```kotlin
+// Manually upload a file to Drive using UploaderFactory (optional)
+suspend fun uploadFileNow(
+    context: Context,
+    tokenProvider: GoogleDriveTokenProvider,
+    fileUri: Uri,
+    folderId: String
+): UploadResult {
+    val uploader = UploaderFactory.create(
+        context = context.applicationContext,
+        engine = UploadEngine.KOTLIN,
+        tokenProvider = tokenProvider
+    ) ?: error("Upload engine not available")
+
+    return uploader.upload(fileUri, folderId, fileName = null)
+}
+```
+
+---
+
 ## Quick Start
 
 > The files under `app`, `core`, `dataselector`, and `datamanager` are already included in the repository and do not require setup. Only the preparation of local‑specific files and Google Drive integration is described below.
@@ -226,8 +359,13 @@ class MyCustomTokenProvider : GoogleDriveTokenProvider {
 <!-- app/src/main/AndroidManifest.xml -->
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.INTERNET" />
+
+<!-- Optional: only if you need location access while no foreground service or UI is visible -->
+<!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> -->
 ```
 
 ### 5. Build
