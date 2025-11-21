@@ -5,20 +5,20 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import android.webkit.MimeTypeMap
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
-import com.mapconductor.plugin.provider.geolocation.drive.auth.DriveTokenProviderRegistry
-import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
-import com.mapconductor.plugin.provider.geolocation.util.LogTags
-import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
+import com.mapconductor.plugin.provider.geolocation.drive.auth.DriveTokenProviderRegistry
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleAuthRepository
+import com.mapconductor.plugin.provider.geolocation.drive.auth.GoogleDriveTokenProvider
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
-import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
-import kotlinx.coroutines.flow.first
+import com.mapconductor.plugin.provider.geolocation.util.LogTags
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
-/** アップロード方式の共通境界。URI を受け取り、結果を UploadResult で返す。*/
+/** アップロード方式の共通インターフェース。URI を受け取り、結果を UploadResult として返す。 */
 interface Uploader {
     suspend fun upload(
         uri: Uri,
@@ -28,8 +28,10 @@ interface Uploader {
 }
 
 /**
- * 既存の DriveApiClient + GoogleAuthRepository を内部で利用する薄いラッパ。
- * ※ Resumable対応の実体（OkHttp直叩き版）KotlinDriveUploader とクラス名が衝突するため改名。
+ * 既存の DriveApiClient + GoogleAuthRepository を内部で利用するレガシー実装。
+ *
+ * @deprecated GoogleAuthUtil ベースの実装に依存するため、新規コードでは KotlinDriveUploader と
+ *             GoogleDriveTokenProvider（Credential Manager など）の組み合わせを使用してください。
  */
 @Deprecated("Use KotlinDriveUploader via UploaderFactory with a modern GoogleDriveTokenProvider")
 class ApiClientDriveUploader(
@@ -46,7 +48,7 @@ class ApiClientDriveUploader(
         val token = auth.getAccessTokenOrNull()
             ?: return UploadResult.Failure(code = 401, body = "No Google access token")
 
-        // 2) フォルダIDのプレフライト解決（ショートカット・権限・resourceKey 対応）
+        // 2) フォルダ ID のプレフライト解決（ショートカット・権限・resourceKey を考慮）
         val rk = try { prefs.folderResourceKeyFlow.first() } catch (_: Exception) { null }
         val resolved = client.resolveFolderIdForUpload(token, folderId, rk)
         val finalFolderId = when (resolved) {
@@ -69,10 +71,9 @@ class ApiClientDriveUploader(
             }
         }
 
-        // 3) URI からメタ情報と内容を取得（サンプル用途：全読み込み）
+        // 3) URI からメタ情報と内容を取得（ここではシンプルに全読み込み）
         val cr = appContext.contentResolver
         val pickedName = fileName ?: run {
-            // DISPLAY_NAME が取れない場合はファイル名を推測
             val guess = cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
             guess ?: "upload.bin"
@@ -119,15 +120,15 @@ class ApiClientDriveUploader(
     }
 }
 
-/** エンジンに応じて Uploader を生成。NONE のときは null。*/
+/** エンジン種別に応じて Uploader を生成するファクトリ。NONE のときは null を返す。 */
 object UploaderFactory {
     /**
-     * Create an Uploader instance based on the specified engine.
+     * エンジン種別とトークンプロバイダに応じて Uploader を生成する。
      *
-     * @param context Application context
-     * @param engine Upload engine to use
-     * @param tokenProvider Optional token provider. If not provided, uses legacy GoogleAuthRepository.
-     *                      For new code, it's recommended to provide a tokenProvider (AppAuth or CredentialManager).
+     * @param context Application コンテキスト
+     * @param engine  利用するアップロードエンジン
+     * @param tokenProvider 利用するトークンプロバイダ。未指定の場合は DriveTokenProviderRegistry を参照し、
+     *                      未登録ならレガシーな GoogleAuthRepository にフォールバックする。
      */
     fun create(
         context: Context,
@@ -148,10 +149,9 @@ object UploaderFactory {
         }
 
     /**
-     * Legacy method for backward compatibility.
-     * Uses ApiClientDriveUploader instead of KotlinDriveUploader.
+     * レガシーなファクトリメソッド。内部的に ApiClientDriveUploader を利用する。
      *
-     * @deprecated Use create(context, engine, tokenProvider) instead
+     * @deprecated create(context, engine, tokenProvider) の利用を推奨
      */
     @Deprecated("Use create(context, engine, tokenProvider) for better flexibility")
     fun createLegacy(context: Context, engine: UploadEngine): Uploader? =

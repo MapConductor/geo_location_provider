@@ -1,8 +1,8 @@
 plugins {
     id("com.android.library")
     alias(libs.plugins.kotlin.android)
-    // alias(libs.plugins.ksp) // ← KSPを使っていないなら消してOK
-    // alias(libs.plugins.room) // ← 外す（原因行）
+    // alias(libs.plugins.ksp)   // KSP を利用する場合に有効化する
+    // alias(libs.plugins.room)  // Room を直接利用する場合のみ有効化する
 }
 
 android {
