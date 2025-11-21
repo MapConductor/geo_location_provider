@@ -102,7 +102,7 @@ private fun IntervalAndDrArea(
             onValueChange = {
                 vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3))
             },
-            label = { Text("GPS取得間隔(>5秒)") },
+            label = { Text("GPS取得間隔(秒)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)
@@ -115,7 +115,7 @@ private fun IntervalAndDrArea(
             onValueChange = {
                 vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3))
             },
-            label = { Text("DR予測間隔(>5秒)") },
+            label = { Text("DR予測間隔(秒)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)

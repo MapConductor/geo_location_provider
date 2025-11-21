@@ -107,7 +107,7 @@ class GeoLocationService : Service() {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
                 .collect { sec ->
-                    val ms = max(5_000L, sec * 1_000L)
+                    val ms = max(1_000L, sec * 1_000L)
                     if (ms != updateIntervalMs) {
                         Log.d(TAG, "interval changed: ${updateIntervalMs}ms -> ${ms}ms")
                         updateIntervalMs = ms
@@ -371,7 +371,7 @@ class GeoLocationService : Service() {
 
         // 3) バックフィル：直前Fix→今回Fixの間を DR間隔(秒)で分割し保存
         if (lastFix != null) {
-            val stepMs = (drIntervalSec * 1000L).coerceAtLeast(5000L)
+            val stepMs = (drIntervalSec * 1000L).coerceAtLeast(1000L)
             val targets = generateSequence(lastFix + stepMs) { it + stepMs }
                 .takeWhile { it < now - 100L }
                 .toList()
@@ -539,7 +539,7 @@ class GeoLocationService : Service() {
                 } catch (t: Throwable) {
                     Log.e(TAG, "drTicker loop error", t)
                 }
-                delay((drIntervalSec * 1000L).coerceAtLeast(5000L))
+                delay((drIntervalSec * 1000L).coerceAtLeast(1000L))
             }
             Log.d(TAG, "drTicker: loop end")
         }
@@ -552,7 +552,7 @@ class GeoLocationService : Service() {
     }
 
     private fun applyDrInterval(sec: Int) {
-        val clamped = max(5, sec)
+        val clamped = max(1, sec)
         Log.d(TAG, "applyDrInterval: $drIntervalSec -> $clamped")
         drIntervalSec = clamped
         if (isRunning.get()) {

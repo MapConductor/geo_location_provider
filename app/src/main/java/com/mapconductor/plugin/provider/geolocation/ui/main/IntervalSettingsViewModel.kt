@@ -20,20 +20,20 @@ import kotlin.math.max
 
 /**
  * Interval(秒) と DR予測間隔(秒) を管理し、保存とサービス反映を行う VM。
- * - 既定: Interval=30秒 / DR間隔=（移行ロジックで算出 or 最小5）
- * - DR間隔は [最小5秒, 上限=floor(GPS/2)] を満たすときのみ保存
+ * - 既定: Interval=30秒 / DR間隔=5秒（移行ロジックで算出 or 最小値）
+ * - DR間隔は [最小, 上限=floor(GPS/2)] を満たすときのみ保存
  * - サービスへの反映:
- *    - Interval(秒) は ACTION_UPDATE_INTERVAL(ms) を送る
+ *    - Interval(秒) は DataStore 経由で Service に伝播（ACTION_UPDATE_INTERVAL は補助）
  *    - DR間隔(秒) は ACTION_UPDATE_DR_INTERVAL(sec) を送る
  */
 class IntervalSettingsViewModel(
     private val appContext: Context
 ) : ViewModel() {
 
-    // Repository のルールに合わせた最小値（5秒）
+    // Repository のルールに合わせた最小値（1秒）
     private companion object {
-        const val MIN_INTERVAL_SEC = 5
-        const val MIN_DR_INTERVAL_SEC = 5
+        const val MIN_INTERVAL_SEC = 1
+        const val MIN_DR_INTERVAL_SEC = 1
     }
 
     private val _secondsText = MutableStateFlow("30")
@@ -46,7 +46,7 @@ class IntervalSettingsViewModel(
     val imuAvailable: StateFlow<Boolean> = _imuAvailable.asStateFlow()
 
     init {
-        // 既存値を DataStore（SettingsRepository）から読み込み
+        // 既存値を DataStore (SettingsRepository) から読み込み
         viewModelScope.launch(Dispatchers.IO) {
             val gpsSec = (SettingsRepository.currentIntervalMs(appContext) / 1000L).toInt()
                 .coerceAtLeast(MIN_INTERVAL_SEC)
@@ -77,8 +77,8 @@ class IntervalSettingsViewModel(
 
     /**
      * 保存 + サービス適用。
-     * - Interval(秒) は常に保存（最小5秒に矯正）
-     * - DR間隔(秒) は [最小5, 上限=floor(GPS/2)] を満たす場合のみ保存
+     * - Interval(秒) は常に保存（最小1秒に矯正）
+     * - DR間隔(秒) は [最小, 上限=floor(GPS/2)] を満たす場合のみ保存
      * - サービスへは各アクションで個別に反映
      */
     fun saveAndApply() {
@@ -99,14 +99,18 @@ class IntervalSettingsViewModel(
 
             val gpsInterval = clampedSec
             val upper = floor(gpsInterval / 2.0).toInt()        // 上限
-            val lower = MIN_DR_INTERVAL_SEC                // 下限=5
+            val lower = MIN_DR_INTERVAL_SEC                     // 下限=1
             if (upper < lower) {
-                rollbackDrIntervalWithToast("現在のGPS間隔ではDR間隔を設定できません（GPSは最小10秒以上にしてください）")
+                rollbackDrIntervalWithToast(
+                    "現在のGPS間隔ではDR間隔を設定できません。GPSは最小2秒以上にしてください。"
+                )
                 return@launch
             }
 
             if (drInterval < lower || drInterval > upper) {
-                rollbackDrIntervalWithToast("DR予測間隔は5秒以上、かつGPS間隔の半分以下にしてください（上限: ${upper}秒）。")
+                rollbackDrIntervalWithToast(
+                    "DR予測間隔は1秒以上、かつGPS間隔の半分以下にしてください（上限: ${upper}秒）。"
+                )
                 return@launch
             }
 
@@ -114,10 +118,10 @@ class IntervalSettingsViewModel(
             SettingsRepository.setDrIntervalSec(appContext, drInterval)
             applyDrIntervalToService(drInterval)
 
-            // 成功トースト（例：適用された値を表示）
+            // 成功トースト
             launchToast(
                 "設定を保存して適用しました\n" +
-                "GPS間隔: ${gpsInterval}秒 / DR間隔: ${drInterval}秒"
+                    "GPS間隔: ${gpsInterval}秒 / DR間隔: ${drInterval}秒"
             )
         }
     }
@@ -135,9 +139,11 @@ class IntervalSettingsViewModel(
     }
 
     private fun applyIntervalToService(ms: Long) {
+        // Interval は SettingsRepository 経由で Service 側に伝播されるため、
+        // ここでは明示的な ACTION_UPDATE_INTERVAL は行わない。
+        // service が未起動の場合のみ、従来どおり起動だけ行う。
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
-            action = GeoLocationService.ACTION_UPDATE_INTERVAL
-            putExtra(GeoLocationService.EXTRA_UPDATE_MS, ms)
+            action = GeoLocationService.ACTION_START
         }
         appContext.startService(intent)
     }
