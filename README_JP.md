@@ -107,6 +107,10 @@ UPLOAD_ENGINE=kotlin
 # 任意: Drive のフルスコープ仕様を有効化する予定がある場合のフラグ
 # (現時点ではフルスコープ(drive)での既存ファイル参照・更新は未実装のため効果はありません)
 DRIVE_FULL_SCOPE=false
+
+# サンプルアプリで Credential Manager 認証を使う場合に必須となるサーバー クライアント ID
+# secrets-gradle-plugin により BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID として公開されます
+CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
 ```
 
 > 注意: 実装上これらのキーが無くてもアプリは動作します。必要な場合のみ追加してください。
