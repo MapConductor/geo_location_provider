@@ -51,7 +51,15 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             when (val r = api.aboutGet(token)) {
-                is ApiResult.Success      -> _status.value = "About 200: ${r.data.user?.emailAddress ?: "unknown"}"
+                is ApiResult.Success      -> {
+                    val email = r.data.user?.emailAddress.orEmpty()
+                    if (email.isNotBlank()) {
+                        prefs.setAccountEmail(email)
+                    }
+                    // 「トークンを UI から正常に取得できた」タイミングとして保存しておく
+                    prefs.markTokenRefreshed()
+                    _status.value = "About 200: ${if (email.isNotBlank()) email else "unknown"}"
+                }
                 is ApiResult.HttpError    -> _status.value = "About ${r.code}: ${r.body}"
                 is ApiResult.NetworkError -> _status.value = "About network: ${r.exception.message}"
             }
@@ -193,4 +201,3 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         MidnightExportWorker.runNow(getApplication())
     }
 }
-

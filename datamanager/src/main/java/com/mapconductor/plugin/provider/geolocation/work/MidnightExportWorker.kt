@@ -2,7 +2,6 @@ package com.mapconductor.plugin.provider.geolocation.work
 
 import android.content.Context
 import android.net.Uri
-import android.service.controls.ControlsProviderService.TAG
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -180,6 +179,7 @@ class MidnightExportWorker(
     }
 
     companion object {
+        private const val TAG = "MidnightExportWorker"
         private const val UNIQUE_NAME = "midnight-export-worker"
 
         /** UI から即時にバックログ処理を起動するためのヘルパー */

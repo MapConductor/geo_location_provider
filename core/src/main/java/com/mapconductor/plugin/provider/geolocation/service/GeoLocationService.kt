@@ -43,6 +43,7 @@ class GeoLocationService : Service() {
 
     companion object {
         private const val TAG = "GeoLocationService"
+        private const val NOTIFICATION_ID = 1
 
         const val ACTION_START = "ACTION_START_LOCATION"
         const val ACTION_STOP  = "ACTION_STOP_LOCATION"
@@ -156,7 +157,7 @@ class GeoLocationService : Service() {
     private fun startLocation() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
-        startForeground(1, buildNotification())
+        startForeground(NOTIFICATION_ID, buildNotification())
         serviceScope.launch { restartLocationUpdates() }
         startDrTicker() // DR リアルタイムを開始
     }
@@ -219,6 +220,10 @@ class GeoLocationService : Service() {
     }
 
     private fun handleLocation(location: Location) {
+        // Foreground 通知がユーザー操作で隠されていても、
+        // 次の GPS 取得タイミングで再掲できるようにする。
+        ensureNotificationVisible()
+
         val now = System.currentTimeMillis()
         val lastFix = lastFixMillis
 
@@ -445,6 +450,10 @@ class GeoLocationService : Service() {
         Log.d(TAG, "startDrTicker interval=${drIntervalSec}s")
         drTickerJob = serviceScope.launch(Dispatchers.IO) {
             while (isRunning.get()) {
+                // GPS 更新がしばらく無い場合でも、DR の周期で
+                // Foreground 通知を再掲できるようにする。
+                ensureNotificationVisible()
+
                 val base = lastFixMillis
                 try {
                     if (base != null) {
@@ -562,20 +571,48 @@ class GeoLocationService : Service() {
         }
     }
 
+    /**
+     * Foreground Service 用の通知がユーザー操作で一時的に隠されても、
+     * 次の GPS/DR のタイミングで再掲するためのヘルパー。
+     *
+     * 毎回呼んでも startForeground による通知更新として扱われるだけなので、
+     * DR ticker や GPS コールバックからの定期呼び出しを前提とする。
+     */
+    private fun ensureNotificationVisible() {
+        if (!isRunning.get()) return
+        serviceScope.launch(Dispatchers.Main.immediate) {
+            try {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            } catch (t: Throwable) {
+                Log.w(TAG, "ensureNotificationVisible failed", t)
+            }
+        }
+    }
+
     private fun buildNotification(): Notification {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, "geo")
-                .setContentTitle("GeoLocation")
-                .setContentText("Running…")
-                .setSmallIcon(R.drawable.stat_notify_sync)
-                .build()
         } else {
             Notification.Builder(this)
-                .setContentTitle("GeoLocation")
-                .setContentText("Running…")
-                .setSmallIcon(R.drawable.stat_notify_sync)
-                .build()
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
+        val notification = builder
+            .setContentTitle("GeoLocation")
+            .setContentText("Running…")
+            .setSmallIcon(R.drawable.stat_notify_sync)
+            .setOngoing(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .build()
+
+        notification.flags = notification.flags or
+            Notification.FLAG_ONGOING_EVENT or
+            Notification.FLAG_NO_CLEAR
+
+        return notification
     }
 
     // ------------------------
