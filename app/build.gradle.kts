@@ -29,10 +29,8 @@ android {
                 "proguard-rules.pro"
             )
         }
-        // debug { }
     }
 
-    // Packaging は buildTypes の外
     packaging {
         resources {
             pickFirsts += setOf(
@@ -47,8 +45,6 @@ android {
                 "META-INF/NOTICE.txt",
                 "META-INF/notice.txt"
             )
-            // 衝突する場合のみ:
-            // pickFirsts += "META-INF/io.netty.versions.properties"
         }
     }
 
@@ -59,7 +55,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
-        // もし存在していたら 11 -> 17 に必ず変更してください
     }
 
     buildFeatures {
@@ -68,7 +63,6 @@ android {
     }
 }
 
-// ✅ import を使わず FQ 名で指定（警告解消）
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
@@ -85,6 +79,7 @@ secrets {
 }
 
 dependencies {
+    // プロジェクト内モジュール
     implementation(project(":core"))
     implementation(project(":dataselector"))
     implementation(project(":datamanager"))
@@ -92,8 +87,8 @@ dependencies {
     implementation(project(":storageservice"))
     implementation(project(":auth-credentialmanager"))
 
+    // Compose / AndroidX / Google Play Services
     implementation("com.google.android.material:material:1.12.0")
-
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.navigation:navigation-compose:2.8.0")
     implementation("androidx.activity:activity-compose:1.9.2")
@@ -125,8 +120,10 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(platform(libs.androidx.compose.bom))
 
+    // Room (KSP)
     ksp(libs.androidx.room.compiler)
 
+    // Test / Debug
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.ui.test.junit4)
@@ -134,3 +131,4 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     debugImplementation(libs.androidx.ui.tooling)
 }
+

@@ -9,8 +9,7 @@ android {
 
     defaultConfig {
         minSdk = 26
-        // センサー使用のためのマニフェスト権限はアプリ側に記載してください
-        // <uses-permission android:name="android.permission.BODY_SENSORS"/>
+        // センサー権限（BODY_SENSORS など）はアプリ側のマニフェストで宣言してください
     }
 
     compileOptions {
@@ -27,9 +26,10 @@ android {
 }
 
 dependencies {
-    // Kotlin
+    // コルーチン
     implementation(libs.kotlinx.coroutines.android)
 
-    // AndroidX
+    // 共通 AndroidX 依存
     implementation(libs.androidx.core.ktx)
 }
+
