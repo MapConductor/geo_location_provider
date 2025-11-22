@@ -44,9 +44,12 @@ fun ServiceToggleAction() {
         }
     }
 
-    // 初回起動時に一度だけ状態を問い合わせる
+    // 初回起動以降も、一定間隔で状態を問い合わせる
     LaunchedEffect(Unit) {
-        refreshState()
+        while (true) {
+            refreshState()
+            delay(1_000L)
+        }
     }
 
     // 画面復帰時にも状態を取り直す

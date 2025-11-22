@@ -17,10 +17,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 kotlin {
@@ -46,4 +42,3 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okio)
 }
-

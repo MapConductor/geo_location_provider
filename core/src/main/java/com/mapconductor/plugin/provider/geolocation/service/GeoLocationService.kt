@@ -104,6 +104,7 @@ class GeoLocationService : Service() {
         gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
         dr = DeadReckoningImpl(applicationContext).also { it.start() }
         ensureChannel()
+        // サンプリング間隔（GPS）は SettingsRepository の Flow から常に同期する
         serviceScope.launch {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
@@ -116,6 +117,15 @@ class GeoLocationService : Service() {
                             restartLocationUpdates()
                         }
                     }
+                }
+        }
+        // DR 予測間隔も Flow から同期し、Save&Apply 経由・手動起動どちらでも同じ値を使う
+        serviceScope.launch {
+            SettingsRepository.drIntervalSecFlow(applicationContext)
+                .distinctUntilChanged()
+                .collect { sec ->
+                    Log.d(TAG, "dr interval changed: $drIntervalSec -> $sec")
+                    applyDrInterval(sec)
                 }
         }
         // ---- ここまで ----
