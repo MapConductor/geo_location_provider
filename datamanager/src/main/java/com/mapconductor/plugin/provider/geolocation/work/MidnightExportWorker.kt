@@ -111,7 +111,7 @@ class MidnightExportWorker(
                     }
                     is UploadResult.Failure -> {
                         lastError = buildString {
-                            up.code?.let { append("HTTP $it ") }
+                            append("HTTP ${up.code} ")
                             if (!up.message.isNullOrBlank()) append(up.message)
                             if (!up.body.isNullOrBlank()) {
                                 if (isNotEmpty()) append(" ")

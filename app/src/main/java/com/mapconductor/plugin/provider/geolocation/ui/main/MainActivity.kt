@@ -37,9 +37,11 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId.extractFromUrlOrId
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
@@ -222,13 +224,18 @@ private fun AppRoot(
                     scope.launch(Dispatchers.IO) {
                         val extractedId = extractFromUrlOrId(folderInput)
                         val rk: String = (DriveFolderId.extractResourceKey(folderInput) as? String).orEmpty()
-                        val msg = if (extractedId.isNullOrBlank()) {
-                            "Invalid Folder ID or URL"
-                        } else {
-                            prefs.setFolderId(extractedId!!)
-                            prefs.setFolderResourceKey(rk)
-                            "Saved Folder ID: $extractedId" + if (rk.isNotEmpty()) " (rk saved)" else ""
-                        }
+                        val msg =
+                            if (extractedId.isNullOrBlank()) {
+                                "Invalid Folder ID or URL"
+                            } else {
+                                val id = extractedId
+                                prefs.setFolderId(id)
+                                prefs.setFolderResourceKey(rk)
+                                // Worker 側が参照する AppPrefs にも同期しておく
+                                AppPrefs.saveFolderId(ctx.applicationContext, id)
+                                AppPrefs.saveEngine(ctx.applicationContext, UploadEngine.KOTLIN)
+                                "Saved Folder ID: $id" + if (rk.isNotEmpty()) " (rk saved)" else ""
+                            }
                         launch(Dispatchers.Main) {
                             showFolderDialog = false
                             showMsg(msg)

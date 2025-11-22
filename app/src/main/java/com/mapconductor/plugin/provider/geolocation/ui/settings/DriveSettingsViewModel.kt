@@ -5,12 +5,13 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
-import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
+import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +116,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     prefs.setFolderId(resolvedId)
+                    // AppPrefs 側にも反映しておくことで、Worker やレガシー経路も同じ設定を参照できるようにする
+                    AppPrefs.saveFolderId(getApplication(), resolvedId)
+                    AppPrefs.saveEngine(getApplication(), UploadEngine.KOTLIN)
                     _status.value = "Folder OK: ${detail.name} ($resolvedId)"
                 }
                 is ApiResult.HttpError    -> _status.value = "Folder ${r.code}: ${r.body}"

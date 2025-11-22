@@ -1,12 +1,28 @@
 package com.mapconductor.plugin.provider.geolocation.ui.pickup
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.runtime.*
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -20,7 +36,11 @@ import com.mapconductor.plugin.provider.geolocation.usecase.BuildSelectedSlots
 import com.mapconductor.plugin.provider.geolocation.usecase.SelectorUseCases
 import kotlinx.coroutines.launch
 import java.text.Normalizer
-import java.time.*
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -30,8 +50,8 @@ fun PickupScreen() {
     val context = LocalContext.current
 
     // -----------------------------
-    // ▼ dataselector：UseCase をファクトリから取得
-    //   （Pickup は DB/DAO を知らない）
+    // ▼ dataselector の UseCase をファクトリから取得
+    //   Pickup は DB/DAO の型を直接知らない
     // -----------------------------
     val buildSelectedSlots: BuildSelectedSlots = remember {
         SelectorUseCases.buildSelectedSlots(context)
@@ -40,19 +60,19 @@ fun PickupScreen() {
     // ====== 入力フィールド（統一フォーム） ======
     val jst = remember { ZoneId.of("Asia/Tokyo") }
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ROOT) }
-    val hmsFmt  = remember { DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT) }
+    val hmsFmt = remember { DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT) }
 
-    // 既定値：今日の 00:00:00 ～ 現在
+    // 既定値: 今日の 00:00:00 〜 現在
     val now = remember { ZonedDateTime.now(jst) }
     var fromDate by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
-    var fromHms  by remember { mutableStateOf("00:00:00") }
-    var toDate   by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
-    var toHms    by remember { mutableStateOf(now.toLocalTime().format(hmsFmt)) }
+    var fromHms by remember { mutableStateOf("00:00:00") }
+    var toDate by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
+    var toHms by remember { mutableStateOf(now.toLocalTime().format(hmsFmt)) }
     var sortOrder by remember { mutableStateOf(SortOrder.NewestFirst) }
     var countText by remember { mutableStateOf("100") }
-    var intervalSecText by remember { mutableStateOf("3600") } // 0で無効
+    var intervalSecText by remember { mutableStateOf("3600") } // 0 で無効
 
-    // 反映後の固定表示用スナップショット（SelectedSlot = 欠測も行として保持）
+    // 反映後に固定表示するスナップショット（SelectedSlot = 欠測も行として保持）
     var displaySlots by remember { mutableStateOf<List<SelectedSlot>>(emptyList()) }
 
     // ====== 変換ユーティリティ ======
@@ -144,7 +164,7 @@ fun PickupScreen() {
             OutlinedTextField(
                 value = countText,
                 onValueChange = { countText = it },
-                label = { Text("件数（上限）") },
+                label = { Text("件数上限") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f)
@@ -165,7 +185,7 @@ fun PickupScreen() {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = {
                 scope.launch {
-                    // 1) 入力→ミリ秒
+                    // 1) 入力をミリ秒に変換
                     val fromDateMs = parseDateMillis(fromDate)
                     val toDateMs = parseDateMillis(toDate)
                     val fromHmsMs = parseHmsToMillisOfDay(fromHms) ?: 0L
@@ -175,7 +195,7 @@ fun PickupScreen() {
                     var toMs = combine(toDateMs, toHmsMs)
                     toMs = clampToNow(toMs)
 
-                    // From>To は入れ替え
+                    // From > To の場合は入れ替え
                     if (fromMs != null && toMs != null && fromMs > toMs) {
                         val tmp = fromMs
                         fromMs = toMs
@@ -183,7 +203,8 @@ fun PickupScreen() {
                     }
 
                     val limit = countText.trim().toIntOrNull()?.coerceIn(1, 100_000) ?: 100
-                    val intervalSec = intervalSecText.trim().toIntOrNull()?.coerceIn(0, 86_400) ?: 0
+                    val intervalSec =
+                        intervalSecText.trim().toIntOrNull()?.coerceIn(0, 86_400) ?: 0
                     val interval = if (intervalSec > 0) intervalSec.toLong() else null
 
                     // 2) UseCase 実行（欠測は SelectedSlot.sample == null）
@@ -261,20 +282,19 @@ private fun CountDirectionSelector(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
-            DropdownMenuItem(
-                text = { Text("新しい方から優先") },
-                onClick = {
-                    onChange(SortOrder.NewestFirst)
-                    expanded = false
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("古い方から優先") },
-                onClick = {
-                    onChange(SortOrder.OldestFirst)
-                    expanded = false
-                }
-            )
+            TextButton(onClick = {
+                onChange(SortOrder.NewestFirst)
+                expanded = false
+            }) {
+                Text("新しい方から優先")
+            }
+            TextButton(onClick = {
+                onChange(SortOrder.OldestFirst)
+                expanded = false
+            }) {
+                Text("古い方から優先")
+            }
         }
     }
 }
+

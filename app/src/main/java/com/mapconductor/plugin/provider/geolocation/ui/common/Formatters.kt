@@ -72,7 +72,7 @@ object Formatters {
     fun courseText(deg: Float?): String =
         deg?.let { "${oneDecimal(it)}°" } ?: "-"
 
-    /** m/s -> "0.0Km/h(0.0m/s)"（無いとき "-"） */
+    /** m/s -> "0.0Km/h(0.0m/s)"。null の場合は "-"。 */
     fun speedText(mps: Float?): String =
         mps?.let { "${oneDecimal(it * 3.6f)} Km/h (${oneDecimal(it)} m/s)" } ?: "-"
 
@@ -91,19 +91,19 @@ object Formatters {
         slot: SelectedSlot,
         modifier: Modifier = Modifier
     ) {
-        val item = slot.sample?: return
+        val item = slot.sample ?: return
 
-        val time     = timeJst(item.timeMillis)
-        val prov     = providerText(item.provider)
-        val latlon   = latLonAcc(item.lat, item.lon, item.accuracy)
-        val head     = headingText(item.headingDeg.toFloat())
-        val course   = courseText(item.courseDeg?.toFloat())
-        val speed    = speedText(item.speedMps.toFloat())
-        val gnss     = gnssUsedTotal(item.gnssUsed, item.gnssTotal)
-        val cn0      = cn0Text(item.cn0.toFloat())
-        val battery  = batteryText(item.batteryPercent, item.isCharging)
+        val time = timeJst(item.timeMillis)
+        val prov = providerText(item.provider)
+        val latlon = latLonAcc(item.lat, item.lon, item.accuracy)
+        val head = headingText(item.headingDeg.toFloat())
+        val course = courseText(item.courseDeg?.toFloat())
+        val speed = speedText(item.speedMps.toFloat())
+        val gnss = gnssUsedTotal(item.gnssUsed, item.gnssTotal)
+        val cn0 = cn0Text(item.cn0.toFloat())
+        val battery = batteryText(item.batteryPercent, item.isCharging)
         val idealJst = timeJst(slot.idealMs)
-        val delta    = slot.deltaMs?.let { d ->
+        val delta = slot.deltaMs?.let { d ->
             val sign = if (d >= 0) "+" else "-"
             val ad = kotlin.math.abs(d)
             val sec = ad / 1000
@@ -116,8 +116,11 @@ object Formatters {
         ) {
             // 1行目: Provider / [GNSS] Used/Total / [搬送波対雑音比] C/N0
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.GpsFixed, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.GpsFixed,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Provider")
                 Text(prov, style = MaterialTheme.typography.bodyMedium)
@@ -125,54 +128,72 @@ object Formatters {
                 if (prov == "GPS") {
                     Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                    Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE))
+                    Icon(
+                        Icons.Outlined.SignalCellularAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
                     Spacer(Modifier.width(SPACER_SIZE))
                     BoldLabel("GNSS")
                     Text(gnss, style = MaterialTheme.typography.bodyMedium)
 
                     Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                    Icon(Icons.Outlined.SignalCellularAlt, contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE))
+                    Icon(
+                        Icons.Outlined.SignalCellularAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
                     Spacer(Modifier.width(SPACER_SIZE))
                     BoldLabel("C/N0")
                     Text(cn0, style = MaterialTheme.typography.bodyMedium)
                 }
             }
 
-            // 2行目: Ideal / Δ
+            // 2行目: Ideal / Δt
             if ((slot.idealMs != 0L) || (slot.deltaMs != 0L)) {
-                // Ideal=0,Delta=0なら主画面なのでこの行は非表示
+                // Ideal=0, Delta=0 なら主画面なのでこの行は非表示
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Schedule, contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE))
+                    Icon(
+                        Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
                     Spacer(Modifier.width(SPACER_SIZE))
                     BoldLabel("Ideal")
                     Text(idealJst, style = MaterialTheme.typography.bodyMedium)
                     if (delta != null) {
                         Spacer(Modifier.width(SPACER_SIZE))
-                        Icon(Icons.Outlined.Timeline, contentDescription = null,
-                            modifier = Modifier.size(ICON_SIZE))
+                        Icon(
+                            Icons.Outlined.Timeline,
+                            contentDescription = null,
+                            modifier = Modifier.size(ICON_SIZE)
+                        )
                         Spacer(Modifier.width(SPACER_SIZE))
-                        BoldLabel("Δ")
+                        BoldLabel("Δt")
                         Text(delta, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
 
-            // 3行目: [時計] 時刻 / [電池] Battery
+            // 3行目: [時間] Time / [電池] Battery
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.AccessTime, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.AccessTime,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Time")
                 Text(time, style = MaterialTheme.typography.bodyMedium)
 
                 Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                Icon(Icons.Outlined.BatteryFull, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.BatteryFull,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Battery")
                 Text(battery, style = MaterialTheme.typography.bodyMedium)
@@ -180,8 +201,11 @@ object Formatters {
 
             // 4行目: [位置] Lat/Lon/Acc
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.LocationOn, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.LocationOn,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Lat/Lon/Acc")
                 Text(latlon, style = MaterialTheme.typography.bodyMedium)
@@ -189,24 +213,33 @@ object Formatters {
 
             // 5行目: [方位] Heading / Course / [速度] Speed
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.CompassCalibration, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.CompassCalibration,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Heading")
                 Text(head, style = MaterialTheme.typography.bodyMedium)
 
                 Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                Icon(Icons.Outlined.Explore, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.Explore,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Course")
                 Text(course, style = MaterialTheme.typography.bodyMedium)
 
                 Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                Icon(Icons.Outlined.Speed, contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE))
+                Icon(
+                    Icons.Outlined.Speed,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
                 Spacer(Modifier.width(SPACER_SIZE))
                 BoldLabel("Speed")
                 Text(speed, style = MaterialTheme.typography.bodyMedium)
@@ -216,6 +249,11 @@ object Formatters {
 
     @Composable
     private fun BoldLabel(label: String) {
-        Text("$label : ", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "$label : ",
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium
+        )
     }
 }
+

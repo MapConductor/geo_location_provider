@@ -5,7 +5,13 @@ import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
 import kotlin.math.abs
 import kotlin.math.max
 
-/** endInclusive を必ず含むグリッド列を生成（Δ=intervalMs）。start > end は空。 */
+/**
+ * start 〜 end を含むグリッド時刻列を生成する。
+ *
+ * @param startInclusive 開始時刻（ミリ秒, inclusive）
+ * @param endInclusive 終了時刻（ミリ秒, inclusive）
+ * @param intervalMs グリッド間隔（ミリ秒, 0 以下なら空）
+ */
 fun buildTargetsInclusive(
     startInclusive: Long,
     endInclusive: Long,
@@ -14,8 +20,10 @@ fun buildTargetsInclusive(
     if (intervalMs <= 0L) return emptyList()
     if (endInclusive < startInclusive) return emptyList()
 
-    val first = ((startInclusive) / intervalMs) * intervalMs
-    val result = ArrayList<Long>( ((max(0L, endInclusive - startInclusive) / intervalMs) + 2).toInt() )
+    val first = (startInclusive / intervalMs) * intervalMs
+    val result = ArrayList<Long>(
+        ((max(0L, endInclusive - startInclusive) / intervalMs) + 2).toInt()
+    )
     var g = first
     // g が start 未満の場合は繰り上げ
     while (g < startInclusive) g += intervalMs
@@ -31,9 +39,14 @@ fun buildTargetsInclusive(
 }
 
 /**
- * グリッド吸着：各 g について [g-W, g+W] に入る createdAt を探索し、|Δ| 最小 1 件を採用。
- * 同差は「過去側」優先（昇順走査の先勝ち）。
- * records は createdAt 昇順を想定。
+ * グリッド吸着ロジック。
+ *
+ * 各グリッド時刻 g について [g - halfWindowMs, g + halfWindowMs] に入る sample を探索し、
+ * |Δt| が最小のものを 1 件だけ採用する。同差の場合は「より過去側」が優先される。
+ *
+ * @param records timeMillis 昇順の LocationSample 一覧
+ * @param grid    グリッド時刻列（ミリ秒）
+ * @param halfWindowMs 吸着窓の半幅（ミリ秒）
  */
 fun snapToGrid(
     records: List<LocationSample>,
@@ -60,13 +73,19 @@ fun snapToGrid(
                 bestAbs = ad
                 bestIdx = q
             }
-            // 同差は先勝ち（= 過去側）
+            // 同差は先勝ち（= より過去側を優先）
             q++
         }
 
         if (bestIdx >= 0) {
             val s = records[bestIdx]
-            out.add(SelectedSlot(idealMs = g, sample = s, deltaMs = s.timeMillis - g))
+            out.add(
+                SelectedSlot(
+                    idealMs = g,
+                    sample = s,
+                    deltaMs = s.timeMillis - g
+                )
+            )
         } else {
             out.add(SelectedSlot(idealMs = g, sample = null, deltaMs = null))
         }
@@ -74,20 +93,30 @@ fun snapToGrid(
     return out
 }
 
-/** ダイレクト抽出（グリッド無し） → SelectedSlot に変換（ideal=createdAt, delta=0）。 */
+/**
+ * ダイレクト抽出（グリッド無し）の結果を SelectedSlot に変換する。
+ * - idealMs = sample.timeMillis
+ * - deltaMs = 0
+ */
 fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
     records.map { SelectedSlot(idealMs = it.timeMillis, sample = it, deltaMs = 0L) }
 
-/** デフォルト100。指定があれば 1 以上のみ有効。 */
+/**
+ * limit 値の正規化。
+ *
+ * @return 1 以上ならその値、それ以外（null / 0 以下）の場合は null（= 無制限）
+ */
 fun effectiveLimit(maxCount: Int?): Int? =
-    maxCount?.takeIf { it > 0 } ?: 100
+    maxCount?.takeIf { it > 0 }
 
 /**
- * 候補読み込みのソフト上限。
- * グリッド時は limit*5 を基準に 1000〜200,000 の範囲へクリップ。
- * ダイレクト時は null（=制御しない。DAO に LIMIT が無い場合に備え）
+ * グリッド取得時の「候補読み込み件数」のソフト上限を計算する。
+ * - limit が指定されている場合は、その約 5 倍をベースとしつつ [1,000, 200,000] にクランプ
+ * - limit が null の場合は、デフォルト 100 件相当をベースにする
  */
 fun softLimitForGrid(limit: Int?): Int {
-    val base = ((effectiveLimit(limit) ?: 100) * 5).coerceAtLeast(1000)
+    val baseLimit = effectiveLimit(limit) ?: 100
+    val base = (baseLimit * 5).coerceAtLeast(1_000)
     return base.coerceAtMost(200_000)
 }
+

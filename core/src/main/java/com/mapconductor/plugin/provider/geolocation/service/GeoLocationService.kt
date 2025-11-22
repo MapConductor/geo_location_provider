@@ -25,6 +25,7 @@ import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
+import androidx.core.app.NotificationCompat
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -442,7 +443,7 @@ class GeoLocationService : Service() {
     }
 
     // ------------------------
-    //   DR タイカー（リアルタイム）
+    //   DR ticker（リアルタイム）
     // ------------------------
     private fun startDrTicker() {
         stopDrTicker()
@@ -573,8 +574,7 @@ class GeoLocationService : Service() {
 
     /**
      * Foreground Service 用の通知がユーザー操作で一時的に隠されても、
-     * 次の GPS/DR のタイミングで再掲するためのヘルパー。
-     *
+     * 次の GPS/DR のタイミングで再掲するためのヘルパ。
      * 毎回呼んでも startForeground による通知更新として扱われるだけなので、
      * DR ticker や GPS コールバックからの定期呼び出しを前提とする。
      */
@@ -590,29 +590,39 @@ class GeoLocationService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, "geo")
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val builder = Notification.Builder(this, "geo")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
+            }
+            val notification = builder
+                .setContentTitle("GeoLocation")
+                .setContentText("Running…")
+                .setSmallIcon(R.drawable.stat_notify_sync)
+                .setOngoing(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+                .build()
+
+            notification.flags = notification.flags or
+                Notification.FLAG_ONGOING_EVENT or
+                Notification.FLAG_NO_CLEAR
+
+            notification
         } else {
-            Notification.Builder(this)
+            val builder = NotificationCompat.Builder(this, "geo")
+                .setContentTitle("GeoLocation")
+                .setContentText("Running…")
+                .setSmallIcon(R.drawable.stat_notify_sync)
+                .setOngoing(true)
+                .setCategory(Notification.CATEGORY_SERVICE)
+
+            val notification = builder.build()
+            notification.flags = notification.flags or
+                Notification.FLAG_ONGOING_EVENT or
+                Notification.FLAG_NO_CLEAR
+
+            notification
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
-        }
-
-        val notification = builder
-            .setContentTitle("GeoLocation")
-            .setContentText("Running…")
-            .setSmallIcon(R.drawable.stat_notify_sync)
-            .setOngoing(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .build()
-
-        notification.flags = notification.flags or
-            Notification.FLAG_ONGOING_EVENT or
-            Notification.FLAG_NO_CLEAR
-
-        return notification
     }
 
     // ------------------------
