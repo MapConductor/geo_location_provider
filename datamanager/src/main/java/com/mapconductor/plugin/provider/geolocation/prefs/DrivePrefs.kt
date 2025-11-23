@@ -25,6 +25,7 @@ class DrivePrefs(private val appContext: Context) {
         val ENGINE           = stringPreferencesKey("upload_engine")
         val TOKEN_TS         = longPreferencesKey("token_updated_at")
         val FOLDER_RES_KEY   = stringPreferencesKey("folder_resource_key")
+        val AUTH_METHOD      = stringPreferencesKey("auth_method")
     }
 
     // ---- Read Flows ----
@@ -36,6 +37,9 @@ class DrivePrefs(private val appContext: Context) {
 
     val uploadEngine: Flow<String> =
         appContext.driveDataStore.data.map { it[K.ENGINE] ?: "" }
+
+    val authMethod: Flow<String> =
+        appContext.driveDataStore.data.map { it[K.AUTH_METHOD] ?: "" }
 
     val tokenUpdatedAtMillis: Flow<Long> =
         appContext.driveDataStore.data.map { it[K.TOKEN_TS] ?: 0L }
@@ -55,6 +59,10 @@ class DrivePrefs(private val appContext: Context) {
 
     suspend fun setUploadEngine(engineName: String) {
         appContext.driveDataStore.edit { it[K.ENGINE] = engineName }
+    }
+
+    suspend fun setAuthMethod(methodName: String) {
+        appContext.driveDataStore.edit { it[K.AUTH_METHOD] = methodName }
     }
 
     suspend fun setTokenUpdatedAt(millis: Long) {

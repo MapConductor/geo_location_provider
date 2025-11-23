@@ -17,6 +17,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -31,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.auth.AppAuthAuth
+import com.mapconductor.plugin.provider.geolocation.auth.AppAuthSignInActivity
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
@@ -64,6 +67,7 @@ fun DriveSettingsScreen(
     val folderId by vm.folderId.collectAsState()
     val account by vm.accountEmail.collectAsState()
     val lastRefresh by vm.tokenLastRefresh.collectAsState()
+    val authMethod by vm.authMethod.collectAsState()
 
     val lastRefreshText = remember(lastRefresh) {
         if (lastRefresh > 0L) {
@@ -81,9 +85,9 @@ fun DriveSettingsScreen(
             TopAppBar(
                 title = { Text("Google Drive Settings") },
                 navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                }
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
                 }
             )
         }
@@ -95,7 +99,30 @@ fun DriveSettingsScreen(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // --- Drive 基本設定 ---
+            // 認証方式をラジオボタンで選択
+            Text("Auth method", style = MaterialTheme.typography.titleMedium)
+            Column {
+                DriveAuthMethod.values().forEach { method ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Start,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = authMethod == method,
+                            onClick = { vm.setAuthMethod(method) }
+                        )
+                        Text(
+                            text = method.label,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+            }
+
+            // Drive 基本設定
             OutlinedTextField(
                 value = folderId,
                 onValueChange = { vm.updateFolderId(it) },
@@ -107,34 +134,64 @@ fun DriveSettingsScreen(
                 Text(text = lastRefreshText, style = MaterialTheme.typography.bodySmall)
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val credential = credentialManagerTokenProvider.signIn(ctx)
-                            if (credential != null) {
-                                vm.setStatus("Credential Manager sign-in completed")
-                            } else {
-                                vm.setStatus("Credential Manager sign-in failed")
+            // 認証方式ごとの UI（現時点では CM のみ実装）
+            if (authMethod == DriveAuthMethod.CREDENTIAL_MANAGER) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val credential = credentialManagerTokenProvider.signIn(ctx)
+                                if (credential != null) {
+                                    vm.setStatus("Credential Manager sign-in completed")
+                                } else {
+                                    vm.setStatus("Credential Manager sign-in failed")
+                                }
                             }
                         }
+                    ) {
+                        Text("Sign in (CM)")
                     }
-                ) {
-                    Text("Sign in (CM)")
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val token = credentialManagerTokenProvider.getAccessToken()
+                                if (token != null) {
+                                    vm.setStatus("CM Token OK: ${token.take(12)}…")
+                                } else {
+                                    vm.setStatus("CM Token failed")
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Get Token (CM)")
+                    }
                 }
-                Button(
-                    onClick = {
-                        scope.launch {
-                            val token = credentialManagerTokenProvider.getAccessToken()
-                            if (token != null) {
-                                vm.setStatus("CM Token OK: ${token.take(12)}…")
-                            } else {
-                                vm.setStatus("CM Token failed")
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = {
+                            // AppAuth のブラウザフローを開始
+                            val intent = android.content.Intent(ctx, AppAuthSignInActivity::class.java)
+                            ctx.startActivity(intent)
+                        }
+                    ) {
+                        Text("Sign in (AppAuth)")
+                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val provider = AppAuthAuth.get(ctx)
+                                val token = provider.getAccessToken()
+                                if (token != null) {
+                                    vm.setStatus("AppAuth Token OK: ${token.take(12)}…")
+                                } else {
+                                    vm.setStatus("AppAuth Token failed")
+                                }
                             }
                         }
+                    ) {
+                        Text("Get Token (AppAuth)")
                     }
-                ) {
-                    Text("Get Token (CM)")
                 }
             }
 
@@ -158,17 +215,17 @@ fun DriveSettingsScreen(
 
             Text(text = status, style = MaterialTheme.typography.bodyMedium)
 
-            // --- バックアップ操作（前日以前のバックログ + 今日のプレビュー） ---
+            // バックアップ系操作（前日以前のバックログ + 今日のプレビュー）
             BackupSection(modifier = Modifier.fillMaxWidth())
         }
     }
 }
 
 /**
- * 「前日以前をBackup」「今日のPreview」を提供するセクション。
+ * 「前日以前を Backup」「今日の Preview」を提供するセクション。
  *
- * - 前日以前をBackup: MidnightExportWorker に任せる（前日より前を日付ごとにアップロード）
- * - 今日のPreview: 0:00〜現在のデータを ZIP 化し、アップロード有無を選択可能
+ * - 前日以前を Backup: MidnightExportWorker に任せる（前日より前を日付ごとにアップロード）
+ * - 今日の Preview: 0:00〜現在のデータを ZIP 化し、アップロード有無を選択可能
  */
 @Composable
 private fun BackupSection(modifier: Modifier = Modifier) {
@@ -182,10 +239,10 @@ private fun BackupSection(modifier: Modifier = Modifier) {
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Button(onClick = {
-                // 前日以前のバックログを即時実行（UniqueWork REPLACE）
+                // 前日以前のバックログを即時実行（uniqueWork REPLACE）
                 scope.launch(Dispatchers.Default) {
                     MidnightExportWorker.runNow(ctx)
-                    uiMsg = "前日以前のバックアップを開始しました。"
+                    uiMsg = "前日以前のバックアップを開始しました"
                 }
             }) {
                 Text("前日以前をBackup")
@@ -227,7 +284,7 @@ private fun BackupSection(modifier: Modifier = Modifier) {
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = {
+                Button(onClick = {
                     showPreviewChoice = false
                     // アップロードしない: IO スレッドで実行
                     scope.launch(Dispatchers.IO) {
@@ -243,7 +300,7 @@ private fun BackupSection(modifier: Modifier = Modifier) {
 }
 
 /**
- * 今日(0:00〜現在)のみを対象に Preview 実行する処理本体。
+ * 今日 (0:00〜現在) のみを対象に Preview 実行する処理本体。
  * UI から呼び出す想定。
  */
 private suspend fun runTodayPreviewIO(
@@ -255,7 +312,7 @@ private suspend fun runTodayPreviewIO(
     val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
     val todayEpochDay = today0.toLocalDate().toEpochDay()
 
-    // LocationSample エンティティを StorageService 経由で取得
+    // LocationSample エンティティ一覧を StorageService 経由で取得
     val all = StorageService.getAllLocations(ctx)
 
     // エンティティのタイムスタンプを安全に取得（フィールド名の違いに対応）
@@ -290,7 +347,7 @@ private suspend fun runTodayPreviewIO(
     }
 
     if (todays.isEmpty()) {
-        return@withContext "今日のデータはありません。"
+        return@withContext "今日のデータはありません"
     }
 
     val baseName = "glp-" + DateTimeFormatter.ofPattern("yyyyMMdd")
@@ -302,11 +359,11 @@ private suspend fun runTodayPreviewIO(
         records = todays,
         baseName = baseName,
         compressAsZip = true
-    ) ?: return@withContext "ZIP の作成に失敗しました。"
+    ) ?: return@withContext "ZIP の作成に失敗しました"
 
     if (!upload) {
         // 保存のみ: Room は削除しない
-        return@withContext "今日のデータを Downloads に保存しました（${baseName}.zip）。Room は削除していません。"
+        return@withContext "今日のデータを Downloads に保存しました（$baseName.zip）。Room は削除していません"
     }
 
     // ここから「アップロードする」経路
@@ -314,7 +371,7 @@ private suspend fun runTodayPreviewIO(
     val token = tokenProvider.getAccessToken()
     if (token == null) {
         runCatching { ctx.contentResolver.delete(outUri, null, null) }
-        return@withContext "Drive 認可が不足しています。設定画面から権限を付与してください。ZIP は削除しました。Room は削除していません。"
+        return@withContext "Drive 認可が不足しています。設定画面から権限を付与してください。ZIP は削除しましたが、Room は削除していません"
     }
 
     val snapshot = AppPrefs.snapshot(ctx)
@@ -328,7 +385,7 @@ private suspend fun runTodayPreviewIO(
     if (uploader == null || folderId.isNullOrBlank()) {
         // ZIP は削除、Room は残す
         runCatching { ctx.contentResolver.delete(outUri, null, null) }
-        return@withContext "アップロード設定が不足しています（engine / folderId）。ZIP は削除しました。Room は削除していません。"
+        return@withContext "アップロード設定が不足しています（Engine / folderId）。ZIP は削除しましたが、Room は削除していません"
     }
 
     var success = false
@@ -342,18 +399,19 @@ private suspend fun runTodayPreviewIO(
 
             is UploadResult.Failure -> {
                 if (attempt < 4) {
-                    delay(15_000L * (1 shl attempt)) // 15s,30s,60s,120s
+                    // 15s, 30s, 60s, 120s の指数バックオフ
+                    delay(15_000L * (1 shl attempt))
                 }
             }
         }
     }
 
-    // ZIP は成功/失敗に関わらず削除。Room は削除しない。
+    // ZIP は成功 / 失敗に関わらず削除。Room は削除しない
     runCatching { ctx.contentResolver.delete(outUri, null, null) }
 
     if (success) {
-        "今日のデータをアップロードしました（${baseName}.zip）。ローカル ZIP は削除し、Room は削除していません。"
+        "今日のデータをアップロードしました（$baseName.zip）。ローカル ZIP は削除し、Room は削除していません"
     } else {
-        "今日のアップロードに失敗しました（リトライ 5 回）。ZIP は削除し、Room は削除していません。"
+        "今日のアップロードに失敗しました（リトライ 5 回）。ZIP は削除し、Room は削除していません"
     }
 }

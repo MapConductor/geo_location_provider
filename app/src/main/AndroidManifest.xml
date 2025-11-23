@@ -36,6 +36,21 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".auth.AppAuthSignInActivity"
+            android:exported="true"
+            android:theme="@style/Theme.GeoLocationProvider">
+            <!-- AppAuth 用のリダイレクト URI を受け取るための Intent Filter -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.mapconductor.plugin.provider.geolocation"
+                    android:path="/oauth2redirect" />
+            </intent-filter>
+        </activity>
         <service
             android:name=".service.GeoLocationService"
             android:foregroundServiceType="location"

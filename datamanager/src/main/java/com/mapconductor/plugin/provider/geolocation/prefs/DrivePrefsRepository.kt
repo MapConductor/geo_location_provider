@@ -5,18 +5,21 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * UI/UseCase 側が使いやすいように null/blank の扱いを吸収するレイヤ。
- * DriveUploader や ViewModel は基本こちらを参照する。
+ * UI / UseCase 側が扱いやすい形に整えるための DrivePrefs ラッパ。
+ *
+ * - null / blank の扱いをある程度ここで吸収する
+ * - ViewModel / UseCase は原則このリポジトリ経由で Drive 設定を参照する
  */
 class DrivePrefsRepository(context: Context) {
 
     private val prefs = DrivePrefs(context)
 
     // ---- Read Flows ----
-    /** Drive フォルダID（未設定なら空文字） */
+
+    /** Drive フォルダ ID（未設定なら空文字） */
     val folderIdFlow: Flow<String> = prefs.folderId
 
-    /** フォルダの resourceKey（未設定/空文字なら null を返す） */
+    /** フォルダの resourceKey（未設定・空文字なら null） */
     val folderResourceKeyFlow: Flow<String?> =
         prefs.folderResourceKey.map { it?.takeIf { s -> s.isNotBlank() } }
 
@@ -26,14 +29,19 @@ class DrivePrefsRepository(context: Context) {
     /** アップロードエンジン名（未設定なら空文字） */
     val uploadEngineNameFlow: Flow<String> = prefs.uploadEngine
 
-    /** 最終トークン更新時刻（ミリ秒）。未保存なら 0L */
+    /** 認証方式（Credential Manager / AppAuth）。未設定なら空文字 */
+    val authMethodFlow: Flow<String> = prefs.authMethod
+
+    /** 最終トークン更新時刻（ミリ秒単位）。未保存なら 0L */
     val tokenUpdatedAtMillisFlow: Flow<Long> = prefs.tokenUpdatedAtMillis
 
     // --- 既存コード互換エイリアス ---
+
     /** 互換用: ViewModel 等が参照する想定の名前 */
     val tokenLastRefreshFlow: Flow<Long> = tokenUpdatedAtMillisFlow
 
     // ---- Write APIs ----
+
     suspend fun setFolderId(folderId: String) = prefs.setFolderId(folderId)
 
     suspend fun setFolderResourceKey(resourceKey: String?) = prefs.setFolderResourceKey(resourceKey)
@@ -42,12 +50,17 @@ class DrivePrefsRepository(context: Context) {
 
     suspend fun setUploadEngine(engineName: String) = prefs.setUploadEngine(engineName)
 
+    suspend fun setAuthMethod(methodName: String) = prefs.setAuthMethod(methodName)
+
     suspend fun setTokenUpdatedAt(millis: Long) = prefs.setTokenUpdatedAt(millis)
 
     // --- 既存コード互換エイリアス ---
+
     /** 互換用: nowMillis を保存する */
     suspend fun markTokenRefreshed(nowMillis: Long) = prefs.setTokenUpdatedAt(nowMillis)
 
     /** 互換用オーバーロード: 現在時刻で更新 */
-    suspend fun markTokenRefreshed() = prefs.setTokenUpdatedAt(System.currentTimeMillis())
+    suspend fun markTokenRefreshed() =
+        prefs.setTokenUpdatedAt(System.currentTimeMillis())
 }
+

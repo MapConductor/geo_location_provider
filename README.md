@@ -261,8 +261,8 @@ implementation(project(":auth-appauth"))
 2) Create OAuth 2.0 credentials in Google Cloud Console:
    - Create a project
    - Configure OAuth consent screen
-   - Create **Web application** credentials (not Android)
-   - Add authorized redirect URI: `com.yourapp:/oauth2redirect`
+   - Create an **Installed app** client (for example "Android" or "iOS"), **not** a Web application client
+   - Add an authorized redirect URI that uses a custom scheme, e.g. `com.yourapp:/oauth2redirect`
 
 3) Initialize the token provider:
 ```kotlin

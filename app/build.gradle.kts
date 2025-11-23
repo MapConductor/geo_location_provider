@@ -19,6 +19,7 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.mapconductor.plugin.provider.geolocation"
     }
 
     buildTypes {
@@ -82,6 +83,7 @@ dependencies {
     implementation(project(":deadreckoning"))
     implementation(project(":storageservice"))
     implementation(project(":auth-credentialmanager"))
+    implementation(project(":auth-appauth"))
 
     // Compose / AndroidX / Google Play Services
     implementation("com.google.android.material:material:1.12.0")

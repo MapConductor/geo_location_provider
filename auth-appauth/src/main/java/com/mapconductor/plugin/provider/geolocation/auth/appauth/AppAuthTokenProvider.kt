@@ -145,7 +145,10 @@ class AppAuthTokenProvider(
 
         if (tokenResponse != null) {
             val newAuthState = AuthState(serviceConfig)
-            newAuthState.update(response, tokenResponse, exception)
+            // First apply the authorization response
+            newAuthState.update(response, exception)
+            // Then apply the token response
+            newAuthState.update(tokenResponse, null)
             authState = newAuthState
             true
         } else {

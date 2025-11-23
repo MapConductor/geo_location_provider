@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,11 +33,26 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     val tokenLastRefresh: StateFlow<Long> =
         prefs.tokenLastRefreshFlow.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
 
+    val authMethod: StateFlow<DriveAuthMethod> =
+        prefs.authMethodFlow
+            .map { DriveAuthMethod.fromStorage(it) }
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                DriveAuthMethod.CREDENTIAL_MANAGER
+            )
+
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
     fun setStatus(message: String) {
         _status.value = message
+    }
+
+    fun setAuthMethod(method: DriveAuthMethod) {
+        viewModelScope.launch {
+            prefs.setAuthMethod(method.storageValue)
+        }
     }
 
     fun updateFolderId(idOrUrl: String) {
