@@ -6,7 +6,7 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
 @Dao
-interface ExportedDayDao {
+internal interface ExportedDayDao {
 
     /**
      * 指定された日付 [day.epochDay] の ExportedDay レコードを ensure する。

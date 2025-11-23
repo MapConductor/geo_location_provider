@@ -22,7 +22,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
     version = 7,
     exportSchema = true
 )
-abstract class AppDatabase : RoomDatabase() {
+internal abstract class AppDatabase : RoomDatabase() {
 
     abstract fun locationSampleDao(): LocationSampleDao
     abstract fun exportedDayDao(): ExportedDayDao

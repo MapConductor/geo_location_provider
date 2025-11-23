@@ -17,7 +17,7 @@ private val Context.driveDataStore by preferencesDataStore(DS_NAME)
  * DataStore の薄いラッパ（生値をそのまま扱うレイヤ）。
  * Repository で null/blank の吸収などを行う想定。
  */
-class DrivePrefs(private val appContext: Context) {
+internal class DrivePrefs(private val appContext: Context) {
 
     private object K {
         val FOLDER_ID        = stringPreferencesKey("folder_id")

@@ -8,7 +8,7 @@ import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface LocationSampleDao {
+internal interface LocationSampleDao {
 
     /**
      * 1 件の LocationSample を挿入する。
@@ -101,4 +101,3 @@ interface LocationSampleDao {
     @Delete
     suspend fun deleteAll(items: List<LocationSample>)
 }
-

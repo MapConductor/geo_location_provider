@@ -12,7 +12,7 @@ import kotlin.math.max
  * @param endInclusive 終了時刻（ミリ秒, inclusive）
  * @param intervalMs グリッド間隔（ミリ秒, 0 以下なら空）
  */
-fun buildTargetsInclusive(
+internal fun buildTargetsInclusive(
     startInclusive: Long,
     endInclusive: Long,
     intervalMs: Long
@@ -48,7 +48,7 @@ fun buildTargetsInclusive(
  * @param grid    グリッド時刻列（ミリ秒）
  * @param halfWindowMs 吸着窓の半幅（ミリ秒）
  */
-fun snapToGrid(
+internal fun snapToGrid(
     records: List<LocationSample>,
     grid: List<Long>,
     halfWindowMs: Long
@@ -98,7 +98,7 @@ fun snapToGrid(
  * - idealMs = sample.timeMillis
  * - deltaMs = 0
  */
-fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
+internal fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
     records.map { SelectedSlot(idealMs = it.timeMillis, sample = it, deltaMs = 0L) }
 
 /**
@@ -106,7 +106,7 @@ fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
  *
  * @return 1 以上ならその値、それ以外（null / 0 以下）の場合は null（= 無制限）
  */
-fun effectiveLimit(maxCount: Int?): Int? =
+internal fun effectiveLimit(maxCount: Int?): Int? =
     maxCount?.takeIf { it > 0 }
 
 /**
@@ -114,9 +114,8 @@ fun effectiveLimit(maxCount: Int?): Int? =
  * - limit が指定されている場合は、その約 5 倍をベースとしつつ [1,000, 200,000] にクランプ
  * - limit が null の場合は、デフォルト 100 件相当をベースにする
  */
-fun softLimitForGrid(limit: Int?): Int {
+internal fun softLimitForGrid(limit: Int?): Int {
     val baseLimit = effectiveLimit(limit) ?: 100
     val base = (baseLimit * 5).coerceAtLeast(1_000)
     return base.coerceAtMost(200_000)
 }
-
