@@ -1,11 +1,12 @@
-package com.mapconductor.plugin.provider.geolocation.deadreckoning.impl
+package com.mapconductor.plugin.provider.deadreckoning.impl
 
 import android.content.Context
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoning
+import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningConfig
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.GpsFix
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedPoint
-import com.mapconductor.plugin.provider.geolocation.deadreckoning.engine.DeadReckoningEngine
-import com.mapconductor.plugin.provider.geolocation.deadreckoning.engine.SensorAdapter
+import com.mapconductor.plugin.provider.deadreckoning.engine.DeadReckoningEngine
+import com.mapconductor.plugin.provider.deadreckoning.engine.SensorAdapter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -14,11 +15,12 @@ import kotlinx.coroutines.launch
 import kotlin.math.max
 
 class DeadReckoningImpl(
-    private val appContext: Context
+    private val appContext: Context,
+    private val config: DeadReckoningConfig
 ) : DeadReckoning {
 
     private val scope = CoroutineScope(Dispatchers.Default + Job())
-    private val engine = DeadReckoningEngine()
+    private val engine = DeadReckoningEngine(config)
     private val sensor = SensorAdapter(appContext, scope)
 
     private var collectingJob: Job? = null

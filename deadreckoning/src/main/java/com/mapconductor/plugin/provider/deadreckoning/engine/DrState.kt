@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation.deadreckoning.engine
+package com.mapconductor.plugin.provider.deadreckoning.engine
 
 internal data class DrState(
     var lat: Double = 0.0,

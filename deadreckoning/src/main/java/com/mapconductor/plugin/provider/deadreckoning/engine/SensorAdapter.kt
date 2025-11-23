@@ -1,4 +1,4 @@
-package com.mapconductor.plugin.provider.geolocation.deadreckoning.engine
+package com.mapconductor.plugin.provider.deadreckoning.engine
 
 import android.content.Context
 import android.hardware.Sensor

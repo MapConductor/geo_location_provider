@@ -18,9 +18,9 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoning
+import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningFactory
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.GpsFix
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedPoint
-import com.mapconductor.plugin.provider.geolocation.deadreckoning.impl.DeadReckoningImpl
 import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
@@ -102,7 +102,7 @@ class GeoLocationService : Service() {
         fusedClient = LocationServices.getFusedLocationProviderClient(this)
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
         gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
-        dr = DeadReckoningImpl(applicationContext).also { it.start() }
+        dr = DeadReckoningFactory.create(applicationContext).also { it.start() }
         ensureChannel()
         // サンプリング間隔（GPS）は SettingsRepository の Flow から常に同期する
         serviceScope.launch {
