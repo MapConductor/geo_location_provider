@@ -1,7 +1,8 @@
 package com.mapconductor.plugin.provider.geolocation.repository
 
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
-import com.mapconductor.plugin.provider.geolocation.algorithm.buildTargetsInclusive
+import com.mapconductor.plugin.provider.geolocation.algorithm.buildTargetsFromEnd
+import com.mapconductor.plugin.provider.geolocation.algorithm.buildTargetsFromStart
 import com.mapconductor.plugin.provider.geolocation.algorithm.directToSlots
 import com.mapconductor.plugin.provider.geolocation.algorithm.effectiveLimit
 import com.mapconductor.plugin.provider.geolocation.algorithm.snapToGrid
@@ -10,10 +11,10 @@ import com.mapconductor.plugin.provider.geolocation.condition.SelectorCondition
 import com.mapconductor.plugin.provider.geolocation.condition.SortOrder
 
 /**
- * LocationSampleSource を用いた抽出/補完の実装。
- * - from > to は正規化（SelectorCondition.normalized() 側で実施）
- * - intervalSec が null → ダイレクト抽出（グリッド無し）
- * - intervalSec が指定 → グリッド吸着（±T/2、欠測は sample=null）
+ * LocationSampleSource を用いた抽出/補完の実装クラス。
+ * - from > to は正規化（SelectorCondition.normalized() 側で実施）。
+ * - intervalSec == null の場合はダイレクト抽出（グリッド無し）。
+ * - intervalSec が指定されている場合はグリッド吸着（±T/2、欠測は sample=null）。
  */
 class SelectorRepository(
     private val source: LocationSampleSource
@@ -26,17 +27,17 @@ class SelectorRepository(
 
         // ダイレクト抽出（グリッド無し）
         if (cond.intervalSec == null) {
-            val asc = fetchAsc(from, to)       // 取得元は昇順返却
+            val asc = fetchAsc(from, to)       // 取得自体は昇順
             val filtered = filterByAccuracy(asc, cond.minAccuracy)
             val limited = limitAndOrderForDirect(filtered, cond)
             return directToSlots(limited)
         }
 
-        // グリッド吸着（from/to/T が揃っていることを前提）
+        // グリッド吸着用。from/to/T が揃っていることを前提。
         val T = cond.intervalSec.coerceAtLeast(1L) * 1000L
         val W = T / 2L
 
-        // from/to のどちらかが null の場合、グリッドを安全に組めない → ダイレクトへフォールバック
+        // from/to のどちらかが null の場合、グリッドを安全に組めないのでダイレクトにフォールバック
         if (from == null || to == null) {
             val asc = fetchAsc(from, to)
             val filtered = filterByAccuracy(asc, cond.minAccuracy)
@@ -44,37 +45,41 @@ class SelectorRepository(
             return directToSlots(limited)
         }
 
-        // ★ グリッドは Oldest/Newest を問わず同じ列を使う
-        //    → 最後のソートだけで方向を変える
-        val targets = buildTargetsInclusive(from, to, T)
+        // グリッドは SortOrder に応じて基準を変える。
+        // - NewestFirst : To 基準 (endInclusive からさかのぼる)
+        // - OldestFirst : From 基準 (startInclusive から積み上げる)
+        val targets = when (cond.order) {
+            SortOrder.NewestFirst -> buildTargetsFromEnd(from, to, T)
+            SortOrder.OldestFirst -> buildTargetsFromStart(from, to, T)
+        }
 
-        // 候補の一括取得： [from-W, to+W)  ※ 取得元は半開区間 toExcl のため +1ms で inclusive
+        // 候補を一括取得。[from-W, to+W)  ※ 取得側は半開区間 toExcl のため +1ms で inclusive
         val fromQ = from - W
         val toQExcl = (to + W) + 1L
         val ascAll = source.findBetween(fromQ, toQExcl)
 
         val cand = filterByAccuracy(ascAll, cond.minAccuracy)
 
-        // 吸着（昇順 grid を前提）
+        // 吸着用。grid は昇順を前提。
         var slots = snapToGrid(cand, targets, W)
 
-        // 最終順序
+        // 最終並び順。
         when (cond.order) {
             SortOrder.OldestFirst -> {
-                // そのまま（targets が from→to 昇順）
+                // targets は from→to の昇順なので、そのまま。
             }
             SortOrder.NewestFirst -> {
                 slots = slots.asReversed()
             }
         }
 
-        // 最終件数制御（欠測行も件数にカウント）
+        // 最終件数制御。
         val maxCount = effectiveLimit(cond.limit)
         return if (maxCount != null) slots.take(maxCount) else slots
     }
 
     // ----------------------
-    // 内部ヘルパ
+    // 内部ヘルパー
     // ----------------------
     private suspend fun fetchAsc(from: Long?, to: Long?): List<LocationSample> {
         val f = from ?: Long.MIN_VALUE
@@ -91,9 +96,9 @@ class SelectorRepository(
     }
 
     /**
-     * ダイレクト抽出の最終順序・件数制御。
-     * - 昇順返却（OldestFirst）。NewestFirst の場合は末尾から取る。
-     * - limit は最終出力件数（null/<=0 なら無制限）
+     * ダイレクト抽出の最終並び・件数制御。
+     * - OldestFirst  : そのまま頭から limit 件。
+     * - NewestFirst  : 末尾側から limit 件を取り、順序は新しい→古いに並べ替える。
      */
     private fun limitAndOrderForDirect(
         asc: List<LocationSample>,
@@ -113,3 +118,4 @@ class SelectorRepository(
         }
     }
 }
+

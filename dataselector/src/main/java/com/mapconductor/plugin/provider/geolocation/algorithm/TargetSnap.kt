@@ -6,13 +6,16 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * start 〜 end を含むグリッド時刻列を生成する。
+ * グリッドのターゲット時刻列を生成するユーティリティ。
  *
  * @param startInclusive 開始時刻（ミリ秒, inclusive）
- * @param endInclusive 終了時刻（ミリ秒, inclusive）
- * @param intervalMs グリッド間隔（ミリ秒, 0 以下なら空）
+ * @param endInclusive   終了時刻（ミリ秒, inclusive）
+ * @param intervalMs     グリッド間隔（ミリ秒, 0 以下なら空）
+ *
+ * - NewestFirst では To(=endInclusive) を基準に生成したいので [buildTargetsFromEnd] を使用。
+ * - OldestFirst では From(=startInclusive) を基準に生成したいので [buildTargetsFromStart] を使用。
  */
-internal fun buildTargetsInclusive(
+internal fun buildTargetsFromEnd(
     startInclusive: Long,
     endInclusive: Long,
     intervalMs: Long
@@ -20,20 +23,31 @@ internal fun buildTargetsInclusive(
     if (intervalMs <= 0L) return emptyList()
     if (endInclusive < startInclusive) return emptyList()
 
-    val first = (startInclusive / intervalMs) * intervalMs
-    val result = ArrayList<Long>(
-        ((max(0L, endInclusive - startInclusive) / intervalMs) + 2).toInt()
-    )
-    var g = first
-    // g が start 未満の場合は繰り上げ
-    while (g < startInclusive) g += intervalMs
-    while (g <= endInclusive) {
+    val result = ArrayList<Long>()
+    var g = endInclusive
+    while (g >= startInclusive) {
+        result.add(g)
+        g -= intervalMs
+    }
+    // 降順で溜めているので昇順に並べ替える。
+    result.reverse()
+    return result
+}
+
+internal fun buildTargetsFromStart(
+    startInclusive: Long,
+    endInclusive: Long,
+    intervalMs: Long
+): List<Long> {
+    if (intervalMs <= 0L) return emptyList()
+    if (endInclusive < startInclusive) return emptyList()
+
+    val result = ArrayList<Long>()
+    var g = startInclusive
+    val end = endInclusive
+    while (g <= end) {
         result.add(g)
         g += intervalMs
-    }
-    // 端が合っていなければ endInclusive を追加
-    if (result.isEmpty() || result.last() != endInclusive) {
-        result.add(endInclusive)
     }
     return result
 }
@@ -41,11 +55,11 @@ internal fun buildTargetsInclusive(
 /**
  * グリッド吸着ロジック。
  *
- * 各グリッド時刻 g について [g - halfWindowMs, g + halfWindowMs] に入る sample を探索し、
+ * 各グリッド時刻 g について [g - halfWindowMs, g + halfWindowMs] 内に入る sample を探索し、
  * |Δt| が最小のものを 1 件だけ採用する。同差の場合は「より過去側」が優先される。
  *
  * @param records timeMillis 昇順の LocationSample 一覧
- * @param grid    グリッド時刻列（ミリ秒）
+ * @param grid    グリッド時刻列（ミリ秒, 昇順）
  * @param halfWindowMs 吸着窓の半幅（ミリ秒）
  */
 internal fun snapToGrid(
@@ -73,7 +87,7 @@ internal fun snapToGrid(
                 bestAbs = ad
                 bestIdx = q
             }
-            // 同差は先勝ち（= より過去側を優先）
+            // 同差は先勝ち -> より過去側を優先
             q++
         }
 
@@ -111,11 +125,12 @@ internal fun effectiveLimit(maxCount: Int?): Int? =
 
 /**
  * グリッド取得時の「候補読み込み件数」のソフト上限を計算する。
- * - limit が指定されている場合は、その約 5 倍をベースとしつつ [1,000, 200,000] にクランプ
- * - limit が null の場合は、デフォルト 100 件相当をベースにする
+ * - limit が指定されている場合は、その値の 5 倍をベースとしつつ [1,000, 200,000] にクランプ。
+ * - limit が null の場合は、デフォルト 100 件相当をベースにする。
  */
 internal fun softLimitForGrid(limit: Int?): Int {
     val baseLimit = effectiveLimit(limit) ?: 100
     val base = (baseLimit * 5).coerceAtLeast(1_000)
     return base.coerceAtMost(200_000)
 }
+
