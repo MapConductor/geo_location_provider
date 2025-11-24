@@ -25,22 +25,26 @@ También ofrece la posibilidad de **subir los datos exportados a Google Drive**.
 > Puedes utilizar la aplicación de ejemplo tal cual o integrar únicamente los módulos que necesites en tu proyecto.
 
 - **:core**  
-  Proporciona la adquisición de localizaciones, entidades/DAOs/bd de Room y utilidades relacionadas.
+  Proporciona el servicio de localización (`GeoLocationService`), la lógica relacionada con sensores y la aplicación de ajustes como el intervalo de muestreo.  
+  La persistencia se delega a `:storageservice`, y el Dead Reckoning se implementa en `:deadreckoning`.
 
 - **:storageservice**  
-  Contiene `AppDatabase`, los DAOs y la fachada `StorageService`, que es la única puerta de acceso a Room. Gestiona las muestras de localización (`LocationSample`) y el estado de exportación (`ExportedDay`).
+  Contiene `AppDatabase`, los DAOs y la fachada `StorageService`, que es la única puerta de acceso a Room.  
+  Gestiona las muestras de localización (`LocationSample`) y el estado de exportación diaria (`ExportedDay`).
 
 - **:dataselector**  
-  Implementa la lógica de filtrado y selección (Pickup) en función de condiciones (`SelectorCondition`, `SelectedSlot`, `SelectorRepository`).
+  Implementa la lógica de filtrado y selección (Pickup) en función de condiciones como período, intervalo y límite.  
+  Expone `SelectorCondition`, `SelectedSlot`, `SelectorRepository`, `BuildSelectedSlots`, etc.
 
 - **:datamanager**  
-  Se encarga de la exportación a GeoJSON, compresión ZIP, `MidnightExportWorker` y la integración con Google Drive (p. ej. `GoogleDriveTokenProvider`, `Uploader`).
+  Se encarga de la exportación a GeoJSON, compresión ZIP, `MidnightExportWorker` / `MidnightExportScheduler`  
+  e integración con Google Drive (`GoogleDriveTokenProvider`, `Uploader`, `DriveTokenProviderRegistry`, etc.).
 
 - **:deadreckoning**  
   Proporciona el motor y API de Dead Reckoning (`DeadReckoning`, `GpsFix`, `PredictedPoint`), usados desde `GeoLocationService`.
 
 - **:auth-appauth / :auth-credentialmanager**  
-  Módulos de implementación de referencia de `GoogleDriveTokenProvider` basados en AppAuth o Android Credential Manager.
+  Módulos de implementación de referencia de `GoogleDriveTokenProvider` basados en AppAuth y Android Credential Manager + Identity.
 
 - **:app**  
   Aplicación de ejemplo basada en Jetpack Compose (lista de historial, pantalla de Pickup, pantalla de ajustes de Drive, etc.).
@@ -60,11 +64,14 @@ También ofrece la posibilidad de **subir los datos exportados a Google Drive**.
   Filtran y agrupan las muestras por rejilla temporal y representan las ausencias como `SelectedSlot(sample = null)`.
 
 - **MidnightExportWorker & MidnightExportScheduler**  
-  Tareas en segundo plano basadas en WorkManager. Cada día a medianoche exportan el día anterior a GeoJSON + ZIP, suben el archivo a Google Drive y actualizan el estado correspondiente en `ExportedDay`.
+  Tareas en segundo plano basadas en WorkManager. Cada día a medianoche exportan el día anterior a GeoJSON + ZIP,  
+  suben el archivo a Google Drive y actualizan el estado correspondiente en `ExportedDay`.
 
 - **GoogleDriveTokenProvider / Uploader / DriveApiClient**  
   Componentes centrales para la integración con Google Drive.  
-  `GoogleDriveTokenProvider` abstrae la obtención de tokens de acceso, `Uploader` / `UploaderFactory` se encargan de la subida de archivos y `DriveApiClient` implementa llamadas REST como `/files` o `/about`.
+  `GoogleDriveTokenProvider` abstrae la obtención de tokens de acceso, `Uploader` / `UploaderFactory` se encargan de la subida de archivos  
+  y `DriveApiClient` implementa llamadas REST como `/files` o `/about`.  
+  La implementación heredada `GoogleAuthRepository` (basada en GoogleAuthUtil) se mantiene solo por compatibilidad y no debe usarse en código nuevo.
 
 ---
 
@@ -76,41 +83,44 @@ Al integrarlo en tu aplicación normalmente utilizarás los siguientes módulos 
 ### Módulos y puntos de entrada principales
 
 - **`:core`**
-  - `GeoLocationService` – Servicio en primer plano que registra `LocationSample` en la base de datos.
-  - `UploadEngine` – Enum para configurar el tipo de exportación/subida.
+  - `GeoLocationService`  EServicio en primer plano que registra `LocationSample` en la base de datos.
+  - `UploadEngine`  EEnum para configurar el tipo de exportación/subida.
 
 - **`:storageservice`**
-  - `StorageService` – Fachada única hacia Room (`LocationSample`, `ExportedDay`).
-  - `LocationSample`, `ExportedDay` – Entidades principales para los registros de localización y el estado de exportación.
-  - `SettingsRepository` – Gestiona los intervalos de muestreo y de Dead Reckoning.
+  - `StorageService`  EFachada única hacia Room (`LocationSample`, `ExportedDay`).
+  - `LocationSample`, `ExportedDay`  EEntidades principales para los registros de localización y el estado de exportación.
+  - `SettingsRepository`  EGestiona los intervalos de muestreo y de Dead Reckoning.
 
 - **`:dataselector`**
-  - `SelectorCondition`, `SelectedSlot`, `SortOrder` – Modelo de dominio de las consultas Pickup.
-  - `LocationSampleSource` – Abstracción sobre el origen de `LocationSample`.
-  - `SelectorRepository`, `BuildSelectedSlots` – Lógica de selección y caso de uso para UI.
-  - `SelectorPrefs` – Fachada DataStore para persistir las condiciones de selección.
+  - `SelectorCondition`, `SelectedSlot`, `SortOrder`  EModelo de dominio de las consultas Pickup.
+  - `LocationSampleSource`  EAbstracción sobre el origen de `LocationSample`.
+  - `SelectorRepository`, `BuildSelectedSlots`  ELógica de selección y caso de uso para UI.
+  - `SelectorPrefs`  EFachada DataStore para persistir las condiciones de selección.
 
 - **`:datamanager`**
-  - `GeoJsonExporter` – Exporta `LocationSample` a GeoJSON + ZIP.
-  - `GoogleDriveTokenProvider` – Abstracción para obtener tokens de acceso a Drive.
-  - `DriveTokenProviderRegistry` – Registro del proveedor de tokens para tareas en segundo plano.
-  - `Uploader`, `UploaderFactory` – Puntos de entrada de alto nivel para la subida a Drive.
-  - `DriveApiClient`, `DriveFolderId`, `UploadResult` – Ayudas para llamadas REST y modelos de resultado.
-  - `MidnightExportWorker`, `MidnightExportScheduler` – Pipeline de exportación diaria.
+  - `GeoJsonExporter`  EExporta `LocationSample` a GeoJSON + ZIP.
+  - `GoogleDriveTokenProvider`  EAbstracción para obtener tokens de acceso a Drive.
+  - `DriveTokenProviderRegistry`  ERegistro del proveedor de tokens para tareas en segundo plano.
+  - `Uploader`, `UploaderFactory`  EPuntos de entrada de alto nivel para la subida a Drive.
+  - `DriveApiClient`, `DriveFolderId`, `UploadResult`  EAyudas para llamadas REST y modelos de resultado.
+  - `MidnightExportWorker`, `MidnightExportScheduler`  EPipeline de exportación diaria.
 
 - **`:deadreckoning`**
-  - `DeadReckoning`, `GpsFix`, `PredictedPoint` – API del motor de Dead Reckoning, utilizada desde `GeoLocationService`.
+  - `DeadReckoning`, `GpsFix`, `PredictedPoint`  EAPI del motor de Dead Reckoning, utilizada desde `GeoLocationService`.
 
 - **`:auth-credentialmanager` / `:auth-appauth` (opcional)**
-  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider` – Implementaciones de referencia de `GoogleDriveTokenProvider`.
+  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider`  EImplementaciones de referencia de `GoogleDriveTokenProvider`.
 
-Todos los demás tipos (DAOs, `AppDatabase`, implementaciones concretas de repositorios, helpers HTTP de bajo nivel, etc.) deben considerarse detalles internos y pueden cambiar sin previo aviso.
+Todos los demás tipos (DAOs, `AppDatabase`, implementaciones concretas de repositorios, helpers HTTP de bajo nivel, etc.)  
+deben considerarse detalles internos y pueden cambiar sin previo aviso.
 
-### Ejemplo mínimo de integración
+---
 
-Los siguientes fragmentos muestran una integración básica de extremo a extremo.
+## Ejemplo mínimo de integración
 
-#### 1. Iniciar el servicio de localización y observar el historial
+Los siguientes fragmentos muestran una integración básica de extremo a extremo en una app host.
+
+### 1. Iniciar el servicio de localización y observar el historial
 
 ```kotlin
 // En tu Activity
@@ -136,7 +146,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 }
 ```
 
-#### 2. Ejecutar Pickup sobre los datos almacenados
+### 2. Ejecutar Pickup sobre los datos almacenados
 
 ```kotlin
 // Implementación de LocationSampleSource respaldada por StorageService
@@ -164,7 +174,7 @@ suspend fun runPickup(context: Context): List<SelectedSlot> {
 }
 ```
 
-#### 3. Configurar subida a Drive y exportación diaria
+### 3. Configurar subida a Drive y exportación diaria
 
 ```kotlin
 // En tu clase Application
@@ -205,62 +215,66 @@ suspend fun uploadFileNow(
 }
 ```
 
+Para más detalles y ejemplos completos, consulta también la versión en inglés `README.md`.
+
 ---
 
 ## Quick Start
 
-> Los archivos bajo `app`, `core`, `dataselector`, `datamanager` y `storageservice` ya están incluidos en el repositorio y no requieren configuración adicional.  
-> A continuación solo se describe la preparación de archivos locales y la configuración previa de Google Drive.
+> El código fuente bajo `app`, `core`, `dataselector`, `datamanager`, `storageservice`, `deadreckoning` y `auth-*` ya está incluido y conectado en este repositorio como app de ejemplo.  
+> Solo necesitas preparar algunos archivos de configuración locales y (opcionalmente) las credenciales de Google Drive para compilar y ejecutar la app.
 
-### 1. Preparar `local.default.properties` / `local.properties`
+### 0. Requisitos
 
-`local.properties` almacena ajustes **específicos de la máquina del desarrollador** (normalmente fuera de control de versiones).  
-Este proyecto asume que `local.default.properties` se usa como plantilla de valores por defecto.
+- Android Studio compatible con AGP 8.11+ (o el `./gradlew` incluido)
+- JDK 17 (Gradle y Kotlin usan objetivo JVM 17)
+- SDK de Android con al menos API 26 instalada (el proyecto usa `compileSdk = 36`)
 
-**Ejemplo: local.default.properties (plantilla, se puede commitear)**
+### 1. Preparar `local.properties`
 
-```properties
-# Ruta al Android SDK. Puede estar vacía o contener un valor ficticio.
-sdk.dir=/path/to/Android/sdk
+`local.properties` almacena ajustes **específicos de la máquina del desarrollador** (principalmente la ruta al SDK de Android).  
+Normalmente Android Studio lo genera automáticamente; si no existe, créalo en la raíz del proyecto.
 
-# Opcional: parámetros JVM de Gradle
-org.gradle.jvmargs=-Xmx4g -XX:+UseParallelGC
-```
-
-**Ejemplo: local.properties (entorno local, NO commitear)**
+**Ejemplo: `local.properties` (entorno local, NO commitear)**
 
 ```properties
-sdk.dir=C:\Android\Sdk          # Ejemplo en Windows
+sdk.dir=C:\\Android\\Sdk          # Ejemplo en Windows
 # sdk.dir=/Users/you/Library/Android/sdk   # Ejemplo en macOS
 org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
 ```
 
-Android Studio puede generar `local.properties` automáticamente; en ese caso basta con editarlo.
-
 ### 2. Preparar `secrets.properties`
 
-`secrets.properties` almacena **valores por defecto sensibles y relacionados con autenticación** (fuera de Git).  
-Algunas opciones se pueden configurar desde la UI, pero este archivo resulta útil para CI o para fijar valores por defecto.
+`secrets.properties` almacena **valores sensibles relacionados con autenticación y APIs**, que se inyectan en BuildConfig mediante `secrets-gradle-plugin` (fuera de control de versiones).  
+El repositorio incluye `local.default.properties` como plantilla; la idea es copiarlo y editarlo:
 
-**Ejemplo: secrets.properties (NO commitear)**
-
-```properties
-# Opcional: carpeta por defecto para subir archivos (se puede sobrescribir desde la UI)
-DRIVE_DEFAULT_FOLDER_ID=
-
-# Opcional: motor de subida por defecto
-UPLOAD_ENGINE=kotlin
-
-# Opcional: habilitar futuro soporte de full-scope (actualmente sin uso)
-DRIVE_FULL_SCOPE=false
-
-# Necesario si se usa el ejemplo con Credential Manager.
-# Expuesto como BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
-# mediante secrets-gradle-plugin.
-CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
+```bash
+cp local.default.properties secrets.properties   # En Windows, puedes copiarlo con el Explorador
 ```
 
-Estos valores no son obligatorios para el núcleo de la biblioteca; solo son necesarios si se quiere usar la pantalla de ejemplo basada en Credential Manager.
+**Ejemplo: `local.default.properties` (plantilla, se puede commitear)**
+
+```properties
+# Credential Manager (server) client ID for Google Sign-In / Identity.
+CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
+
+# AppAuth (installed app) client ID for OAuth2 with custom scheme redirect.
+# Use an "installed app" client, not the server client ID above.
+APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
+```
+
+**Ejemplo: `secrets.properties` (entorno local, NO commitear)**
+
+```properties
+CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
+APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
+
+# Clave de Google Maps usada en el Manifest de la app de ejemplo (opcional)
+GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
+```
+
+> Para compilar localmente basta con usar valores ficticios.  
+> Si quieres iniciar sesión realmente en Drive o usar los mapas, deberás configurar IDs de cliente / claves reales obtenidas en Cloud Console.
 
 ### 3. Preparar la integración con Google Drive
 
@@ -290,7 +304,7 @@ Estos valores no son obligatorios para el núcleo de la biblioteca; solo son nec
 ### 5. Build
 
 ```bash
-./gradlew assembleDebug
+./gradlew :app:assembleDebug
 ```
 
 ---
@@ -307,14 +321,14 @@ Estos valores no son obligatorios para el núcleo de la biblioteca; solo son nec
 
 ## Estado de implementación de funcionalidades
 
-| Funcionalidad                  | Estado         | Notas                                               |
-|--------------------------------|----------------|-----------------------------------------------------|
-| Registro de localización (Room)| [v] Implementado | Guardado en DB Room                              |
-| Exportación diaria (GeoJSON+ZIP)| [v] Implementado | Ejecutado a medianoche por MidnightExportWorker |
-| Subida a Google Drive          | [v] Implementado | Usa el cargador Kotlin                            |
-| Pickup (intervalo / número)    | [v] Implementado | Integrado con ViewModel + UseCase y la UI        |
-| Autenticación Drive full-scope | [-] En progreso  | Actualización de archivos existentes aún no soportada |
-| UI: DriveSettingsScreen        | [v] Implementado | Ajustes de autenticación, carpeta y pruebas      |
-| UI: PickupScreen               | [v] Implementado | Entrada de condiciones y lista de resultados     |
-| UI: lista de historial         | [v] Implementado | Visualización cronológica de muestras guardadas  |
+| Funcionalidad                   | Estado           | Notas                                                 |
+|---------------------------------|------------------|-------------------------------------------------------|
+| Registro de localización (Room) | [v] Implementado | Guardado en DB Room                                   |
+| Exportación diaria (GeoJSON+ZIP)| [v] Implementado | Ejecutado a medianoche por MidnightExportWorker       |
+| Subida a Google Drive           | [v] Implementado | Usa el cargador Kotlin                                |
+| Pickup (intervalo / número)     | [v] Implementado | Integrado con ViewModel + UseCase y la UI             |
+| Autenticación Drive full-scope  | [-] En progreso  | Actualización de archivos existentes aún no soportada |
+| UI: DriveSettingsScreen         | [v] Implementado | Ajustes de autenticación, carpeta y pruebas           |
+| UI: PickupScreen                | [v] Implementado | Entrada de condiciones y lista de resultados          |
+| UI: lista de historial          | [v] Implementado | Visualización cronológica de muestras guardadas       |
 
