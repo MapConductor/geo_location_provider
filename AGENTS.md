@@ -26,9 +26,10 @@ Please read it once before changing code and implement in line with these guidel
 - Production code lives in each module’s `src/main/java`, `src/main/kotlin`, and `src/main/res`.  
   Build outputs are generated under each module’s `build/` directory.
 
-- Local, machine-specific settings are stored in the root `local.properties`.  
-  Its template is `local.default.properties`.  
-  Default values for secrets and auth-related configuration are in `secrets.properties` (be mindful of which files are committed to Git and which are not).
+- Local, machine-specific settings (such as the Android SDK path) are stored in the root `local.properties`.  
+  Android Studio usually generates this file automatically; if not, create it manually.
+- Secrets and auth-related configuration are stored in `secrets.properties`, which must **not** be committed.  
+  The template for this file is `local.default.properties`: copy it to `secrets.properties` and replace the values with real credentials.
 
 ---
 

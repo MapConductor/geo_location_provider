@@ -26,9 +26,10 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 - El código de producción se encuentra en `src/main/java`, `src/main/kotlin` y `src/main/res` de cada módulo.  
   Los artefactos de build se generan en `build/` dentro de cada módulo.
 
-- La configuración específica de cada máquina se define en `local.properties` en el directorio raíz.  
-  Su plantilla es `local.default.properties`.  
-  Los valores por defecto relacionados con secretos y autenticación viven en `secrets.properties` (presta atención a qué archivos se versionan en Git).
+- La configuración específica de cada máquina (por ejemplo, la ruta al SDK de Android) se define en `local.properties` en el directorio raíz.  
+  Android Studio suele generar este archivo automáticamente; si no existe, créalo manualmente.
+- Los ajustes de secretos y autenticación viven en `secrets.properties`, que **no debe versionarse**.  
+  La plantilla para este archivo es `local.default.properties`: cópiala a `secrets.properties` y reemplaza los valores con credenciales reales.
 
 ---
 
@@ -144,7 +145,7 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 ### Gestión de ajustes (SettingsRepository)
 
 - Los intervalos de muestreo y de DR se gestionan en `storageservice.prefs.SettingsRepository`.
-  - `intervalSecFlow(context)` / `drIntervalSecFlow(context)` devuelven Flows en segundos, gestionando valores por defecto y mínimos.
+  - `intervalSecFlow(context)` / `drIntervalSecFlow(context)` devuelven Flows en **segundos**, gestionando valores por defecto y mínimos.
   - `currentIntervalMs(context)` / `currentDrIntervalSec(context)` existen por compatibilidad con código antiguo,  
     pero el código nuevo debe preferir las APIs basadas en Flow.
 

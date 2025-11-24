@@ -25,7 +25,9 @@ GeoLocationProvider リポジトリで作業する際の共通方針・コーデ
 
 - 本番コードは各モジュールの `src/main/java`・`src/main/kotlin`・`src/main/res` に配置し、ビルド成果物は各モジュールの `build/` 以下に生成されます。
 
-- ローカル固有設定はルートの `local.properties`、そのテンプレートは `local.default.properties`、機密情報や認証まわりの既定値は `secrets.properties` に記述します（Git 管理対象かどうかに注意してください）。
+- ローカル固有設定（主に Android SDK パスなど）はルートの `local.properties` に記述します。通常は Android Studio が自動生成しますが、存在しない場合は手動で作成してください。
+- 機密情報や認証まわりの設定は `secrets.properties` に記述し、このファイルは **Git 管理対象にしない** でください。
+  そのテンプレートとして `local.default.properties` を用意しているので、これを `secrets.properties` にコピーして値を書き換える運用を想定しています。
 
 ---
 
