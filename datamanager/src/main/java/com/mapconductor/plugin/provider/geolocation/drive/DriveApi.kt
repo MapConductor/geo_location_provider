@@ -155,6 +155,18 @@ class DriveApiClient(
     }
 
     /**
+     * Public wrapper: Drive の About API からメールアドレスだけを取得する。
+     *
+     * - 正常系: emailAddress があればそれを返す（なければ null）
+     * - 異常系: ネットワークエラー / HTTP エラーなどはすべて null 扱い
+     */
+    suspend fun getAccountEmail(token: String): String? = when (val res = aboutGet(token)) {
+        is ApiResult.Success -> res.data.user?.emailAddress
+        is ApiResult.HttpError,
+        is ApiResult.NetworkError -> null
+    }
+
+    /**
      * GET /files/{id}?fields=id,name,mimeType,capabilities/canAddChildren,shortcutDetails/targetId
      * でフォルダかどうか・書き込み可能かなどを検証する。
      */
@@ -244,6 +256,22 @@ class DriveApiClient(
             is ApiResult.HttpError -> return r
             is ApiResult.NetworkError -> return r
         }
+    }
+
+    /**
+     * Public wrapper: URL/ID + resourceKey から「アップロード可能なフォルダ ID」を取得する。
+     *
+     * - 正常系: フォルダかつ書き込み可能な場合に、その ID を返す
+     * - 異常系: それ以外（ショートカット先を含めて検証 NG / ネットワークエラー）は null 扱い
+     */
+    suspend fun resolveFolderIdForUploadOrNull(
+        token: String,
+        idOrUrl: String,
+        resourceKey: String?
+    ): String? = when (val r = resolveFolderIdForUpload(token, idOrUrl, resourceKey)) {
+        is ApiResult.Success      -> r.data
+        is ApiResult.HttpError,
+        is ApiResult.NetworkError -> null
     }
 
     /**
