@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.mapconductor.plugin.provider.geolocation.drive.auth
 
 import android.accounts.Account

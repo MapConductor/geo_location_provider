@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package com.mapconductor.plugin.provider.geolocation.drive.upload
 
 import android.content.Context

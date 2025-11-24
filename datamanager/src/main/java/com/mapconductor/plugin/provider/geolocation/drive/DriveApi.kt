@@ -143,8 +143,8 @@ class DriveApiClient(
                 val u = obj.optJSONObject("user")
                 val user = if (u != null) {
                     AboutResponse.User(
-                        displayName = u.optString("displayName", null),
-                        emailAddress = u.optString("emailAddress", null)
+                        displayName = u.optStringOrNull("displayName"),
+                        emailAddress = u.optStringOrNull("emailAddress")
                     )
                 } else null
                 ApiResult.Success(AboutResponse(user))
@@ -191,7 +191,7 @@ class DriveApiClient(
                 val obj = JSONObject(body)
                 val mime = obj.optString("mimeType", "")
                 val isFolder = (mime == "application/vnd.google-apps.folder")
-                val shortcutTargetId = obj.optJSONObject("shortcutDetails")?.optString("targetId")
+                val shortcutTargetId = obj.optJSONObject("shortcutDetails")?.optStringOrNull("targetId")
                 val canAdd = obj.optJSONObject("capabilities")?.optBoolean("canAddChildren", false) ?: false
 
                 ApiResult.Success(
@@ -306,16 +306,17 @@ class DriveApiClient(
 
     private fun parseUploadResponse(json: String): UploadResponse {
         val obj = JSONObject(json)
-        fun JSONObject.optStringOrNull(key: String): String? {
-            val s = optString(key, null)
-            return if (s.isNullOrBlank()) null else s
-        }
         return UploadResponse(
             id = obj.optStringOrNull("id"),
             name = obj.optStringOrNull("name"),
             mimeType = obj.optStringOrNull("mimeType"),
             webViewLink = obj.optStringOrNull("webViewLink")
         )
+    }
+
+    private fun JSONObject.optStringOrNull(key: String): String? {
+        val s = optString(key)
+        return if (s.isBlank()) null else s
     }
 
     private fun jsonEscape(s: String): String =

@@ -44,6 +44,7 @@ import kotlinx.coroutines.withContext
  *   ユーザー操作が忁E��な場合�E hasResolution()==true となり、ここでは null を返す、E
  *   そ�E場合�Eアプリ側で AuthorizationClient.authorize() の解決付きフローを絁E�Eこと、E
  */
+@Suppress("DEPRECATION")
 class CredentialManagerTokenProvider(
     private val context: Context,
     private val serverClientId: String,
@@ -63,6 +64,7 @@ class CredentialManagerTokenProvider(
      * GoogleSignInOptions は signOut() 時�Eクライアント生成にだけ使ぁE��E
      * アクセスト�Eクン自体�E AuthorizationClient から取得する、E
      */
+    @Suppress("DEPRECATION")
     private val googleSignInOptions: GoogleSignInOptions =
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).apply {
             requestEmail()
@@ -178,6 +180,7 @@ class CredentialManagerTokenProvider(
      * ここでは簡易的に GoogleSignInClient の signOut() だけ呼ぶ、E
      * �E�忁E��ならアプリ側で CredentialManager の clearCredentialState() なども併用すること、E
      */
+    @Suppress("DEPRECATION")
     suspend fun signOut() = withContext(Dispatchers.IO) {
         try {
             val client = GoogleSignIn.getClient(context, googleSignInOptions)

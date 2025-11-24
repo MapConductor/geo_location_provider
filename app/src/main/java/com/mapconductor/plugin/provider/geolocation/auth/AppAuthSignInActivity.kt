@@ -16,6 +16,7 @@ import kotlinx.coroutines.launch
  *
  * UI には何も描画せず、あくまでフロー専用の透明な Activity として扱う想定。
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 class AppAuthSignInActivity : ComponentActivity() {
 
     companion object {

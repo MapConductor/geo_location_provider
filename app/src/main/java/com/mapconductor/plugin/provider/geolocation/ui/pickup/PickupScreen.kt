@@ -255,6 +255,7 @@ private fun PickupListBySlots(slots: List<SelectedSlot>) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("DEPRECATION")
 private fun CountDirectionSelector(
     value: SortOrder,
     onChange: (SortOrder) -> Unit,

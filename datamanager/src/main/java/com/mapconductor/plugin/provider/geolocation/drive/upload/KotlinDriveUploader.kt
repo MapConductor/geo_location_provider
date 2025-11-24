@@ -119,7 +119,7 @@ class KotlinDriveUploader(
                 val jo = JSONObject(resp.body?.string().orEmpty())
                 val idVal   = jo.optString("id", "")
                 val nameVal = jo.optString("name", "")
-                val linkVal = jo.optString("webViewLink", null)
+                val linkVal = jo.optString("webViewLink").takeIf { it.isNotBlank() }
                 UploadResult.Success(
                     id = idVal.ifEmpty { "drive:unknown" },
                     name = nameVal.ifEmpty { name },
@@ -193,9 +193,9 @@ class KotlinDriveUploader(
                                 if (bodyStr.isNotEmpty()) {
                                     runCatching {
                                         val jo = JSONObject(bodyStr)
-                                        finalId = jo.optString("id", null)
-                                        finalName = jo.optString("name", null)
-                                        finalLink = jo.optString("webViewLink", null)
+                                        finalId = jo.optString("id").takeIf { it.isNotBlank() }
+                                        finalName = jo.optString("name").takeIf { it.isNotBlank() }
+                                        finalLink = jo.optString("webViewLink").takeIf { it.isNotBlank() }
                                     }
                                 }
                                 true
@@ -251,9 +251,9 @@ class KotlinDriveUploader(
                 }
                 val arr = JSONObject(resp.body?.string().orEmpty()).optJSONArray("files")
                 val obj = arr?.optJSONObject(0)
-                val id  = obj?.optString("id", null)
-                val nm  = obj?.optString("name", null) ?: name
-                val lnk = obj?.optString("webViewLink", null)
+                val id  = obj?.optString("id")?.takeIf { it.isNotBlank() }
+                val nm  = obj?.optString("name")?.takeIf { it.isNotBlank() } ?: name
+                val lnk = obj?.optString("webViewLink")?.takeIf { it.isNotBlank() }
                 UploadResult.Success(
                     id = id ?: "drive:completed",
                     name = nm,
