@@ -96,7 +96,7 @@ object DriveFolderId {
 }
 
 /** ストリーミングでファイルを送る RequestBody */
-class InputStreamRequestBody(
+internal class InputStreamRequestBody(
     private val mediaType: MediaType,
     private val contentResolver: ContentResolver,
     private val uri: Uri,

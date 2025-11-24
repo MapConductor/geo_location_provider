@@ -50,7 +50,6 @@ dependencies {
 
     // 設定・非同期処理
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.datastore.preferences.v111)
     implementation(libs.kotlinx.coroutines.core)
 }
 

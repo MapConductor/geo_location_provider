@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
-class DeadReckoningImpl(
+internal class DeadReckoningImpl(
     private val appContext: Context,
     private val config: DeadReckoningConfig
 ) : DeadReckoning {

@@ -87,21 +87,14 @@ dependencies {
 
     // Compose / AndroidX / Google Play Services
     implementation("com.google.android.material:material:1.12.0")
-    implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.navigation:navigation-compose:2.8.0")
-    implementation("androidx.activity:activity-compose:1.9.2")
-    implementation("com.google.android.gms:play-services-auth:21.2.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("androidx.compose.material3:material3")
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.foundation:foundation")
 
     implementation(libs.androidx.activity.compose)
-    implementation(libs.androidx.activity.compose.v192)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.datastore.preferences.v111)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")

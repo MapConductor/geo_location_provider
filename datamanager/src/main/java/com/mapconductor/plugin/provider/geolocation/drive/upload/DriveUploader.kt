@@ -36,7 +36,7 @@ interface Uploader {
  *             GoogleDriveTokenProvider（Credential Manager など）の組み合わせを使用してください。
  */
 @Deprecated("Use KotlinDriveUploader via UploaderFactory with a modern GoogleDriveTokenProvider")
-class ApiClientDriveUploader(
+internal class ApiClientDriveUploader(
     private val appContext: Context,
     private val client: DriveApiClient = DriveApiClient(appContext),
     private val auth: GoogleAuthRepository = GoogleAuthRepository(appContext)

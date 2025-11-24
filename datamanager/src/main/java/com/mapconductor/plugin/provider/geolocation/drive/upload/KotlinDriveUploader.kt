@@ -22,7 +22,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
 
-class KotlinDriveUploader(
+internal class KotlinDriveUploader(
     private val context: Context,
     private val tokenProvider: GoogleDriveTokenProvider
 ) : Uploader {

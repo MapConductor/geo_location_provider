@@ -14,7 +14,7 @@ import kotlin.math.round
  * - TYPE_ROTATION_VECTOR を使用（非対応機は GEOMAGNETIC_ROTATION_VECTOR にフォールバック）
  * - 直近 Location / 時刻で地磁気偏差を更新できる API を用意
  */
-class HeadingSensor(
+internal class HeadingSensor(
     private val context: Context
 ) : SensorEventListener {
 

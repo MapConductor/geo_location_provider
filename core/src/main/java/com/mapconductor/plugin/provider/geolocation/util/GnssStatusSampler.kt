@@ -15,7 +15,7 @@ import kotlin.math.round
  * - 位置権限（ACCESS_FINE_LOCATION）が必要
  * - API30+ は Executor 版、<30 は Handler(Looper) 版で登録
  */
-class GnssStatusSampler(
+internal class GnssStatusSampler(
     private val context: Context
 ) {
     data class Stats(

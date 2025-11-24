@@ -34,7 +34,7 @@ private const val DRIVE_METADATA_SCOPE = "https://www.googleapis.com/auth/drive.
     message = "Use Credential Manager or AppAuth instead",
     replaceWith = ReplaceWith("CredentialManagerTokenProvider or AppAuthTokenProvider")
 )
-class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvider {
+internal class GoogleAuthRepository(private val context: Context) : GoogleDriveTokenProvider {
     private val tag = "DriveAuth"
 
     private val gso: GoogleSignInOptions = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)

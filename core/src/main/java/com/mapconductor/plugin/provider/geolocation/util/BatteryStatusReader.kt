@@ -6,7 +6,7 @@ import android.content.IntentFilter
 import android.os.BatteryManager
 import android.os.Build
 
-object BatteryStatusReader {
+internal object BatteryStatusReader {
     data class Status(val percent: Int, val isCharging: Boolean)
 
     fun read(context: Context): Status {
