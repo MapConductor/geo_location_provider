@@ -19,7 +19,8 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        manifestPlaceholders["appAuthRedirectScheme"] = "com.mapconductor.plugin.provider.geolocation"
+        manifestPlaceholders["appAuthRedirectScheme"] =
+            "com.mapconductor.plugin.provider.geolocation"
     }
 
     buildTypes {
@@ -34,9 +35,7 @@ android {
 
     packaging {
         resources {
-            pickFirsts += setOf(
-                "META-INF/INDEX.LIST"
-            )
+            pickFirsts += setOf("META-INF/INDEX.LIST")
             excludes += setOf(
                 "META-INF/DEPENDENCIES",
                 "META-INF/LICENSE",
@@ -76,7 +75,7 @@ secrets {
 }
 
 dependencies {
-    // プロジェクト内モジュール
+    // Project modules
     implementation(project(":core"))
     implementation(project(":dataselector"))
     implementation(project(":datamanager"))
@@ -123,3 +122,4 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     debugImplementation(libs.androidx.ui.tooling)
 }
+

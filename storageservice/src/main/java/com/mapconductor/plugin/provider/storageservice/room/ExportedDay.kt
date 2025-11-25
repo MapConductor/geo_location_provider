@@ -5,15 +5,15 @@ import androidx.room.PrimaryKey
 
 @Entity(tableName = "exported_days")
 data class ExportedDay(
-    /** LocalDate.toEpochDay() と同じ基準（UTC 1970-01-01 からの日数）。 */
+    /** Days since UTC 1970-01-01 (same base as LocalDate.toEpochDay). */
     @PrimaryKey val epochDay: Long,
-    /** ローカル ZIP が生成済みかどうか。 */
+    /** Whether the local ZIP has been generated. */
     val exportedLocal: Boolean = false,
-    /** Drive へのアップロードが完了しているかどうか。 */
+    /** Whether upload to Drive has completed. */
     val uploaded: Boolean = false,
-    /** Drive 側のファイル ID（必要に応じて記録）。 */
+    /** Drive file id recorded for this day, if any. */
     val driveFileId: String? = null,
-    /** 直近の失敗メモ（任意）。null の場合はエラー無し。 */
+    /** Last error message, or null when there is no error. */
     val lastError: String? = null
 )
 

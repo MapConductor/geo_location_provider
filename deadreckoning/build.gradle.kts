@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         minSdk = 26
-        // センサー権限（BODY_SENSORS など）はアプリ側のマニフェストで宣言してください
+        // Declare sensor permissions (for example BODY_SENSORS) in the app manifest
     }
 
     compileOptions {
@@ -31,9 +31,10 @@ kotlin {
 }
 
 dependencies {
-    // コルーチン
+    // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
-    // 共通 AndroidX 依存
+    // Common AndroidX dependencies
     implementation(libs.androidx.core.ktx)
 }
+

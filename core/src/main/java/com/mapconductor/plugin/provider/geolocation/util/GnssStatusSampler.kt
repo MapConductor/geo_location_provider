@@ -11,9 +11,12 @@ import androidx.core.content.getSystemService
 import kotlin.math.round
 
 /**
- * GNSS の used/total と C/N0 平均（できるだけ usedInFix のみ）をサンプリング。
- * - 位置権限（ACCESS_FINE_LOCATION）が必要
- * - API30+ は Executor 版、<30 は Handler(Looper) 版で登録
+ * Samples GNSS status and computes used/total satellite counts and mean C/N0.
+ *
+ * It focuses on satellites with usedInFix set to true and falls back to all
+ * satellites when there are no usedInFix samples with valid C/N0.
+ *
+ * Requires ACCESS_FINE_LOCATION permission.
  */
 internal class GnssStatusSampler(
     private val context: Context
@@ -26,7 +29,8 @@ internal class GnssStatusSampler(
     )
 
     private val lm: LocationManager? = context.getSystemService()
-    @Volatile private var last: Stats? = null
+    @Volatile
+    private var last: Stats? = null
 
     private val cb = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -38,36 +42,52 @@ internal class GnssStatusSampler(
                 val cn0 = status.getCn0DbHz(i).toDouble()
                 if (status.usedInFix(i)) {
                     used++
-                    if (cn0 > 0.0) { sum += cn0; cnt++ }
+                    if (cn0 > 0.0) {
+                        sum += cn0
+                        cnt++
+                    }
                 }
             }
-            // usedInFix 側で平均が出せない場合は全体でフォールバック
+
+            // If we could not compute mean C/N0 from usedInFix satellites, fall back to all
             var mean: Double? = if (cnt > 0) sum / cnt else null
             if (mean == null && total > 0) {
-                var s = 0.0; var c = 0
+                var s = 0.0
+                var c = 0
                 for (i in 0 until total) {
                     val cn0 = status.getCn0DbHz(i).toDouble()
-                    if (cn0 > 0.0) { s += cn0; c++ }
+                    if (cn0 > 0.0) {
+                        s += cn0
+                        c++
+                    }
                 }
                 mean = if (c > 0) s / c else null
             }
+
             val rounded = mean?.let { (round(it * 10.0) / 10.0).toFloat() }
-            last = Stats(used = used, total = total, cn0Mean = rounded, timestampMs = System.currentTimeMillis())
+            last = Stats(
+                used = used,
+                total = total,
+                cn0Mean = rounded,
+                timestampMs = System.currentTimeMillis()
+            )
         }
     }
 
     /**
-     * 監視開始。
-     * @param looper API < 30 で Handler を使うときに利用（null なら mainLooper）
+     * Starts listening for GNSS status updates.
+     *
+     * @param looper used only on API < 30 when registering with a Handler;
+     *               null means mainLooper.
      */
     fun start(looper: Looper? = null) {
         val mgr = lm ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // API 30+ : Executor 版
+            // API 30+: register with Executor based callback
             val executor = ContextCompat.getMainExecutor(context)
             mgr.registerGnssStatusCallback(executor, cb)
         } else {
-            // API 29 以下 : Handler(Looper) 版
+            // API 29 and below: use Handler(Looper)
             @Suppress("DEPRECATION")
             mgr.registerGnssStatusCallback(cb, Handler(looper ?: Looper.getMainLooper()))
         }
@@ -79,3 +99,4 @@ internal class GnssStatusSampler(
 
     fun snapshot(): Stats? = last
 }
+

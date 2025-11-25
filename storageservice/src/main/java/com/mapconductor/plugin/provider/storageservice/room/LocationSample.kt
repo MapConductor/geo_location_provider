@@ -19,22 +19,22 @@ data class LocationSample(
     val lon: Double,
     val accuracy: Float,
 
-    /** 位置プロバイダ種別（例: "gps", "dead_reckoning" など）。 */
+    /** Provider name (for example "gps", "dead_reckoning"). */
     val provider: String,
 
-    /** 方位（デバイス北基準の真方位）。 */
+    /** Heading in degrees (true north). */
     val headingDeg: Double,
-    /** 進行方向。Location.bearing 相当。null の場合は未計算 / 不明。 */
+    /** Course in degrees, equivalent to Location.bearing; null when unknown. */
     val courseDeg: Double?,
-    /** 速度 [m/s]。 */
+    /** Speed in meters per second. */
     val speedMps: Double,
 
-    /** 使用衛星数 / 総数 / 平均 C/N0 など GNSS 系メトリクス。 */
+    /** GNSS metrics: used satellites, total satellites, and mean C/N0. */
     val gnssUsed: Int,
     val gnssTotal: Int,
     val cn0: Double,
 
-    /** バッテリー残量 [%]。 */
+    /** Battery percent. */
     val batteryPercent: Int,
     val isCharging: Boolean
 )

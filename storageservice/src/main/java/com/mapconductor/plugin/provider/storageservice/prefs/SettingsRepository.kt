@@ -13,31 +13,39 @@ import kotlinx.coroutines.withTimeout
 
 private val Context.settingsDataStore by preferencesDataStore(name = "geolocation_settings")
 
+/**
+ * DataStore-backed settings for sampling intervals.
+ *
+ * New code should prefer the Flow-based APIs; synchronous getters are provided
+ * only for legacy code paths.
+ */
 object SettingsRepository {
-    // 旧仕様に合わせた既定値 / 下限
-    private const val DEFAULT_INTERVAL_SEC = 30      // GPS取得間隔の既定値
-    private const val MIN_INTERVAL_SEC     = 1       // 最小1秒まで許可
-    private const val DEFAULT_DR_SEC       = 5       // DR間隔の既定値
-    private const val MIN_DR_SEC           = 1       // 最小1秒まで許可
-    private const val FIRST_TIMEOUT_MS     = 700L    // 同期取得のタイムアウト保険
+    // Defaults and lower bounds (keep compatible with legacy behavior)
+    private const val DEFAULT_INTERVAL_SEC = 30     // Default GPS interval in seconds
+    private const val MIN_INTERVAL_SEC = 1          // Minimum 1 second
+    private const val DEFAULT_DR_SEC = 5            // Default DR interval in seconds
+    private const val MIN_DR_SEC = 1                // Minimum 1 second
+    private const val FIRST_TIMEOUT_MS = 700L       // Safety timeout for sync getters
 
     private val KEY_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("interval_sec")
     private val KEY_DR_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("dr_interval_sec")
 
     // ---------- Flow ----------
-    /** GPS取得間隔(秒)の Flow。既定値・下限を反映。 */
+
+    /** Flow of GPS interval in seconds, including defaults and lower bound. */
     fun intervalSecFlow(context: Context): Flow<Int> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
             (prefs[KEY_INTERVAL_SEC] ?: DEFAULT_INTERVAL_SEC).coerceAtLeast(MIN_INTERVAL_SEC)
         }
 
-    /** DR間隔(秒)の Flow。既定値・下限を反映。 */
+    /** Flow of DR interval in seconds, including defaults and lower bound. */
     fun drIntervalSecFlow(context: Context): Flow<Int> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
             (prefs[KEY_DR_INTERVAL_SEC] ?: DEFAULT_DR_SEC).coerceAtLeast(MIN_DR_SEC)
         }
 
     // ---------- Write ----------
+
     suspend fun setIntervalSec(context: Context, sec: Int) {
         context.applicationContext.settingsDataStore.edit {
             it[KEY_INTERVAL_SEC] = sec.coerceAtLeast(MIN_INTERVAL_SEC)
@@ -50,18 +58,19 @@ object SettingsRepository {
         }
     }
 
-    // ---------- Sync getters（既存コード互換用） ----------
-    /** すぐ「現在のGPS間隔(ミリ秒)」が欲しいとき用。旧 currentIntervalMs() 相当。 */
+    // ---------- Sync getters (legacy compatibility) ----------
+
+    /** Synchronously returns the current GPS interval in milliseconds. */
     fun currentIntervalMs(context: Context): Long = runBlocking {
         try {
             val sec = withTimeout(FIRST_TIMEOUT_MS) { intervalSecFlow(context).first() }
-            (sec.coerceAtLeast(MIN_INTERVAL_SEC) * 1000L)
+            sec.coerceAtLeast(MIN_INTERVAL_SEC) * 1000L
         } catch (_: Throwable) {
             DEFAULT_INTERVAL_SEC * 1000L
         }
     }
 
-    /** すぐ「現在のDR間隔(秒)」が欲しいとき用。旧 currentDrIntervalSec() 相当。 */
+    /** Synchronously returns the current DR interval in seconds. */
     fun currentDrIntervalSec(context: Context): Int = runBlocking {
         try {
             withTimeout(FIRST_TIMEOUT_MS) { drIntervalSecFlow(context).first() }

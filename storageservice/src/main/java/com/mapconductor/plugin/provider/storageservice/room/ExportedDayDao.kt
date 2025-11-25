@@ -9,29 +9,27 @@ import androidx.room.Query
 internal interface ExportedDayDao {
 
     /**
-     * 指定された日付 [day.epochDay] の ExportedDay レコードを ensure する。
+     * Ensures that a row for the given [day.epochDay] exists.
      *
-     * - 既に同じ epochDay のレコードがある場合は何もしない（IGNORE）。
+     * - Uses IGNORE so that existing rows are kept as-is.
      */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun ensure(day: ExportedDay)
 
     /**
-     * 「まだ uploaded=false の中で最も古い日」を返す。
-     *
-     * - 対象が存在しない場合は null を返す。
+     * Returns the oldest day with uploaded == false, or null if none exists.
      */
     @Query("SELECT * FROM exported_days WHERE uploaded = 0 ORDER BY epochDay ASC LIMIT 1")
     suspend fun oldestNotUploaded(): ExportedDay?
 
-    /** 指定された日付を「ローカル ZIP 出力済み」としてマークする。 */
+    /** Marks the given day as "local ZIP exported". */
     @Query("UPDATE exported_days SET exportedLocal = 1 WHERE epochDay = :d")
     suspend fun markExportedLocal(d: Long)
 
     /**
-     * 指定された日付を「アップロード済み」としてマークし、Drive の fileId 等を記録する。
+     * Marks the given day as "uploaded" and records the Drive file id.
      *
-     * - 同時に lastError はクリアされる。
+     * - Also clears lastError.
      */
     @Query(
         "UPDATE exported_days SET uploaded = 1, driveFileId = :fileId, lastError = NULL WHERE epochDay = :d"
@@ -39,8 +37,9 @@ internal interface ExportedDayDao {
     suspend fun markUploaded(d: Long, fileId: String?)
 
     /**
-     * 指定された日付に対して、直近のエラーメッセージを記録する。
+     * Records the latest error message for the given day.
      */
     @Query("UPDATE exported_days SET lastError = :msg WHERE epochDay = :d")
     suspend fun markError(d: Long, msg: String)
 }
+

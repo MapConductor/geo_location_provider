@@ -3,8 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     id("com.android.library")
     alias(libs.plugins.kotlin.android)
-    // alias(libs.plugins.ksp)   // KSP を利用する場合に有効化する
-    // alias(libs.plugins.room)  // Room を直接利用する場合のみ有効化する
+    // alias(libs.plugins.ksp)   // Enable when using KSP
+    // alias(libs.plugins.room)  // Enable only if this module uses Room directly
 }
 
 android {
@@ -28,10 +28,11 @@ kotlin {
 }
 
 dependencies {
-    // プロジェクト内モジュール
+    // Project modules
     implementation(project(":storageservice"))
 
-    // 設定・非同期処理
+    // Coroutines / preferences
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.datastore.preferences)
 }
+

@@ -1,11 +1,11 @@
 package com.mapconductor.plugin.provider.geolocation.config
 
 /**
- * アップロードの実行エンジンを切り替えるトグル。
- * - none   : 生成のみ（アップロードをしない）
- * - kotlin : Kotlin/OkHttp 経路
- * - jni    : C++(JNI) -> Kotlin 経路
- * - native : C++(libcurl等) で完結
+ * Upload engine type used by workers and settings.
+ *
+ * Currently supported:
+ * - none   : no upload is performed
+ * - kotlin : Kotlin / OkHttp based uploader
  */
 enum class UploadEngine(val wire: String) {
     NONE("none"),
@@ -16,3 +16,4 @@ enum class UploadEngine(val wire: String) {
             entries.firstOrNull { it.wire.equals(s, ignoreCase = true) } ?: NONE
     }
 }
+

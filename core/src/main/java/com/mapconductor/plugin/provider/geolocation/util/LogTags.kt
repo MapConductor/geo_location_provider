@@ -1,11 +1,13 @@
 package com.mapconductor.plugin.provider.geolocation.util
 
 /**
- * ログタグの集中管理。必要に応じて増やしてください。
- * 実際の出力は P2/P3 以降で行えばOK（P1は置くだけ）。
+ * Central place for log tags.
+ *
+ * Use these from workers and other components instead of hard coding tags.
  */
 object LogTags {
     const val WORKER = "GLP-Worker"
-    const val DRIVE  = "GLP-Drive"
+    const val DRIVE = "GLP-Drive"
     const val NATIVE = "GLP-Native"
 }
+

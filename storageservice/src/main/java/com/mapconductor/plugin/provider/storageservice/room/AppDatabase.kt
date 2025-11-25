@@ -9,10 +9,11 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /**
- * storageservice の統合 AppDatabase。
- * - DB 名: geolocation.db
- * - エンティティ: LocationSample, ExportedDay
- * - バージョン: 7（v6 -> v7 で courseDeg を nullable 化）
+ * AppDatabase for the storageservice module.
+ *
+ * - DB name: geolocation.db
+ * - Entities: LocationSample, ExportedDay
+ * - Version: 7 (v6 -> v7 made courseDeg nullable)
  */
 @Database(
     entities = [
@@ -61,7 +62,7 @@ internal abstract class AppDatabase : RoomDatabase() {
         // --- v1 -> v2 --------------------------------------------------------
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 旧バージョンは使っていない前提で、最低限の安全策のみ
+                // Older versions are not used in production; keep migration minimal but safe
                 addColumnIfMissing(db, "location_samples", "batteryPercent", "INTEGER NOT NULL DEFAULT 0")
                 addColumnIfMissing(db, "location_samples", "isCharging", "INTEGER NOT NULL DEFAULT 0")
             }
@@ -70,29 +71,34 @@ internal abstract class AppDatabase : RoomDatabase() {
         // --- v2 -> v3 --------------------------------------------------------
         val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // ここで gnssUsed / gnssTotal / cn0 を追加していた想定
+                // Add gnssUsed / gnssTotal / cn0 columns if needed
                 addColumnIfMissing(db, "location_samples", "gnssUsed", "INTEGER NOT NULL DEFAULT 0")
                 addColumnIfMissing(db, "location_samples", "gnssTotal", "INTEGER NOT NULL DEFAULT 0")
                 addColumnIfMissing(db, "location_samples", "cn0", "REAL NOT NULL DEFAULT 0.0")
             }
         }
 
-        // --- v3 -> v4：一部カラムの最低限の安全整備 -------------------------
+        // --- v3 -> v4: add missing basic columns before creating indexes -----
         val MIGRATION_3_4 = object : Migration(3, 4) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // timeMillis, provider などの基本カラムが揃っている前提で、
-                // index の前の下準備だけ行うイメージ。
+                // Ensure timeMillis and provider columns exist before we add indexes
                 if (!hasColumn(db, "location_samples", "timeMillis")) {
-                    db.execSQL("ALTER TABLE `location_samples` ADD COLUMN `timeMillis` INTEGER NOT NULL DEFAULT 0")
+                    db.execSQL(
+                        "ALTER TABLE `location_samples` " +
+                            "ADD COLUMN `timeMillis` INTEGER NOT NULL DEFAULT 0"
+                    )
                 }
                 if (!hasColumn(db, "location_samples", "provider")) {
-                    db.execSQL("ALTER TABLE `location_samples` ADD COLUMN `provider` TEXT NOT NULL DEFAULT 'gps'")
+                    db.execSQL(
+                        "ALTER TABLE `location_samples` " +
+                            "ADD COLUMN `provider` TEXT NOT NULL DEFAULT 'gps'"
+                    )
                 }
-                // 複合 UNIQUE 作成は v4->v5 で
+                // Unique index is created in v4 -> v5
             }
         }
 
-        // --- v4 -> v5：Room 期待名で複合 UNIQUE を整備 ---
+        // --- v4 -> v5: create expected Room-style UNIQUE index ----------------
         val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 val expected = "index_location_samples_timeMillis_provider"
@@ -105,40 +111,35 @@ internal abstract class AppDatabase : RoomDatabase() {
                 if (!hasIndex(db, expected)) {
                     db.execSQL(
                         "CREATE UNIQUE INDEX IF NOT EXISTS `$expected` " +
-                                "ON `location_samples`(`timeMillis`, `provider`)"
+                            "ON `location_samples`(`timeMillis`, `provider`)"
                     )
                     Log.d("DB/Migration", "created expected unique index: $expected")
                 } else {
-                    Log.d("DB/Migration", "expected index already exists: $expected")
+                    Log.d("DB/Migration", "expected unique index already exists: $expected")
                 }
             }
         }
 
-        // --- v5 -> v6：ExportedDay（exported_days）を追加
-        // ＊デフォルト値・インデックスは付けない（現在の @Entity に合わせる）
+        // --- v5 -> v6: add ExportedDay (exported_days) -----------------------
         val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `exported_days`(
-                        `epochDay` INTEGER NOT NULL,
-                        `exportedLocal` INTEGER NOT NULL,
-                        `uploaded` INTEGER NOT NULL,
+                        `epochDay` INTEGER NOT NULL PRIMARY KEY,
+                        `exportedLocal` INTEGER NOT NULL DEFAULT 0,
+                        `uploaded` INTEGER NOT NULL DEFAULT 0,
                         `driveFileId` TEXT,
-                        `lastError` TEXT,
-                        PRIMARY KEY(`epochDay`)
+                        `lastError` TEXT
                     )
                     """.trimIndent()
                 )
-                // インデックスは作らない（@Entity 側で未定義のため）
             }
         }
 
-        // --- v6 -> v7：courseDeg を nullable 化するため location_samples を再構築 ---
-        // ＊実テーブルをコピーして NOT NULL 制約を外す
+        // --- v6 -> v7: rebuild location_samples to make courseDeg nullable ----
         val MIGRATION_6_7 = object : Migration(6, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 新テーブルを作成（courseDeg の NOT NULL 制約を外した定義）
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `location_samples_new`(
@@ -160,27 +161,27 @@ internal abstract class AppDatabase : RoomDatabase() {
                     """.trimIndent()
                 )
 
-                // 既存データをコピー
+                // Copy existing data into the new table
                 db.execSQL(
                     """
                     INSERT INTO `location_samples_new`(
-                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,
-                        `provider`,`headingDeg`,`courseDeg`,`speedMps`,
+                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,`provider`,
+                        `headingDeg`,`courseDeg`,`speedMps`,
                         `gnssUsed`,`gnssTotal`,`cn0`,`batteryPercent`,`isCharging`
                     )
                     SELECT
-                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,
-                        `provider`,`headingDeg`,`courseDeg`,`speedMps`,
+                        `id`,`timeMillis`,`lat`,`lon`,`accuracy`,`provider`,
+                        `headingDeg`,`courseDeg`,`speedMps`,
                         `gnssUsed`,`gnssTotal`,`cn0`,`batteryPercent`,`isCharging`
                     FROM `location_samples`
                     """.trimIndent()
                 )
 
-                // 旧テーブルを差し替え
+                // Replace old table with the new one
                 db.execSQL("DROP TABLE `location_samples`")
                 db.execSQL("ALTER TABLE `location_samples_new` RENAME TO `location_samples`")
 
-                // 複合 UNIQUE インデックスを再作成
+                // Recreate the composite UNIQUE index
                 db.execSQL(
                     """
                     CREATE UNIQUE INDEX IF NOT EXISTS `index_location_samples_timeMillis_provider`
@@ -201,7 +202,7 @@ internal abstract class AppDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `$table` ADD COLUMN `$column` $type")
                 Log.d("DB/Migration", "Added column `$column` ($type) to `$table`")
             } else {
-                Log.d("DB/Migration", "Column `$column` already exists in `$table` – skipped")
+                Log.d("DB/Migration", "Column `$column` already exists in `$table` - skipped")
             }
         }
 
@@ -293,3 +294,4 @@ internal abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
+

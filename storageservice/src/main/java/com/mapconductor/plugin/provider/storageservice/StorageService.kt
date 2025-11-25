@@ -10,64 +10,50 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 
 /**
- * Room(AppDatabase) への「唯一の入口」となる薄いファサード。
+ * Thin facade that acts as the single entry point to Room (AppDatabase).
  *
- * ■役割
- * - GeoLocationProvider 全体で、Room / DAO を直接触るのはこのオブジェクトだけにする。
- * - Service / ViewModel / Worker / UseCase / UI からは、
- *   LocationSample / ExportedDay に関する操作をすべてここ経由で行う。
+ * Responsibilities:
+ * - Only this object should touch AppDatabase and DAO types from outside the storageservice module.
+ * - All operations on LocationSample and ExportedDay go through this object.
  *
- * ■現在の主な利用箇所（2025-11 時点）
- * - ログ記録:
- *     GeoLocationService などから [insertLocation] で 1 件ずつ保存。
- * - 履歴表示:
- *     HistoryViewModel などから [latestFlow] で最新 N 件を監視。
- * - 日次バックアップ:
- *     MidnightExportWorker から
- *       - [getLocationsBetween] / [deleteLocations] で LocationSample を取得・削除
- *       - [ensureExportedDay] / [oldestNotUploadedDay] / [markExportedLocal]
- *         / [markUploaded] / [markExportError] で ExportedDay を管理
- * - 手動エクスポート / Pickup:
- *     DriveSettingsScreen の「今日の Preview」、SelectorUseCases 経由の dataselector から
- *     [getAllLocations] / [getLocationsBetween] を利用。
+ * Typical callers (as of 2025-11):
+ * - GeoLocationService and other producers call insertLocation.
+ * - History screens (for example HistoryViewModel) observe latestFlow.
+ * - MidnightExportWorker uses getLocationsBetween, deleteLocations and the ExportedDay helpers.
+ * - DriveSettingsScreen and Pickup use getAllLocations / getLocationsBetween through higher level use cases.
  *
- * ■方針
- * - ここ以外のモジュールから AppDatabase / DAO を import しないこと。
- * - 並び順・時間区間・例外の扱いなどの「契約」をここで明示し、
- *   呼び出し側はこの契約のみに依存する。
+ * Callers should depend on the contracts described here (ordering, ranges, error handling)
+ * instead of relying on DAO implementation details.
  */
 object StorageService {
 
     // ------------------------------------------------------------------------
-    // LocationSample 系 API
+    // LocationSample API
     // ------------------------------------------------------------------------
 
     /**
-     * 最新 [limit] 件の LocationSample を「時系列降順」で Flow 監視する。
+     * Flow of the latest [limit] LocationSample rows ordered newest first.
      *
-     * 想定用途
-     * - 履歴画面やメイン画面など、「最新のログをリアルタイムに追従したい」場面。
+     * Intended for:
+     * - history and home screens that need to follow new samples in near real time.
      *
-     * 契約
-     * - 返ってくるリストは「新しいものが先頭」の順（LocationSampleDao.latestFlow の仕様に依存）。
-     * - [limit] は 1 以上である前提（呼び出し側でコントロールすること）。
-     * - DB アクセスはバックグラウンドスレッドで処理されるが、
-     *   Flow 自体は呼び出し側のコルーチンスコープで collect する。
+     * Contract:
+     * - The list is ordered descending by timeMillis (newest first).
+     * - [limit] must be greater than or equal to 1 and is validated by the caller.
      */
     fun latestFlow(ctx: Context, limit: Int): Flow<List<LocationSample>> =
         AppDatabase.get(ctx).locationSampleDao().latestFlow(limit)
 
     /**
-     * 全 LocationSample を「時系列昇順」(timeMillis の昇順) で取得する。
+     * Returns all LocationSample rows ordered ascending by timeMillis.
      *
-     * 想定用途
-     * - データ件数が比較的少ないことを前提とした「全件エクスポート」系処理。
-     *   例: DriveSettingsScreen の「今日の Preview」で、後段で日付フィルタをかける場合など。
+     * Intended for:
+     * - one shot exports and previews where the total number of rows is relatively small.
      *
-     * 契約
-     * - 戻り値は timeMillis 昇順。
-     * - 件数が多いとメモリ負荷が高くなるため、大量データ用途には [getLocationsBetween] を使うこと。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - The result list is sorted ascending by timeMillis.
+     * - For large datasets prefer [getLocationsBetween] to avoid high memory usage.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun getAllLocations(ctx: Context): List<LocationSample> =
         withContext(Dispatchers.IO) {
@@ -75,18 +61,18 @@ object StorageService {
         }
 
     /**
-     * 指定した期間 [from, to) の LocationSample を「時系列昇順」で取得する。
+     * Returns LocationSample rows in the half open interval [from, to) ordered ascending by timeMillis.
      *
-     * 想定用途
-     * - MidnightExportWorker のような「日単位」のエクスポート。
-     * - Pickup / dataselector など、時間帯を指定した抽出。
+     * Intended for:
+     * - daily export such as MidnightExportWorker.
+     * - time range based extraction for Pickup / dataselector.
      *
-     * 契約
-     * - 取得する区間は [from, to) の半開区間（to は含まない）。
-     * - 戻り値は timeMillis 昇順。
-     * - [softLimit] は安全のための上限であり、DAO 側で制御される。
-     *   例: レコードが異常に多い日でも、softLimit を超えて取得しない。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - The time range is [from, to) (from inclusive, to exclusive).
+     * - The result list is sorted ascending by timeMillis.
+     * - [softLimit] is a safety upper bound that may be enforced at the DAO level
+     *   to avoid loading an unexpectedly huge number of rows.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun getLocationsBetween(
         ctx: Context,
@@ -100,16 +86,13 @@ object StorageService {
         }
 
     /**
-     * LocationSample を 1 件挿入し、行 ID を返す。
+     * Inserts a single LocationSample and returns the new row id.
      *
-     * 想定用途
-     * - GeoLocationService 等からのリアルタイム位置ログ保存。
-     *
-     * 契約
-     * - 挿入前後の件数と provider / timeMillis を Logcat に出力する（タグ "DB/TRACE"）。
-     *   開発・デバッグ時の挙動確認用であり、本番でも許容される程度のログ量を想定。
-     * - 例外が発生した場合はそのままスローされる（呼び出し側でハンドリングすること）。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - Logs the count before and after insertion and the provider/timeMillis
+     *   with the tag "DB/TRACE" for debugging.
+     * - If an exception occurs it is propagated to the caller.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun insertLocation(ctx: Context, sample: LocationSample): Long =
         withContext(Dispatchers.IO) {
@@ -129,16 +112,12 @@ object StorageService {
         }
 
     /**
-     * 渡された LocationSample 群をまとめて削除する。
+     * Deletes the given LocationSample rows in a batch.
      *
-     * 想定用途
-     * - MidnightExportWorker での「エクスポート成功時に、その日のレコードを削除する」処理。
-     *
-     * 契約
-     * - [items] が空のときは何もしない（DB アクセスもしない）。
-     * - 例外が発生した場合はそのままスローされる。
-     *   例: Worker 側などで「削除失敗は致命ではない」と判断する場合は、呼び出し側で try-catch すること。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - If [items] is empty this method does nothing and avoids hitting the database.
+     * - If an exception occurs it is propagated to the caller; workers may choose to catch it.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun deleteLocations(ctx: Context, items: List<LocationSample>) =
         withContext(Dispatchers.IO) {
@@ -148,20 +127,19 @@ object StorageService {
         }
 
     // ------------------------------------------------------------------------
-    // ExportedDay 系 API
+    // ExportedDay API
     // ------------------------------------------------------------------------
 
     /**
-     * 指定された [epochDay] の ExportedDay レコードを ensure する（存在しなければ新規作成）。
+     * Ensures that an ExportedDay row for [epochDay] exists, creating it if necessary.
      *
-     * 想定用途
-     * - MidnightExportWorker の初期シード処理。
-     *   「過去 N 日分の 'まだ処理されていない可能性がある日' を ExportedDay に用意しておく」ために使う。
+     * Intended for:
+     * - initial seeding performed by MidnightExportWorker when it prepares the backlog.
      *
-     * 契約
-     * - epochDay は LocalDate.toEpochDay() と同じ基準（UTC 1970-01-01 からの日数）。
-     * - 既に同じ epochDay のレコードがある場合、内容は変更されない。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - [epochDay] uses the same base as LocalDate.toEpochDay (days since UTC 1970-01-01).
+     * - If there is already a row for the same epochDay its contents are left unchanged.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun ensureExportedDay(ctx: Context, epochDay: Long) =
         withContext(Dispatchers.IO) {
@@ -170,16 +148,15 @@ object StorageService {
         }
 
     /**
-     * 「まだアップロードが完了していない」中で最も古い ExportedDay を返す。
+     * Returns the oldest ExportedDay that is not yet marked as uploaded, or null if none.
      *
-     * 想定用途
-     * - MidnightExportWorker のバックログ処理ループで、
-     *   次に処理すべき日付を決定するために使用する。
+     * Intended for:
+     * - backlog processing loops in MidnightExportWorker when choosing the next day to handle.
      *
-     * 契約
-     * - 対象が存在しない場合は null を返す。
-     * - どの状態を「未アップロード」とみなすかは ExportedDayDao 側の実装に依存する。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - If there is no matching row, null is returned.
+     * - The exact definition of "not uploaded yet" is delegated to the ExportedDayDao implementation.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun oldestNotUploadedDay(ctx: Context): ExportedDay? =
         withContext(Dispatchers.IO) {
@@ -187,15 +164,14 @@ object StorageService {
         }
 
     /**
-     * 指定された [epochDay] を「ローカル ZIP 出力済み」としてマークする。
+     * Marks [epochDay] as exported locally (GeoJSON and ZIP file generated).
      *
-     * 想定用途
-     * - GeoJSON および ZIP の出力が成功した直後に呼び出す。
-     *   アップロードの成否に関わらず、「ローカルには一度出力した」という事実を記録する。
+     * Intended for:
+     * - calling immediately after local export succeeds, regardless of upload result.
      *
-     * 契約
-     * - 対象の日付が存在しない場合の挙動は ExportedDayDao の実装に依存する。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - If the day does not exist the behavior is defined by ExportedDayDao.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun markExportedLocal(ctx: Context, epochDay: Long) =
         withContext(Dispatchers.IO) {
@@ -203,14 +179,11 @@ object StorageService {
         }
 
     /**
-     * 指定された [epochDay] を「アップロード済み」としてマークし、Drive の fileId 等を記録する。
+     * Marks [epochDay] as uploaded and records the Drive file id if available.
      *
-     * 想定用途
-     * - Drive へのアップロードが成功したタイミングで呼び出す。
-     *
-     * 契約
-     * - [fileId] は null を許容（API を簡単にするため）。不要な場合は null でもよい。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - [fileId] may be null to keep the API simple; callers can pass null if they do not need it.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun markUploaded(ctx: Context, epochDay: Long, fileId: String?) =
         withContext(Dispatchers.IO) {
@@ -218,15 +191,14 @@ object StorageService {
         }
 
     /**
-     * 指定された [epochDay] に対して、エラーメッセージ [msg] を記録する。
+     * Records an error message [msg] for [epochDay].
      *
-     * 想定用途
-     * - ZIP 生成やアップロードに失敗した際に、その事実を ExportedDay に紐づけておく。
-     *   これにより、後から UI やログで「どの日がどんな理由で失敗したか」を追いやすくする。
+     * Intended for:
+     * - failures during ZIP generation or Drive upload so that UI and logs can explain what went wrong.
      *
-     * 契約
-     * - [msg] は人間が読めるメッセージ想定（HTTP ステータスやレスポンスボディの要約など）。
-     * - 呼び出しは必ずサスペンドコンテキストから行うこと。
+     * Contract:
+     * - [msg] is expected to be a human readable message, for example an HTTP status and summary.
+     * - This is a suspending call and should be invoked from a coroutine context.
      */
     suspend fun markExportError(ctx: Context, epochDay: Long, msg: String) =
         withContext(Dispatchers.IO) {

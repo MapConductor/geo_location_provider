@@ -40,20 +40,21 @@ kotlin {
 }
 
 dependencies {
-    // core モジュールには依存しない（循環依存防止）
+    // Do not depend on :core here (avoid cyclic dependency)
     // implementation(project(":core"))
 
-    // Room をこのモジュール内で完結させる
+    // Room stays self-contained in this module
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
-    // 設定・非同期処理
+    // Settings and async processing
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.core)
 }
 
 room {
-    // Room スキーマ出力先
+    // Output directory for Room schemas
     schemaDirectory("$projectDir/schemas")
 }
+

@@ -49,11 +49,11 @@ class GeoLocationService : Service() {
         const val ACTION_START = "ACTION_START_LOCATION"
         const val ACTION_STOP  = "ACTION_STOP_LOCATION"
 
-        /** GPS 取得間隔の更新 (ms) */
+        /** Update GPS sampling interval (milliseconds). */
         const val ACTION_UPDATE_INTERVAL = "ACTION_UPDATE_INTERVAL"
         const val EXTRA_UPDATE_MS = "EXTRA_UPDATE_MS"
 
-        /** 新：DR 予測間隔の更新 (sec) */
+        /** Update DR prediction interval (seconds). */
         const val ACTION_UPDATE_DR_INTERVAL = "ACTION_UPDATE_DR_INTERVAL"
         const val EXTRA_DR_INTERVAL_SEC = "EXTRA_DR_INTERVAL_SEC"
     }
@@ -607,7 +607,7 @@ class GeoLocationService : Service() {
             }
             val notification = builder
                 .setContentTitle("GeoLocation")
-                .setContentText("Running…")
+                .setContentText("Running...")
                 .setSmallIcon(R.drawable.stat_notify_sync)
                 .setOngoing(true)
                 .setCategory(Notification.CATEGORY_SERVICE)
@@ -621,7 +621,7 @@ class GeoLocationService : Service() {
         } else {
             val builder = NotificationCompat.Builder(this, "geo")
                 .setContentTitle("GeoLocation")
-                .setContentText("Running…")
+                .setContentText("Running...")
                 .setSmallIcon(R.drawable.stat_notify_sync)
                 .setOngoing(true)
                 .setCategory(Notification.CATEGORY_SERVICE)

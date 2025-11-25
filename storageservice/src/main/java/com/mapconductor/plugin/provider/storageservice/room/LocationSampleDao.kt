@@ -11,18 +11,18 @@ import kotlinx.coroutines.flow.Flow
 internal interface LocationSampleDao {
 
     /**
-     * 1 件の LocationSample を挿入する。
+     * Inserts one LocationSample row.
      *
-     * - [OnConflictStrategy.REPLACE] により、同一キー衝突時は既存行を置き換える。
+     * - Uses [OnConflictStrategy.REPLACE], replacing existing rows on key collision.
      */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(sample: LocationSample): Long
 
     /**
-     * 最新 N 件を Flow で監視する。
+     * Watches the latest [limit] rows as a Flow.
      *
-     * - timeMillis が同一のレコードがある場合でも、provider と id を二次キーとして
-     *   並び順を安定させる。
+     * - When multiple rows share the same timeMillis, provider and id are used
+     *   as secondary keys to keep ordering stable.
      */
     @Query(
         """
@@ -36,7 +36,7 @@ internal interface LocationSampleDao {
     )
     fun latestFlow(limit: Int): Flow<List<LocationSample>>
 
-    /** 最後の 1 件を Flow で監視する。 */
+    /** Watches the most recent row as a Flow. */
     @Query(
         """
         SELECT * FROM location_samples
@@ -46,7 +46,7 @@ internal interface LocationSampleDao {
     )
     fun latestOneFlow(): Flow<LocationSample?>
 
-    /** 全件を timeMillis 昇順・id 昇順で取得する（時系列用途向け）。 */
+    /** Returns all rows ordered by timeMillis ASC, id ASC (for time series use). */
     @Query(
         """
         SELECT * FROM location_samples
@@ -56,9 +56,9 @@ internal interface LocationSampleDao {
     suspend fun findAll(): List<LocationSample>
 
     /**
-     * 期間 [from, to) のレコードを timeMillis 昇順・id 昇順で取得する。
+     * Returns rows in the range [from, to) ordered by timeMillis ASC, id ASC.
      *
-     * - JST の 0:00 区切りなど、日付ベースの抽出に利用することを想定。
+     * - Intended for date based extraction such as JST 0:00 boundaries.
      */
     @Query(
         """
@@ -70,9 +70,9 @@ internal interface LocationSampleDao {
     suspend fun findBetween(from: Long, to: Long): List<LocationSample>
 
     /**
-     * 期間 [from, to) のレコードを timeMillis 昇順で最大 softLimit 件取得する。
+     * Returns up to [softLimit] rows in the range [from, to) ordered by timeMillis ASC.
      *
-     * - Worker による日次エクスポート処理での使用を想定。
+     * - Intended for daily export processing by workers.
      */
     @Query(
         """
@@ -89,15 +89,16 @@ internal interface LocationSampleDao {
         softLimit: Int
     ): List<LocationSample>
 
-    /** 全件数を返す。 */
+    /** Returns the total row count. */
     @Query("SELECT COUNT(*) FROM location_samples")
     suspend fun countAll(): Long
 
     /**
-     * 渡されたレコード群をまとめて削除する。
+     * Deletes the given rows in a batch.
      *
-     * - 通常はアップロード成功後のクリーンアップ用途で使用する。
+     * - Typically used for cleanup after successful upload.
      */
     @Delete
     suspend fun deleteAll(items: List<LocationSample>)
 }
+

@@ -32,7 +32,6 @@
             android:theme="@style/Theme.GeoLocationProvider">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
@@ -41,7 +40,7 @@
             android:name=".auth.AppAuthSignInActivity"
             android:exported="true"
             android:theme="@style/Theme.GeoLocationProvider">
-            <!-- AppAuth 用のリダイレクト URI を受け取るための Intent Filter -->
+            <!-- Intent filter to receive the AppAuth redirect URI -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -51,9 +50,13 @@
                     android:path="/oauth2redirect" />
             </intent-filter>
         </activity>
+
         <service
             android:name=".service.GeoLocationService"
             android:foregroundServiceType="location"
             android:exported="false" />
+
     </application>
+
 </manifest>
+

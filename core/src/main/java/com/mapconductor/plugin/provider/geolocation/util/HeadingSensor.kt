@@ -10,9 +10,11 @@ import kotlin.math.PI
 import kotlin.math.round
 
 /**
- * 端末ヘディング（真北基準 0..360°）を継続サンプリング。
- * - TYPE_ROTATION_VECTOR を使用（非対応機は GEOMAGNETIC_ROTATION_VECTOR にフォールバック）
- * - 直近 Location / 時刻で地磁気偏差を更新できる API を用意
+ * Helper around rotation vector sensors that provides device heading in degrees (0..360).
+ *
+ * It prefers TYPE_ROTATION_VECTOR and falls back to TYPE_GEOMAGNETIC_ROTATION_VECTOR.
+ * Declination can be updated from location data so that magnetic heading is converted
+ * to true heading.
  */
 internal class HeadingSensor(
     private val context: Context
@@ -20,8 +22,10 @@ internal class HeadingSensor(
 
     private val sm = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-    @Volatile private var lastAzimuthDegMag: Float = Float.NaN
-    @Volatile private var declinationDeg: Float = 0f
+    @Volatile
+    private var lastAzimuthDegMag: Float = Float.NaN
+    @Volatile
+    private var declinationDeg: Float = 0f
 
     private var started = false
 
@@ -40,7 +44,7 @@ internal class HeadingSensor(
         sm.unregisterListener(this)
     }
 
-    /** 位置と時刻で地磁気偏差を更新（真北化に必要） */
+    /** Update magnetic declination from location and time. */
     fun updateDeclination(lat: Double, lon: Double, altitudeMeters: Float, timeMillis: Long) {
         val field = GeomagneticField(
             lat.toFloat(),
@@ -51,27 +55,34 @@ internal class HeadingSensor(
         declinationDeg = field.declination
     }
 
-    /** 真北基準のヘディング（NaN の場合は取得不可） */
+    /**
+     * Returns true heading in degrees (0..360), or null if it is not yet available.
+     *
+     * The result is rounded to 0.1 degree.
+     */
     fun headingTrueDeg(): Float? {
         val mag = lastAzimuthDegMag
         if (mag.isNaN()) return null
         var trueDeg = mag + declinationDeg
         while (trueDeg < 0f) trueDeg += 360f
         while (trueDeg >= 360f) trueDeg -= 360f
-        // 小数 1 桁程度に丸め（ノイズ低減）
         return (round(trueDeg * 10f) / 10f)
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
         event ?: return
         if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR &&
-            event.sensor.type != Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR) return
+            event.sensor.type != Sensor.TYPE_GEOMAGNETIC_ROTATION_VECTOR
+        ) {
+            return
+        }
 
         val R = FloatArray(9)
         val orientation = FloatArray(3)
         SensorManager.getRotationMatrixFromVector(R, event.values)
         SensorManager.getOrientation(R, orientation)
-        // azimuth [rad] -> [deg], 0..360 に正規化（磁北）
+
+        // azimuth [rad] -> [deg] and normalize to 0..360
         var deg = (orientation[0] * 180f / PI.toFloat())
         if (deg < 0) deg += 360f
         lastAzimuthDegMag = deg
@@ -79,3 +90,4 @@ internal class HeadingSensor(
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 }
+

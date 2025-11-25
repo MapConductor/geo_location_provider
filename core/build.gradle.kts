@@ -26,14 +26,15 @@ kotlin {
 }
 
 dependencies {
-    // 位置情報取得に必要な依存関係
+    // Dependencies required for location acquisition
     implementation(libs.play.services.location)
     implementation(libs.androidx.core.ktx)
 
-    // 非同期処理
+    // Async processing
     implementation(libs.kotlinx.coroutines.android)
 
-    // Dead Reckoning エンジンと記録用ストレージ
+    // Dead Reckoning engine and storage
     implementation(project(":deadreckoning"))
     implementation(project(":storageservice"))
 }
+

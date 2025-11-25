@@ -26,19 +26,20 @@ kotlin {
 }
 
 dependencies {
-    // プロジェクト内モジュール
+    // Project modules
     implementation(project(":core"))
     implementation(project(":storageservice"))
 
-    // AndroidX / Google ライブラリ
+    // AndroidX / Google libraries
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.play.services.auth)
 
-    // コルーチン / ネットワーク
+    // Coroutines / networking
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.okhttp)
     implementation(libs.okio)
 }
+
