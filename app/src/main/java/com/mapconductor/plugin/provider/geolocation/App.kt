@@ -14,8 +14,6 @@ class App : Application() {
         )
 
         MidnightExportScheduler.scheduleNext(this)
-
-        // サービスの起動は UI 側（権限許諾後）で行う
     }
 }
 

@@ -32,9 +32,10 @@ import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
 import com.mapconductor.plugin.provider.geolocation.ui.history.LocationHistoryList
 
 /**
- * 画面エントリ。
- * - 設定行の [Interval][DR予測間隔][Save&Apply] 入力枠と、履歴一覧を表示する。
- * - 履歴は VM から受け取り、UI 側では Room に直接触らない。
+ * Entry point for the main screen.
+ *
+ * - Shows Interval / DR interval [Save&Apply] controls and the history list.
+ * - The history list is driven by the ViewModel; UI does not touch Room directly.
  */
 @Composable
 fun GeoLocationProviderScreen(
@@ -69,7 +70,7 @@ fun GeoLocationProviderScreen(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
 
-                // 履歴。UI 側は Room に触れない設計。
+                // History area; UI does not touch Room directly.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -102,7 +103,7 @@ private fun IntervalAndDrArea(
             onValueChange = {
                 vm.onSecondsChanged(it.filter { c -> c.isDigit() }.take(3))
             },
-            label = { Text("GPS取得間隔(秒)") },
+            label = { Text("GPS interval (sec)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)
@@ -115,7 +116,7 @@ private fun IntervalAndDrArea(
             onValueChange = {
                 vm.onDrIntervalChanged(it.filter { c -> c.isDigit() }.take(3))
             },
-            label = { Text("DR予測間隔(秒)") },
+            label = { Text("DR interval (sec)") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier.weight(1f)
@@ -124,7 +125,7 @@ private fun IntervalAndDrArea(
         Spacer(modifier = Modifier.width(8.dp))
 
         Button(onClick = { vm.saveAndApply() }) {
-            Text("Save&Apply")
+            Text("Save & Apply")
         }
     }
 

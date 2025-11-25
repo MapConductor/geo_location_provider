@@ -72,13 +72,13 @@ class GeoLocationService : Service() {
 
     @Volatile private var updateIntervalMs: Long = 30_000L
     @Volatile private var isRunning = AtomicBoolean(false)
-    @Volatile private var lastFixMillis: Long? = null // 直近の Fix 時刻（予測の基点に使用）
+    @Volatile private var lastFixMillis: Long? = null // Most recent GPS fix timestamp (used as DR base).
 
-    // DR（リアルタイム）タイカー
+    // DR ticker for real-time prediction loop.
     private var drTickerJob: Job? = null
-    @Volatile private var drIntervalSec: Int = 5  // 既定値
+    @Volatile private var drIntervalSec: Int = 5  // Default interval in seconds.
 
-    // 重複挿入抑制（GPS/DR）
+    // Duplicate insertion suppression for GPS and DR.
     @Volatile private var lastInsertMillis: Long = 0L
     @Volatile private var lastInsertSig: Long = 0L
     private val insertLock = Any()
@@ -86,7 +86,7 @@ class GeoLocationService : Service() {
     @Volatile private var lastDrInsertSig: Long = 0L
     private val drInsertLock = Any()
 
-    // Course(進行方向) 推定用の前回位置 & 直近 Course
+    // Last position and course used to estimate movement direction.
     @Volatile private var lastCourseDeg: Double = Double.NaN
     @Volatile private var lastCourseLat: Double? = null
     @Volatile private var lastCourseLon: Double? = null
@@ -104,7 +104,7 @@ class GeoLocationService : Service() {
         gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
         dr = DeadReckoningFactory.create(applicationContext).also { it.start() }
         ensureChannel()
-        // サンプリング間隔（GPS）は SettingsRepository の Flow から常に同期する
+        // GPS sampling interval is always synced from SettingsRepository.intervalSecFlow().
         serviceScope.launch {
             SettingsRepository.intervalSecFlow(applicationContext)
                 .distinctUntilChanged()
@@ -119,7 +119,7 @@ class GeoLocationService : Service() {
                     }
                 }
         }
-        // DR 予測間隔も Flow から同期し、Save&Apply 経由・手動起動どちらでも同じ値を使う
+        // DR prediction interval is also synced from a Flow so both Save&Apply and manual start use the same value.
         serviceScope.launch {
             SettingsRepository.drIntervalSecFlow(applicationContext)
                 .distinctUntilChanged()
@@ -128,7 +128,7 @@ class GeoLocationService : Service() {
                     applyDrInterval(sec)
                 }
         }
-        // ---- ここまで ----
+        // ---- end of initial setup ----
     }
 
     override fun onDestroy() {
@@ -149,7 +149,7 @@ class GeoLocationService : Service() {
 
             ACTION_UPDATE_INTERVAL -> {
                 val ms = intent.getLongExtra(EXTRA_UPDATE_MS, updateIntervalMs)
-                updateIntervalMs = max(5000L, ms) // GPS側は最小5秒
+                updateIntervalMs = max(5000L, ms) // Minimum GPS interval is 5 seconds.
                 Log.d(TAG, "ACTION_UPDATE_INTERVAL: updateIntervalMs=$updateIntervalMs")
                 if (isRunning.get()) {
                     serviceScope.launch { restartLocationUpdates() }
@@ -170,34 +170,34 @@ class GeoLocationService : Service() {
         Log.d(TAG, "startLocation")
         startForeground(NOTIFICATION_ID, buildNotification())
         serviceScope.launch { restartLocationUpdates() }
-        startDrTicker() // DR リアルタイムを開始
+        startDrTicker() // Start DR ticker for real-time prediction.
     }
 
     private fun stopLocation() {
         if (!isRunning.getAndSet(false)) return
         Log.d(TAG, "stopLocation")
 
-        // FGS を外す
+        // Remove foreground service state.
         stopForeground(STOP_FOREGROUND_DETACH)
 
-        // 位置更新を停止
+        // Stop location updates.
         try {
             fusedClient.removeLocationUpdates(callback)
         } catch (t: Throwable) {
             Log.w(TAG, "removeLocationUpdates", t)
         }
 
-        // DR のタイカー停止
+        // Stop DR ticker.
         stopDrTicker()
 
-        // ★重要★
-        // Start/Stop ボタン側は「サービスに bind できるかどうか」で
-        // 動作中判定をしているため、ここでサービス自体を終了しておく。
+        // Important:
+        // Start/Stop button checks whether it can bind to the service.
+        // To reflect stopped state correctly, fully stop the service here.
         stopSelf()
     }
 
     // ------------------------
-    //   GPS 更新制御
+    //   GPS update control
     // ------------------------
     private suspend fun restartLocationUpdates() {
         Log.d(TAG, "restartLocationUpdates: interval=${updateIntervalMs}ms")
@@ -231,8 +231,8 @@ class GeoLocationService : Service() {
     }
 
     private fun handleLocation(location: Location) {
-        // Foreground 通知がユーザー操作で隠されていても、
-        // 次の GPS 取得タイミングで再掲できるようにする。
+        // Even if the foreground notification is temporarily hidden by the user,
+        // it should be shown again at the next GPS update.
         ensureNotificationVisible()
 
         val now = System.currentTimeMillis()
@@ -241,7 +241,7 @@ class GeoLocationService : Service() {
         val headingDeg: Float = headingSensor.headingTrueDeg() ?: 0f
         val speedMps: Float = max(0f, location.speed.takeIf { !it.isNaN() } ?: 0f)
 
-        // --- Course(進行方向) の推定 ---
+        // --- Estimate course (direction of travel) ---
         val prevLat = lastCourseLat
         val prevLon = lastCourseLon
 
@@ -253,21 +253,21 @@ class GeoLocationService : Service() {
         }
 
         val courseDeg: Double = when {
-            // 1) provider が bearing を出してくれるなら、それを優先して使う
+            // 1) If the provider gives bearing, use it preferentially.
             hasBearing && !rawBearing.isNaN() -> {
                 val normalized = ((rawBearing % 360f) + 360f) % 360f
                 lastCourseDeg = normalized.toDouble()
                 normalized.toDouble()
             }
 
-            // 2) bearing が取れない場合は、直前の位置との差分から進行方向を推定
+            // 2) If bearing is not available, estimate direction from the last position.
             prevLat != null && prevLon != null -> {
                 val prev = Location(location.provider ?: "gps").apply {
                     latitude = prevLat
                     longitude = prevLon
                 }
                 val distance = prev.distanceTo(location) // [m]
-                if (distance >= 0.5f) {                  // ★ 閾値をかなり下げる（0.5m）
+                if (distance >= 0.5f) {                  // Threshold is small (0.5 m) to pick up small movements.
                     val b = prev.bearingTo(location)
                     if (!b.isNaN()) {
                         val normalized = ((b % 360f) + 360f) % 360f
@@ -276,20 +276,20 @@ class GeoLocationService : Service() {
                 }
 
                 if (lastCourseDeg.isNaN()) {
-                    Double.NaN   // まだ一度も決まっていない
+                    Double.NaN   // No course decided yet.
                 } else {
                     lastCourseDeg
                 }
             }
 
-            // 3) それでも決められない場合は、前回の値を維持
+            // 3) Otherwise keep the previous course value.
             !lastCourseDeg.isNaN() -> lastCourseDeg
 
-            // 4) 何も情報がない最初の一発目など → NaN
+            // 4) If there is no information (first sample), keep NaN.
             else -> Double.NaN
         }
 
-        // 直近位置を更新（次回の course 計算用）
+        // Update last position for the next course calculation.
         lastCourseLat = location.latitude
         lastCourseLon = location.longitude
 
@@ -300,7 +300,7 @@ class GeoLocationService : Service() {
         val total: Int? = gnss?.total
         val cn0: Double? = gnss?.cn0Mean?.toDouble()
 
-        // 1) GPS を保存
+        // 1) Insert GPS sample.
         run {
             val bat = BatteryStatusReader.read(applicationContext)
             val sample = LocationSample(
@@ -323,7 +323,7 @@ class GeoLocationService : Service() {
                 sample.lat, sample.lon, sample.accuracy,
                 sample.provider,
                 sample.headingDeg,
-                courseDeg,                    // GPS はこの計算済み courseDeg を使う
+                courseDeg,                    // GPS uses this computed courseDeg.
                 sample.speedMps,
                 sample.gnssUsed, sample.gnssTotal, sample.cn0,
                 sample.batteryPercent, sample.isCharging
@@ -362,7 +362,7 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 2) DRへ Fix を通知（基準更新のみ）
+        // 2) Notify DR of the fix (update its reference only).
         lastFixMillis = now
         serviceScope.launch(Dispatchers.Default) {
             try {
@@ -380,7 +380,7 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 3) バックフィル：直前Fix→今回Fixの間を DR間隔(秒)で分割し保存
+        // 3) Backfill: divide the period between previous and current fix by DR interval and insert samples.
         if (lastFix != null) {
             val stepMs = (drIntervalSec * 1000L).coerceAtLeast(1000L)
             val targets = generateSequence(lastFix + stepMs) { it + stepMs }
@@ -405,7 +405,7 @@ class GeoLocationService : Service() {
                                 val p = pts.lastOrNull() ?: continue
                                 val bat = BatteryStatusReader.read(applicationContext)
 
-                                // ★ DR 用の heading / course を決定
+                                // Decide heading / course values for DR backfill.
                                 val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
                                 val courseForDr = if (!lastCourseDeg.isNaN()) {
                                     lastCourseDeg
@@ -415,7 +415,7 @@ class GeoLocationService : Service() {
 
                                 val sample = LocationSample(
                                     id = 0,
-                                    timeMillis = t,              // バックフィル対象の “過去時刻”
+                                    timeMillis = t,              // Backfill sample time in the past.
                                     lat = p.lat,
                                     lon = p.lon,
                                     accuracy = (p.accuracyM ?: 0f),
@@ -453,7 +453,7 @@ class GeoLocationService : Service() {
     }
 
     // ------------------------
-    //   DR ticker（リアルタイム）
+    //   DR ticker (real time)
     // ------------------------
     private fun startDrTicker() {
         stopDrTicker()
@@ -461,8 +461,8 @@ class GeoLocationService : Service() {
         Log.d(TAG, "startDrTicker interval=${drIntervalSec}s")
         drTickerJob = serviceScope.launch(Dispatchers.IO) {
             while (isRunning.get()) {
-                // GPS 更新がしばらく無い場合でも、DR の周期で
-                // Foreground 通知を再掲できるようにする。
+                // Even if there is no GPS update for a while, at DR interval
+                // we re-show the foreground notification.
                 ensureNotificationVisible()
 
                 val base = lastFixMillis
@@ -479,7 +479,7 @@ class GeoLocationService : Service() {
                         if (p != null) {
                             val bat = BatteryStatusReader.read(applicationContext)
 
-                            // ★ DR 用の heading / course を決定（リアルタイム版）
+                            // Decide heading / course for DR (real-time).
                             val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
                             val courseForDr = if (!lastCourseDeg.isNaN()) {
                                 lastCourseDeg
@@ -503,12 +503,12 @@ class GeoLocationService : Service() {
                                 batteryPercent = bat.percent,
                                 isCharging = bat.isCharging
                             )
-                            // 重複抑止（DR）
+                            // Duplicate insertion guard for DR.
                             val sig = sig(
                                 sample.lat, sample.lon, sample.accuracy,
                                 sample.provider,
                                 sample.headingDeg,
-                                sample.courseDeg ?: 0.0,   // nullable ではないが 0.0 fallback 付き
+                                sample.courseDeg ?: 0.0,   // Not nullable, but keep 0.0 as fallback.
                                 sample.speedMps,
                                 sample.gnssUsed, sample.gnssTotal, sample.cn0,
                                 sample.batteryPercent, sample.isCharging
@@ -572,7 +572,7 @@ class GeoLocationService : Service() {
     }
 
     // ------------------------
-    //   通知
+    //   Notification
     // ------------------------
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -583,10 +583,9 @@ class GeoLocationService : Service() {
     }
 
     /**
-     * Foreground Service 用の通知がユーザー操作で一時的に隠されても、
-     * 次の GPS/DR のタイミングで再掲するためのヘルパ。
-     * 毎回呼んでも startForeground による通知更新として扱われるだけなので、
-     * DR ticker や GPS コールバックからの定期呼び出しを前提とする。
+     * Ensure foreground service notification is visible.
+     * Safe to call on every GPS/DR tick; it just refreshes the notification.
+     * Called regularly from DR ticker and GPS callbacks.
      */
     private fun ensureNotificationVisible() {
         if (!isRunning.get()) return
@@ -636,7 +635,7 @@ class GeoLocationService : Service() {
     }
 
     // ------------------------
-    //   補助
+    //   Helper
     // ------------------------
     private fun sig(
         lat: Double, lon: Double, acc: Float,

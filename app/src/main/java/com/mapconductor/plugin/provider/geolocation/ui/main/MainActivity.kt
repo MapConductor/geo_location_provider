@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         val locOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         val notifOk = if (Build.VERSION.SDK_INT >= 33) {
             granted[Manifest.permission.POST_NOTIFICATIONS] == true
         } else {
@@ -90,16 +90,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // 現状、onStart では権限チェックのみ行い、動作には影響させていない。
         val locOk =
             ContextCompat.checkSelfPermission(
                 this,
                 Manifest.permission.ACCESS_FINE_LOCATION
             ) == PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    ) == PackageManager.PERMISSION_GRANTED
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
         val notifOk = if (Build.VERSION.SDK_INT >= 33) {
             ContextCompat.checkSelfPermission(
                 this,
@@ -108,7 +107,8 @@ class MainActivity : ComponentActivity() {
         } else {
             true
         }
-        // 必要であれば、ここで locOk / notifOk を使った UI 通知などを追加できる。
+        // At the moment we only check permissions here; behavior is not changed.
+        // You can add UI notifications using locOk / notifOk if needed.
     }
 
     private fun startLocationService() {
@@ -179,8 +179,8 @@ private fun AppRoot(
                     }
                 },
                 actions = {
-                    // HOME のときだけ Pickup / Drive / Start/Stop を表示し、
-                    // Pickup 画面では Back のみとする。
+                    // On HOME: show Pickup / Drive / Start/Stop.
+                    // On Pickup screen: only show Back button.
                     if (currentRoute != ROUTE_PICKUP) {
                         TextButton(onClick = {
                             navController.navigate(ROUTE_PICKUP) { launchSingleTop = true }
@@ -204,3 +204,4 @@ private fun AppRoot(
         }
     }
 }
+

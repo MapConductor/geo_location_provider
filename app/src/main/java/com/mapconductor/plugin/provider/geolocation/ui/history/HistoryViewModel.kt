@@ -11,8 +11,9 @@ import kotlinx.coroutines.flow.stateIn
 
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 
-    /** 画面に映る分だけ描画する。件数はここで指定 */
+    /** Latest items for the history list; limit is controlled here. */
     val latest: StateFlow<List<LocationSample>> =
         StorageService.latestFlow(app.applicationContext, limit = 8)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }
+

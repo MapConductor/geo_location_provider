@@ -4,14 +4,13 @@ import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckon
 import kotlin.math.*
 
 /**
- * Tier A の Dead Reckoning エンジン本体。
+ * Tier A Dead Reckoning engine.
  *
- * - 加速度 / ジャイロ / 磁気のセンサ入力を用いて位置・速度・方位を推定する。
- * - ZUPT による静止判定、GPS Fix による補正を組み合わせる。
- * - 位置推定の不確かさ (sigma2Pos) も併せて管理する。
+ * - Uses accelerometer / gyro / magnetometer inputs to estimate position, speed, and heading.
+ * - Combines ZUPT-based static detection and GPS fixes for correction.
+ * - Tracks position uncertainty (sigma2Pos) alongside state.
  *
- * 外部には DeadReckoning インターフェース経由で公開され、
- * このクラス自体は internal 実装として扱う。
+ * Exposed to callers via the DeadReckoning interface; this class itself is kept internal.
  */
 internal class DeadReckoningEngine(
     private val config: DeadReckoningConfig = DeadReckoningConfig()
@@ -20,21 +19,21 @@ internal class DeadReckoningEngine(
     private val state = DrState()
     private val unc = DrUncertainty()
 
-    // 重力推定用のフィルタ
+    // Gravity estimation filter.
     private var gEst = floatArrayOf(0f, 0f, 9.81f)
     private val gAlpha = 0.90f
 
-    // ZUPT 用しきい値
+    // Thresholds for ZUPT-based static detection.
     private val aVarTh = config.staticAccelVarThreshold       // (m/s^2)^2
     private val wVarTh = config.staticGyroVarThreshold        // (rad/s)^2
 
-    // 位置のプロセスノイズ
+    // Position process noise.
     private val qPos = config.processNoisePos                 // m^2/s
 
-    // GPS 速度とのブレンド係数
+    // Blend factor with GPS speed.
     private val kV = config.velocityGain
 
-    // 静止判定用ウィンドウ
+    // Windows for static detection.
     private val aWin = CircularWindow(config.windowSize)
     private val wWin = CircularWindow(config.windowSize)
 
@@ -45,15 +44,15 @@ internal class DeadReckoningEngine(
     }
 
     fun onSensor(acc: FloatArray?, gyro: FloatArray?, mag: FloatArray?, dtSec: Float) {
-        // 分散推定用
+        // Update statistics for static detection.
         acc?.let { aWin.push(norm2(it)) }
         gyro?.let { wWin.push(norm2(it)) }
 
-        // heading を更新（簡易 yaw 推定）
+        // Update heading (simple yaw from magnetometer when available).
         val heading = if (mag != null) atan2(mag[0].toDouble(), mag[1].toDouble()).toFloat() else state.headingRad
         state.headingRad = wrapAngle(lerpAngle(state.headingRad, heading, 0.05f))
 
-        // 重力成分を引いた水平加速度から速度・位置を更新
+        // Subtract gravity and update speed/position based on horizontal acceleration.
         if (acc != null) {
             for (i in 0..2) gEst[i] = gAlpha * gEst[i] + (1 - gAlpha) * acc[i]
             val lin = floatArrayOf(acc[0] - gEst[0], acc[1] - gEst[1], acc[2] - gEst[2])
@@ -61,14 +60,14 @@ internal class DeadReckoningEngine(
             val aH = horizontalProjection(lin, state.headingRad) // nav frame (x:east, y:north)
             state.speedMps = max(0f, state.speedMps + (hypot(aH[0], aH[1]) * dtSec))
 
-            // 静止とみなせる場合は徐々に速度を減衰させる
+            // When considered static, gradually decay speed.
             if (isLikelyStatic()) state.speedMps *= 0.85f
 
             val dx = state.speedMps * dtSec * cos(state.headingRad)
             val dy = state.speedMps * dtSec * sin(state.headingRad)
             applyDisplacementMeters(dx.toDouble(), dy.toDouble())
 
-            // 位置の不確かさを増加
+            // Increase position uncertainty over time.
             unc.sigma2Pos += qPos * dtSec
         }
     }
@@ -77,16 +76,16 @@ internal class DeadReckoningEngine(
         val r = max(accM ?: 10f, 5f)
         val K = unc.sigma2Pos / (unc.sigma2Pos + r * r)
 
-        // 位置を補正
+        // Correct position.
         state.lat = state.lat + K * (lat - state.lat)
         state.lon = state.lon + K * (lon - state.lon)
 
-        // 速度を補正
+        // Correct speed.
         if (speedMps != null) {
             state.speedMps = state.speedMps + kV * (speedMps - state.speedMps)
         }
 
-        // 不確かさを更新
+        // Update uncertainty.
         unc.sigma2Pos = (1 - K) * unc.sigma2Pos
     }
 
@@ -123,7 +122,7 @@ internal class DeadReckoningEngine(
         return a + d * t
     }
 
-    /** センサー統計用の簡易リングバッファ */
+    /** Simple circular window for sensor statistics. */
     private class CircularWindow(cap: Int) {
         private val buf = FloatArray(cap)
         private var idx = 0
@@ -143,3 +142,4 @@ internal class DeadReckoningEngine(
         }
     }
 }
+

@@ -24,15 +24,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 今日分（0:00〜現在）のログを 1 ファイルにまとめてエクスポートする ViewModel。
+ * ViewModel for exporting today's logs (00:00 to now) into a single ZIP file.
  *
- * - Downloads に ZIP を作成
- * - オプションで Drive にアップロード（ZIP 削除）
+ * - Creates a ZIP under Downloads.
+ * - Optionally uploads to Drive and deletes the local ZIP.
  */
 enum class TodayPreviewMode {
-    /** アップロードする（成功/失敗に関わらず ZIP を削除。Room は削除しない） */
+    /** Upload to Drive and always delete the local ZIP; Room data is not deleted. */
     UPLOAD_AND_DELETE_LOCAL,
-    /** アップロードしない（Downloads に保存、ZIP は保持。Room は削除しない） */
+
+    /** Do not upload; keep ZIP in Downloads; Room data is not deleted. */
     SAVE_TO_DOWNLOADS_ONLY
 }
 
@@ -41,31 +42,30 @@ class ManualExportViewModel(
 ) : ViewModel() {
 
     /**
-     * 仕様（確定版）:
-     * - 対象: 今日 0:00〜現在 の全レコードを 1 ファイルにまとめる
-     * - ファイル名: glp-YYYYMMDD-HHmmss.zip（実行時刻ベース）
-     * - モード:
+     * Behavior:
+     * - Target: all records from today 00:00 to now, bundled into one ZIP.
+     * - File name: glp-YYYYMMDD-HHmmss.zip (based on execution time).
+     * - Modes:
      *   - UPLOAD_AND_DELETE_LOCAL:
-     *      - 最大5回試行。成功/失敗を問わず ZIP は必ず削除。Room は削除しない
+     *       - Up to 5 upload attempts. ZIP is always deleted regardless of success/failure.
+     *       - Room data is never deleted.
      *   - SAVE_TO_DOWNLOADS_ONLY:
-     *      - Downloads に保存（ZIP保持）。Room は削除しない
+     *       - Save ZIP in Downloads. ZIP is kept. Room data is never deleted.
      */
     fun backupToday(mode: TodayPreviewMode) {
         viewModelScope.launch(Dispatchers.IO) {
 
-            // 今日0:00〜現在
             val zone = ZoneId.of("Asia/Tokyo")
             val now = ZonedDateTime.now(zone)
             val today0 = now.truncatedTo(ChronoUnit.DAYS)
             val startMillis = today0.toInstant().toEpochMilli()
             val endMillis = now.toInstant().toEpochMilli()
 
-            // DAO には findBetween がある前提だが、UI 層からは StorageService 経由でアクセスする
+            // Prefer range query via StorageService; fall back to manual filtering
             val todays = try {
                 StorageService.getLocationsBetween(appContext, startMillis, endMillis)
             } catch (_: Throwable) {
                 StorageService.getAllLocations(appContext).filter { rec ->
-                    // エンティティのフィールド名が異なる場合に備え、反射で安全取得
                     val candidates = arrayOf(
                         "timestampMillis", "timeMillis", "createdAtMillis",
                         "timestamp", "createdAt", "recordedAt", "epochMillis"
@@ -83,7 +83,7 @@ class ManualExportViewModel(
 
             if (todays.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(appContext, "今日のデータがありません", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(appContext, "No data for today.", Toast.LENGTH_SHORT).show()
                 }
                 return@launch
             }
@@ -99,18 +99,23 @@ class ManualExportViewModel(
                 )
                 if (outUri == null) {
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(appContext, "ZIPの作成に失敗しました", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(appContext, "Failed to create ZIP.", Toast.LENGTH_SHORT)
+                            .show()
                     }
                     return@launch
                 }
 
                 when (mode) {
                     TodayPreviewMode.SAVE_TO_DOWNLOADS_ONLY -> {
-                        // 単に保存だけ。Room は削除しない。
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(appContext, "保存しました（Downloads）", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                appContext,
+                                "Saved to Downloads as $baseName.zip (Room data kept).",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         }
                     }
+
                     TodayPreviewMode.UPLOAD_AND_DELETE_LOCAL -> {
                         val tokenProvider = CredentialManagerAuth.get(appContext)
                         val token = tokenProvider.getAccessToken()
@@ -118,7 +123,7 @@ class ManualExportViewModel(
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(
                                     appContext,
-                                    "Drive 認可が不足しています。設定画面から権限を付与してください。",
+                                    "Drive authorization is missing. Please grant permission in settings.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -136,9 +141,13 @@ class ManualExportViewModel(
 
                         if (uploader == null || folderId.isNullOrBlank()) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(appContext, "アップロード設定が不十分です（フォルダや認証を確認）", Toast.LENGTH_LONG).show()
+                                Toast.makeText(
+                                    appContext,
+                                    "Upload settings are incomplete (check folder and auth).",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
-                            // ZIPは方針に基づき削除（Room保持）
+                            // Delete ZIP; keep Room data
                             runCatching { appContext.contentResolver.delete(outUri, null, null) }
                             return@launch
                         }
@@ -147,33 +156,34 @@ class ManualExportViewModel(
                         for (attempt in 0 until 5) {
                             when (val result = uploader.upload(outUri, folderId, null)) {
                                 is UploadResult.Success -> {
-                                    // 成功：当モードでは Room は削除しない
+                                    // Preview mode: Room data is not deleted
                                     success = true
                                     break
                                 }
+
                                 is UploadResult.Failure -> {
                                     if (attempt < 4) {
-                                        // 15s, 30s, 60s, 120s の指数バックオフ
+                                        // Exponential backoff: 15s, 30s, 60s, 120s
                                         delay(15_000L * (1 shl attempt))
                                     }
                                 }
                             }
                         }
 
-                        // ZIP は成功/失敗に関わらず必ず削除（Room は削除しない）
+                        // Delete ZIP regardless of success/failure; keep Room data
                         runCatching { appContext.contentResolver.delete(outUri, null, null) }
 
                         withContext(Dispatchers.Main) {
                             if (success) {
                                 Toast.makeText(
                                     appContext,
-                                    "アップロードに成功しました（ZIPは削除済み／Roomは削除していません）",
+                                    "Upload succeeded. Local ZIP deleted; Room data kept.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             } else {
                                 Toast.makeText(
                                     appContext,
-                                    "アップロードに失敗しました（ZIPは削除済み／Roomは削除していません）",
+                                    "Upload failed after retries. Local ZIP deleted; Room data kept.",
                                     Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -181,9 +191,9 @@ class ManualExportViewModel(
                     }
                 }
             } finally {
-                // 念のため URI をクリーンアップ（既に削除済みなら no-op）
+                // For SAVE_TO_DOWNLOADS_ONLY we intentionally keep ZIP; no cleanup needed here
                 if (outUri != null && mode == TodayPreviewMode.SAVE_TO_DOWNLOADS_ONLY) {
-                    // 保存モードでは ZIP を残す仕様なので、ここでは削除しない
+                    // No-op: keep ZIP
                 }
             }
         }
@@ -202,3 +212,4 @@ class ManualExportViewModel(
             }
     }
 }
+

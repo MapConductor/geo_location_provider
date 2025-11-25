@@ -22,7 +22,7 @@ internal object DriveHttp {
         chain.proceed(req)
     }
 
-    /** シンプル指数バックオフ（maxRetries 回まで） */
+    /** Simple exponential backoff helper (up to maxRetries times). */
     inline fun <T> withBackoff(
         maxRetries: Int = 5,
         baseDelayMs: Long = 500,
@@ -48,6 +48,7 @@ internal object DriveHttp {
         }
     }
 
-    /** 429 / 5xx はリトライ対象にするかの簡易判定 */
+    /** Simple check whether 429 / 5xx should be treated as retryable. */
     fun shouldRetry(code: Int): Boolean = code == 429 || code in 500..599
 }
+

@@ -22,7 +22,7 @@ fun LocationHistoryList(
     if (records.isEmpty()) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                text = "まだ記録がありません",
+                text = "No records yet.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

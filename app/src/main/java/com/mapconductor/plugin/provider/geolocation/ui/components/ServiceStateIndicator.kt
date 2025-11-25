@@ -13,19 +13,18 @@ import kotlin.coroutines.resume
 object ServiceStateIndicator {
 
     /**
-     * GeoLocationService が「いま位置更新＋DRを動かしているか」を問い合わせる。
+     * Checks whether GeoLocationService is currently running location/DR updates.
      *
-     * 判定ロジック:
-     * - bindService(flags=0) で一時的にバインドを試みる。
-     * - 成功した場合:
-     *     - binder が GeoLocationService.LocalBinder なら、
-     *       service.isLocationRunning() の結果を返す。
-     *     - それ以外の binder（想定外）の場合は「サービスは存在する」とみなし true。
-     * - bindService が失敗した場合:
-     *     - サービスインスタンスが存在しないとみなし false。
+     * Logic:
+     * - Try a temporary bindService(flags = 0).
+     * - If bind succeeds:
+     *   - When binder is GeoLocationService.LocalBinder, return service.isLocationRunning().
+     *   - Otherwise treat it as "service exists" and return true.
+     * - If bind fails:
+     *   - Treat it as "service instance does not exist" and return false.
      *
-     * 注意:
-     * - flags=0（BIND_AUTO_CREATE なし）なので、存在しないサービスを勝手に起動はしない。
+     * Note:
+     * - flags = 0 (no BIND_AUTO_CREATE) so this will not start the service if it is not running.
      */
     suspend fun isRunning(context: Context, service: Class<*>): Boolean {
         val intent = Intent(context, service)
@@ -43,12 +42,12 @@ object ServiceStateIndicator {
                                 try {
                                     binder.getService().isLocationRunning()
                                 } catch (_: Throwable) {
-                                    // 何かおかしくても「サービスは存在する」扱い
+                                    // If something is wrong, still treat as "service exists"
                                     true
                                 }
                             }
                             else -> {
-                                // 想定外の binder 型: サービスは存在しているので true 扱い
+                                // Unexpected binder type but service exists, treat as running
                                 true
                             }
                         }
@@ -61,7 +60,7 @@ object ServiceStateIndicator {
                     }
 
                     override fun onNullBinding(name: ComponentName?) {
-                        // サービスインスタンスは存在するので true 扱い
+                        // Service instance exists; treat as running
                         delivered = true
                         cont.resume(true)
                         try {
@@ -71,11 +70,11 @@ object ServiceStateIndicator {
                     }
 
                     override fun onServiceDisconnected(name: ComponentName?) {
-                        // 一時的な切断なのでここでは何もしない
+                        // Temporary disconnect; nothing to do here
                     }
                 }
 
-                // flags = 0 -> 非起動バインド。存在しなければ false で即返る。
+                // flags = 0 -> do not auto-create; if service does not exist, this returns false
                 val ok = try {
                     context.bindService(intent, conn, 0)
                 } catch (_: Exception) {
@@ -96,3 +95,4 @@ object ServiceStateIndicator {
         }
     }
 }
+

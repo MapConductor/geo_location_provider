@@ -20,7 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
-/** アップロード方式の共通インターフェース。URI を受け取り、結果を UploadResult として返す。 */
+/** Common interface for upload engines. Takes a URI and returns UploadResult. */
 interface Uploader {
     suspend fun upload(
         uri: Uri,
@@ -30,10 +30,10 @@ interface Uploader {
 }
 
 /**
- * 既存の DriveApiClient + GoogleAuthRepository を内部で利用するレガシー実装。
+ * Legacy implementation using DriveApiClient + GoogleAuthRepository internally.
  *
- * @deprecated GoogleAuthUtil ベースの実装に依存するため、新規コードでは KotlinDriveUploader と
- *             GoogleDriveTokenProvider（Credential Manager など）の組み合わせを使用してください。
+ * @deprecated Depends on GoogleAuthUtil-based implementation; for new code prefer KotlinDriveUploader
+ *             together with GoogleDriveTokenProvider (for example Credential Manager).
  */
 @Deprecated("Use KotlinDriveUploader via UploaderFactory with a modern GoogleDriveTokenProvider")
 internal class ApiClientDriveUploader(
@@ -42,15 +42,15 @@ internal class ApiClientDriveUploader(
     private val auth: GoogleAuthRepository = GoogleAuthRepository(appContext)
 ) : Uploader {
 
-    // resourceKey を読むための prefs
+    // prefs used for reading resourceKey.
     private val prefs by lazy { DrivePrefsRepository(appContext) }
 
     override suspend fun upload(uri: Uri, folderId: String, fileName: String?): UploadResult {
-        // 1) 認証トークン
+        // 1) Acquire auth token.
         val token = auth.getAccessTokenOrNull()
             ?: return UploadResult.Failure(code = 401, body = "No Google access token")
 
-        // 2) フォルダ ID のプレフライト解決（ショートカット・権限・resourceKey を考慮）
+        // 2) Resolve folder ID (handles shortcut, permissions, resourceKey).
         val rk = try { prefs.folderResourceKeyFlow.first() } catch (_: Exception) { null }
         val resolved = client.resolveFolderIdForUpload(token, folderId, rk)
         val finalFolderId = when (resolved) {
@@ -73,7 +73,7 @@ internal class ApiClientDriveUploader(
             }
         }
 
-        // 3) URI からメタ情報と内容を取得（ここではシンプルに全読み込み）
+        // 3) Read metadata and content from URI (simple full read).
         val cr = appContext.contentResolver
         val pickedName = fileName ?: run {
             val guess = cr.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
@@ -89,7 +89,7 @@ internal class ApiClientDriveUploader(
             cr.openInputStream(uri)?.use { it.readBytes() }
         } ?: return UploadResult.Failure(code = -1, body = "Failed to open input stream")
 
-        // 4) Drive へ multipart/related アップロード
+        // 4) Perform multipart/related upload via DriveApiClient.
         val apiRes = client.uploadMultipart(
             token = token,
             name = pickedName,
@@ -98,7 +98,7 @@ internal class ApiClientDriveUploader(
             bytes = bytes
         )
 
-        // 5) ApiResult → UploadResult へ変換して返す
+        // 5) Map ApiResult to UploadResult.
         return when (apiRes) {
             is ApiResult.Success -> {
                 val r = apiRes.data
@@ -122,15 +122,15 @@ internal class ApiClientDriveUploader(
     }
 }
 
-/** エンジン種別に応じて Uploader を生成するファクトリ。NONE のときは null を返す。 */
+/** Factory that returns Uploader based on engine type. NONE returns null. */
 object UploaderFactory {
     /**
-     * エンジン種別とトークンプロバイダに応じて Uploader を生成する。
+     * Create Uploader based on engine type and token provider.
      *
-     * @param context Application コンテキスト
-     * @param engine  利用するアップロードエンジン
-     * @param tokenProvider 利用するトークンプロバイダ。未指定の場合は DriveTokenProviderRegistry を参照し、
-     *                      未登録ならレガシーな GoogleAuthRepository にフォールバックする。
+     * @param context Application context.
+     * @param engine  Upload engine to use.
+     * @param tokenProvider Token provider to use. When null, DriveTokenProviderRegistry is consulted;
+     *                      if still null, falls back to legacy GoogleAuthRepository.
      */
     fun create(
         context: Context,
@@ -151,9 +151,9 @@ object UploaderFactory {
         }
 
     /**
-     * レガシーなファクトリメソッド。内部的に ApiClientDriveUploader を利用する。
+     * Legacy factory method that uses ApiClientDriveUploader internally.
      *
-     * @deprecated create(context, engine, tokenProvider) の利用を推奨
+     * @deprecated Prefer create(context, engine, tokenProvider) for better flexibility.
      */
     @Deprecated("Use create(context, engine, tokenProvider) for better flexibility")
     fun createLegacy(context: Context, engine: UploadEngine): Uploader? =
@@ -162,3 +162,4 @@ object UploaderFactory {
             UploadEngine.NONE   -> null
         }
 }
+

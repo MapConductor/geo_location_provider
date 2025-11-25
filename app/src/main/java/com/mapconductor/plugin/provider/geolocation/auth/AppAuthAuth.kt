@@ -5,16 +5,15 @@ import com.mapconductor.plugin.provider.geolocation.BuildConfig
 import com.mapconductor.plugin.provider.geolocation.auth.appauth.AppAuthTokenProvider
 
 /**
- * AppAuthTokenProvider のシングルトンラッパー。
+ * Singleton wrapper around AppAuthTokenProvider.
  *
- * ■役割
- * - アプリ全体で共通の AppAuthTokenProvider インスタンスを提供する。
- * - clientId / redirectUri の持ち方を 1 箇所に集約する。
+ * Responsibilities:
+ * - Provide a single shared AppAuthTokenProvider instance for the whole app.
+ * - Centralize how clientId and redirectUri are wired.
  *
- * ■注意
- * - clientId には「インストール アプリ」用の OAuth クライアント ID
- *   （例: APPAUTH_CLIENT_ID）を使い、Credential Manager 用の
- *   server client ID（WEB クライアント）は流用しないこと。
+ * Notes:
+ * - clientId must be an "installed app" OAuth client id (APPAUTH_CLIENT_ID),
+ *   not the server client id used for Credential Manager.
  */
 object AppAuthAuth {
 

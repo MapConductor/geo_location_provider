@@ -73,7 +73,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     if (email.isNotBlank()) {
                         prefs.setAccountEmail(email)
                     }
-                    // 「トークンを UI から正常に取得できた」タイミングとして保存しておく
+                    // Remember when a token was successfully obtained from the UI
                     prefs.markTokenRefreshed()
                     _status.value = "About 200: ${if (email.isNotBlank()) email else "unknown"}"
                 }
@@ -83,7 +83,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Validate Folder: URL/ID から id と resourceKey を抽出して検証する。 */
+    /** Validate folder URL/ID and extract id and resourceKey. */
     fun validateFolder() {
         viewModelScope.launch(Dispatchers.IO) {
             val tokenProvider = CredentialManagerAuth.get(getApplication())
@@ -132,7 +132,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     prefs.setFolderId(resolvedId)
-                    // AppPrefs 側にも反映しておくことで、Worker やレガシー経路も同じ設定を参照できるようにする
+                    // Also reflect into AppPrefs so workers and legacy paths share the same settings
                     AppPrefs.saveFolderId(getApplication(), resolvedId)
                     AppPrefs.saveEngine(getApplication(), UploadEngine.KOTLIN)
                     _status.value = "Folder OK: ${detail.name} ($resolvedId)"
@@ -143,7 +143,7 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** サンプルテキストを作って Drive にアップロードする。 */
+    /** Create a sample text file and upload it to Drive. */
     fun uploadSampleNow() {
         viewModelScope.launch(Dispatchers.IO) {
             val tokenProvider = CredentialManagerAuth.get(getApplication())
@@ -221,3 +221,4 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
         MidnightExportWorker.runNow(getApplication())
     }
 }
+

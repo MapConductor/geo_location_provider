@@ -9,14 +9,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,20 +46,17 @@ fun PickupScreen() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
-    // -----------------------------
-    // ▼ dataselector の UseCase をファクトリから取得
-    //   Pickup は DB/DAO の型を直接知らない
-    // -----------------------------
+    // UseCase from dataselector; Pickup does not know DB/DAO types directly
     val buildSelectedSlots: BuildSelectedSlots = remember {
         SelectorUseCases.buildSelectedSlots(context)
     }
 
-    // ====== 入力フィールド（統一フォーム） ======
+    // Input fields
     val jst = remember { ZoneId.of("Asia/Tokyo") }
     val dateFmt = remember { DateTimeFormatter.ofPattern("yyyy/MM/dd", Locale.ROOT) }
     val hmsFmt = remember { DateTimeFormatter.ofPattern("HH:mm:ss", Locale.ROOT) }
 
-    // 既定値: 今日の 00:00:00 〜 現在
+    // Defaults: today 00:00:00 to now
     val now = remember { ZonedDateTime.now(jst) }
     var fromDate by remember { mutableStateOf(now.toLocalDate().format(dateFmt)) }
     var fromHms by remember { mutableStateOf("00:00:00") }
@@ -70,12 +64,12 @@ fun PickupScreen() {
     var toHms by remember { mutableStateOf(now.toLocalTime().format(hmsFmt)) }
     var sortOrder by remember { mutableStateOf(SortOrder.NewestFirst) }
     var countText by remember { mutableStateOf("100") }
-    var intervalSecText by remember { mutableStateOf("3600") } // 0 で無効
+    var intervalSecText by remember { mutableStateOf("3600") } // 0 means disabled
 
-    // 反映後に固定表示するスナップショット（SelectedSlot = 欠測も行として保持）
+    // Snapshot to display after apply (SelectedSlot, including gaps)
     var displaySlots by remember { mutableStateOf<List<SelectedSlot>>(emptyList()) }
 
-    // ====== 変換ユーティリティ ======
+    // Conversion utilities
     fun parseDateMillis(text: String): Long? =
         runCatching {
             LocalDate.parse(text.trim(), dateFmt)
@@ -103,58 +97,59 @@ fun PickupScreen() {
 
     fun clampToNow(toMs: Long?): Long? {
         val nowMs = System.currentTimeMillis()
-        return toMs?.let { minOf(it, nowMs) }
+        return toMs?.coerceAtMost(nowMs)
     }
 
-    // ====== 画面 ======
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        // Input fields
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedTextField(
                 value = fromDate,
                 onValueChange = { fromDate = it },
-                label = { Text("From 日付 (yyyy/MM/dd)") },
+                label = { Text("From date (yyyy/MM/dd)") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
             OutlinedTextField(
                 value = fromHms,
                 onValueChange = { fromHms = it },
-                label = { Text("From 時刻 (HH:mm:ss)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-        }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            OutlinedTextField(
-                value = toDate,
-                onValueChange = { toDate = it },
-                label = { Text("To 日付 (yyyy/MM/dd)") },
-                singleLine = true,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-                value = toHms,
-                onValueChange = { toHms = it },
-                label = { Text("To 時刻 (HH:mm:ss)") },
+                label = { Text("From time (HH:mm:ss)") },
                 singleLine = true,
                 modifier = Modifier.weight(1f)
             )
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = toDate,
+                onValueChange = { toDate = it },
+                label = { Text("To date (yyyy/MM/dd)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = toHms,
+                onValueChange = { toHms = it },
+                label = { Text("To time (HH:mm:ss)") },
+                singleLine = true,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             CountDirectionSelector(
                 value = sortOrder,
@@ -164,28 +159,26 @@ fun PickupScreen() {
             OutlinedTextField(
                 value = countText,
                 onValueChange = { countText = it },
-                label = { Text("件数上限") },
+                label = { Text("Count limit") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f)
             )
         }
 
-        // 間隔（秒）
         OutlinedTextField(
             value = intervalSecText,
             onValueChange = { intervalSecText = it },
-            label = { Text("間隔（秒）※0で無効") },
+            label = { Text("Interval (sec, 0 to disable)") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
 
-        // 実行（反映）
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = {
                 scope.launch {
-                    // 1) 入力をミリ秒に変換
+                    // 1) Convert input to millis
                     val fromDateMs = parseDateMillis(fromDate)
                     val toDateMs = parseDateMillis(toDate)
                     val fromHmsMs = parseHmsToMillisOfDay(fromHms) ?: 0L
@@ -195,7 +188,7 @@ fun PickupScreen() {
                     var toMs = combine(toDateMs, toHmsMs)
                     toMs = clampToNow(toMs)
 
-                    // From > To の場合は入れ替え
+                    // Swap if From > To
                     if (fromMs != null && toMs != null && fromMs > toMs) {
                         val tmp = fromMs
                         fromMs = toMs
@@ -207,7 +200,7 @@ fun PickupScreen() {
                         intervalSecText.trim().toIntOrNull()?.coerceIn(0, 86_400) ?: 0
                     val interval = if (intervalSec > 0) intervalSec.toLong() else null
 
-                    // 2) UseCase 実行（欠測は SelectedSlot.sample == null）
+                    // 2) Execute use case (gaps are represented as SelectedSlot.sample == null)
                     val slots = buildSelectedSlots(
                         SelectorCondition(
                             fromMillis = fromMs,
@@ -219,23 +212,22 @@ fun PickupScreen() {
                         )
                     )
 
-                    // 3) 結果を固定表示
+                    // 3) Fix display snapshot
                     displaySlots = slots
                 }
             }) {
-                Text("反映")
+                Text("Apply")
             }
         }
 
-        // 結果
         PickupListBySlots(slots = displaySlots)
     }
 }
 
-/* ====== リスト（SelectedSlot = 欠測も含む） ====== */
+/* ====== List (SelectedSlot, including gaps) ====== */
 @Composable
 private fun PickupListBySlots(slots: List<SelectedSlot>) {
-    // 実データ付きスロットだけを表示対象にする
+    // Filter out empty slots for display
     val filledSlots = remember(slots) { slots.filter { it.sample != null } }
 
     LazyColumn(
@@ -253,49 +245,25 @@ private fun PickupListBySlots(slots: List<SelectedSlot>) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("DEPRECATION")
 private fun CountDirectionSelector(
     value: SortOrder,
     onChange: (SortOrder) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val label = if (value == SortOrder.NewestFirst) "新しい方から優先" else "古い方から優先"
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = !expanded },
-        modifier = modifier
-    ) {
-        OutlinedTextField(
-            value = label,
-            onValueChange = {},
-            label = { Text("件数の適用方向") },
-            readOnly = true,
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier
-                .menuAnchor()
-                .fillMaxWidth()
-        )
-        ExposedDropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false }
-        ) {
-            TextButton(onClick = {
-                onChange(SortOrder.NewestFirst)
-                expanded = false
-            }) {
-                Text("新しい方から優先")
+    Column(modifier = modifier) {
+        Text("Count direction")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = { onChange(SortOrder.NewestFirst) }
+            ) {
+                Text("Newest first")
             }
-            TextButton(onClick = {
-                onChange(SortOrder.OldestFirst)
-                expanded = false
-            }) {
-                Text("古い方から優先")
+            TextButton(
+                onClick = { onChange(SortOrder.OldestFirst) }
+            ) {
+                Text("Oldest first")
             }
         }
     }
 }
-

@@ -10,18 +10,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-/** 画面の状態（必要に応じて項目を足してください） */
+/** Simple UI state for the main screen. */
 data class UiState(
     val title: String = "GeoLocationProvider",
     val subtitle: String = "FGS + Location + Battery + Room",
 )
 
-/** 一回性イベント（Toast など） */
+/** One-shot events (for example Toast). */
 sealed interface UiEvent {
     data class ShowToast(val message: String) : UiEvent
 }
 
-/** 画面用 ViewModel（最小構成） */
+/** Minimal ViewModel for the main GeoLocationProvider screen. */
 class GeoLocationProviderViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow(UiState())
@@ -33,7 +33,8 @@ class GeoLocationProviderViewModel : ViewModel() {
     private val vmScope = CoroutineScope(Dispatchers.Default)
 
     fun onGeoLocationProviderClicked() {
-        vmScope.launch { _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked!")) }
+        vmScope.launch { _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked")) }
         _uiState.update { it.copy() }
     }
 }
+

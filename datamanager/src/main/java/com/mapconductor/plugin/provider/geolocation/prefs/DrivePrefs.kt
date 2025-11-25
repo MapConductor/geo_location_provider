@@ -10,12 +10,12 @@ import kotlinx.coroutines.flow.map
 
 private const val DS_NAME = "drive_prefs"
 
-// Context 拡張（ファイル内 private にして衝突回避）
+// Context extension for Drive-related DataStore; kept private to avoid collisions.
 private val Context.driveDataStore by preferencesDataStore(DS_NAME)
 
 /**
- * DataStore の薄いラッパ（生値をそのまま扱うレイヤ）。
- * Repository で null/blank の吸収などを行う想定。
+ * Thin wrapper around DataStore that exposes raw Drive preference values.
+ * The repository layer is responsible for normalizing null/blank handling.
  */
 internal class DrivePrefs(private val appContext: Context) {
 
@@ -29,6 +29,7 @@ internal class DrivePrefs(private val appContext: Context) {
     }
 
     // ---- Read Flows ----
+
     val folderId: Flow<String> =
         appContext.driveDataStore.data.map { it[K.FOLDER_ID] ?: "" }
 
@@ -44,11 +45,12 @@ internal class DrivePrefs(private val appContext: Context) {
     val tokenUpdatedAtMillis: Flow<Long> =
         appContext.driveDataStore.data.map { it[K.TOKEN_TS] ?: 0L }
 
-    // resourceKey は null 許容（未保存の場合は null）
+    // resourceKey is nullable (when not yet saved).
     val folderResourceKey: Flow<String?> =
-        appContext.driveDataStore.data.map { it[K.FOLDER_RES_KEY] } // そのまま nullable
+        appContext.driveDataStore.data.map { it[K.FOLDER_RES_KEY] }
 
     // ---- Write APIs ----
+
     suspend fun setFolderId(folderId: String) {
         appContext.driveDataStore.edit { it[K.FOLDER_ID] = folderId }
     }
@@ -79,3 +81,4 @@ internal class DrivePrefs(private val appContext: Context) {
         }
     }
 }
+

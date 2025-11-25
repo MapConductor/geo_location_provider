@@ -36,7 +36,7 @@ internal class DeadReckoningImpl(
                 lastTimestampNanos = s.timestampNanos
                 if (prev != null && s.acc != null) {
                     val dt = ((s.timestampNanos - prev).toDouble() / 1_000_000_000.0).toFloat()
-                    val dtClamped = max(0.002f, kotlin.math.min(dt, 0.05f)) // 20Hz~500Hz相当のガード
+                    val dtClamped = max(0.002f, kotlin.math.min(dt, 0.05f)) // Guard for about 20Hz to 500Hz.
                     engine.onSensor(s.acc, s.gyro, s.mag, dtClamped)
                 }
             }
@@ -54,19 +54,20 @@ internal class DeadReckoningImpl(
     }
 
     override suspend fun predict(fromMillis: Long, toMillis: Long): List<PredictedPoint> {
-        // 現在の内部状態スナップショットを単純に返す。
-        // 区間内での補間は呼び出し側スケジューラの刻みに合わせて複数回呼ぶ想定。
+        // Return a snapshot as a simple representative point for [fromMillis, toMillis].
+        // Actual sampling cadence is controlled by the caller that schedules this method.
         val (st, un) = engine.snapshot()
         val hStd = kotlin.math.sqrt(2f * un.sigma2Pos)
         return listOf(
             PredictedPoint(
-                timestampMillis = toMillis, // 代表値（呼出側が刻み分の時刻を使ってもOK）
+                timestampMillis = toMillis,
                 lat = st.lat,
                 lon = st.lon,
-                accuracyM = hStd,      // 近似として1σをaccuracy的に流用
+                accuracyM = hStd,
                 speedMps = st.speedMps,
                 horizontalStdM = hStd
             )
         )
     }
 }
+

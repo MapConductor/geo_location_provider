@@ -20,7 +20,7 @@ object GeoJsonExporter {
     private val nameFmt = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
 
     /**
-     * 既存互換：ファイル名は内部で自動生成（.geojson、非ZIP）
+     * Backward-compatible helper: auto-generates file name (".geojson", no ZIP).
      */
     fun exportToDownloads(
         context: Context,
@@ -35,11 +35,11 @@ object GeoJsonExporter {
     }
 
     /**
-     * Downloads/GeoLocationProvider へエクスポート。
+     * Export to Downloads/GeoLocationProvider.
      *
-     * @param baseName    null の場合は "yyyyMMdd-HHmmss" で自動生成
-     * @param compressAsZip true で ZIP（中身は .geojson 1ファイル）、false で .geojson 直書き
-     * @return MediaStore の Uri（作成失敗時は null）
+     * @param baseName      when null, file name is auto-generated as "yyyyMMdd-HHmmss".
+     * @param compressAsZip true to create ZIP (containing one .geojson file), false to write .geojson directly.
+     * @return MediaStore Uri, or null when creation failed.
      */
     fun exportToDownloads(
         context: Context,
@@ -57,7 +57,7 @@ object GeoJsonExporter {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
             put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
             if (Build.VERSION.SDK_INT >= 29) {
-                // Downloads/GeoLocationProvider に配置
+                // Place under Downloads/GeoLocationProvider.
                 put(
                     MediaStore.MediaColumns.RELATIVE_PATH,
                     Environment.DIRECTORY_DOWNLOADS + "/GeoLocationProvider"
@@ -65,7 +65,7 @@ object GeoJsonExporter {
             }
         }
 
-        // API29+ は Downloads、旧API は Files(external) に挿入
+        // For API 29+, insert into Downloads; for older API, use Files(external).
         val collection = if (Build.VERSION.SDK_INT >= 29) {
             MediaStore.Downloads.EXTERNAL_CONTENT_URI
         } else {
@@ -93,7 +93,7 @@ object GeoJsonExporter {
             return
         }
 
-        // ZIP 内に baseName.geojson という1ファイルで格納
+        // When ZIP, store a single file named baseName.geojson inside.
         ZipOutputStream(BufferedOutputStream(os)).use { zos ->
             val entry = ZipEntry("$baseName.geojson")
             zos.putNextEntry(entry)
@@ -102,7 +102,7 @@ object GeoJsonExporter {
         }
     }
 
-    /** LocationSample -> GeoJSON(FeatureCollection) */
+    /** LocationSample -> GeoJSON (FeatureCollection). */
     private fun toGeoJson(records: List<LocationSample>): String {
         val sb = StringBuilder(1024)
         sb.append("{\"type\":\"FeatureCollection\",\"features\":[")
@@ -110,16 +110,16 @@ object GeoJsonExporter {
             if (i > 0) sb.append(',')
             sb.append("{\"type\":\"Feature\",\"geometry\":{")
             sb.append("\"type\":\"Point\",\"coordinates\":[")
-            sb.append(r.lon).append(',').append(r.lat) // GeoJSON は [lon, lat]
+            sb.append(r.lon).append(',').append(r.lat) // GeoJSON uses [lon, lat]
             sb.append("]},\"properties\":{")
-            // 既存プロパティ
+            // Existing properties.
             sb.append("\"accuracy\":").append(r.accuracy)
             r.provider?.let { sb.append(",\"provider\":\"").append(it).append('"') }
             sb.append(",\"battery_pct\":").append(r.batteryPercent)
             sb.append(",\"is_charging\":").append(if (r.isCharging) "true" else "false")
             sb.append(",\"created_at\":").append(r.timeMillis)
 
-            // ▼ 追加プロパティ（null は出力しない）
+            // Additional properties (skip when null).
             r.headingDeg.let   { sb.append(",\"heading_deg\":").append(it) }
             r.courseDeg?.let   { sb.append(",\"course_deg\":").append(it) }
             r.speedMps.let     { sb.append(",\"speed_mps\":").append(it) }
@@ -131,5 +131,5 @@ object GeoJsonExporter {
         sb.append("]}")
         return sb.toString()
     }
-
 }
+

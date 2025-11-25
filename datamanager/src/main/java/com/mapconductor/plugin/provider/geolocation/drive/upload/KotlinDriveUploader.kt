@@ -29,7 +29,7 @@ internal class KotlinDriveUploader(
 
     private val baseUploadUrl = "https://www.googleapis.com/upload/drive/v3/files"
     private val baseFilesUrl  = "https://www.googleapis.com/drive/v3/files"
-    private val chunkSize = 256 * 1024 // 256 KiB (Drive 要件に合致)
+    private val chunkSize = 256 * 1024 // 256 KiB (fits Drive requirements)
 
     override suspend fun upload(uri: Uri, folderId: String, fileName: String?): UploadResult =
         withContext(Dispatchers.IO) {
@@ -43,8 +43,8 @@ internal class KotlinDriveUploader(
             val mime = guessMime(cr, uri) ?: "application/octet-stream"
             val size = tryGetSize(cr, uri)
 
-            // 小容量は multipart（simple upload）、大容量は resumable
-            val useResumable = size == null || size > 2L * 1024 * 1024 // >2MB を目安に
+            // Small payloads use multipart (simple upload); larger ones use resumable.
+            val useResumable = size == null || size > 2L * 1024 * 1024 // >2MB threshold.
 
             return@withContext if (!useResumable) {
                 simpleUpload(token, cr, uri, name, mime, folderId)
@@ -121,8 +121,8 @@ internal class KotlinDriveUploader(
                 val nameVal = jo.optString("name", "")
                 val linkVal = jo.optString("webViewLink").takeIf { it.isNotBlank() }
                 UploadResult.Success(
-                    id = idVal.ifEmpty { "drive:unknown" },
-                    name = nameVal.ifEmpty { name },
+                    id = idVal,
+                    name = nameVal,
                     webViewLink = linkVal ?: ""
                 )
             }
@@ -137,30 +137,27 @@ internal class KotlinDriveUploader(
         uri: Uri,
         name: String,
         mime: String,
-        folder: String,
+        folderId: String?,
         totalSize: Long?
     ): UploadResult {
-        val folderId = DriveFolderId.extractFromUrlOrId(folder)?.toString()
         val client = DriveHttp.client().newBuilder()
             .addInterceptor(DriveHttp.auth(token))
             .build()
 
-        // 1) セッション開始
         val sessionUrl = startSession(client, name, mime, folderId, totalSize)
 
-        // 2) チャンク送信（再開対応あり）
-        var sent = 0L
         var finalId: String? = null
         var finalName: String? = null
         var finalLink: String? = null
 
-        if (totalSize != null) {
-            // 途中から再開する必要がある場合の問い合わせ
+        var sent = 0L
+        if (totalSize != null && totalSize > 0L) {
+            // Query how many bytes have already been accepted when resuming.
             sent = queryProgress(client, sessionUrl, totalSize)
         }
 
         cr.openInputStream(uri)?.use { input ->
-            // 送信済み分スキップ
+            // Skip bytes that have already been sent.
             if (sent > 0) input.skip(sent)
 
             var offset = sent
@@ -184,11 +181,11 @@ internal class KotlinDriveUploader(
                     client.newCall(req).execute().use { resp ->
                         when {
                             resp.code == 308 -> {
-                                // Incomplete; Range or Location が返る
+                                // Incomplete; Range or Location header indicates progress.
                                 true
                             }
                             resp.isSuccessful -> {
-                                // 完了（200/201）。可能なら JSON をパース
+                                // Completed (200/201). If possible, parse JSON body.
                                 val bodyStr = resp.body?.string().orEmpty()
                                 if (bodyStr.isNotEmpty()) {
                                     runCatching {
@@ -202,7 +199,7 @@ internal class KotlinDriveUploader(
                             }
                             DriveHttp.shouldRetry(resp.code) -> throw IOException("HTTP ${resp.code}")
                             else -> {
-                                // エラー応答の本文は通知へ
+                                // Error response body is used for notification.
                                 throw IOException("Upload failed: ${resp.code} ${resp.body?.string()}")
                             }
                         }
@@ -214,7 +211,7 @@ internal class KotlinDriveUploader(
             }
         } ?: return UploadResult.Failure(code = 400, body = "openInputStream failed")
 
-        // 完了：最終レスポンスで id/name/link を得られていればそれを返す
+        // Completed: if final id/name/link was returned, use it.
         if (finalId != null) {
             return UploadResult.Success(
                 id = finalId!!,
@@ -223,7 +220,7 @@ internal class KotlinDriveUploader(
             )
         }
 
-        // フォールバック検索（親フォルダ条件を付与して誤一致を抑制）
+        // Fallback search: narrow by parent folder to avoid mismatches.
         val qName = name.replace("'", "\\'")
         val query = buildString {
             append("name='").append(qName).append("' and trashed=false")
@@ -242,7 +239,7 @@ internal class KotlinDriveUploader(
                     throw IOException("HTTP ${resp.code}")
                 }
                 if (!resp.isSuccessful) {
-                    // どうしても ID 不明だがアップロードは完了済みとみなす
+                    // ID is unknown, but treat upload as completed.
                     return@use UploadResult.Success(
                         id = "drive:completed",
                         name = name,
@@ -296,7 +293,7 @@ internal class KotlinDriveUploader(
         }
     }
 
-    /** 途中再開のために現在の受領バイトを問い合わせる（RFC 7233 準拠） */
+    /** Query current received bytes for resumable upload (RFC 7233 style). */
     private fun queryProgress(client: OkHttpClient, sessionUrl: String, total: Long): Long {
         val probe = Request.Builder()
             .url(sessionUrl)
@@ -307,16 +304,16 @@ internal class KotlinDriveUploader(
         return DriveHttp.withBackoff {
             client.newCall(probe).execute().use { resp ->
                 if (resp.code == 308) {
-                    // 例: Range: bytes=0-524287
+                    // Example: Range: bytes=0-524287
                     val range = resp.header("Range")
                     val end = range?.substringAfter('=')?.substringAfter('-')?.toLongOrNull()
                     if (end != null) end + 1 else 0L
                 } else if (resp.isSuccessful) {
-                    total // すでに完了
+                    total // Already completed.
                 } else if (DriveHttp.shouldRetry(resp.code)) {
                     throw IOException("HTTP ${resp.code}")
                 } else {
-                    0L // 情報なし→最初から
+                    0L // No information; start from beginning.
                 }
             }
         }
@@ -334,3 +331,4 @@ internal class KotlinDriveUploader(
         cr.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
 }
+

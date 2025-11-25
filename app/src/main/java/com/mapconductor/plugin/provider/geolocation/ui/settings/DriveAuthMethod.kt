@@ -1,7 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
 /**
- * Google Drive 認証方式の種別。
+ * Authentication methods supported for Google Drive integration.
  *
  * - CREDENTIAL_MANAGER : Android Credential Manager + Identity API
  * - APPAUTH            : AppAuth (AuthorizationService + AuthState)

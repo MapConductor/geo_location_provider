@@ -7,22 +7,23 @@ import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 
 /**
- * dataselector のユースケースを、UI から簡単に取得するためのファクトリ。
- * - PickupScreen などは DB や DAO 型を知らずに BuildSelectedSlots を利用できる。
- * - 実際のデータ取得は StorageService 経由で行い、Room/AppDatabase には触れない。
+ * Factory to create BuildSelectedSlots for UI usage.
+ *
+ * - PickupScreen and other callers can use BuildSelectedSlots without knowing DB/DAO types.
+ * - Actual data access is done via StorageService; Room/AppDatabase is not touched directly.
  */
 object SelectorUseCases {
 
     fun buildSelectedSlots(context: Context): BuildSelectedSlots {
         val appContext = context.applicationContext
 
-        // StorageService をラップして LocationSampleSource を実装
+        // Wrap StorageService as a LocationSampleSource implementation
         val source = object : LocationSampleSource {
             override suspend fun findBetween(
                 fromInclusive: Long,
                 toExclusive: Long
             ): List<LocationSample> {
-                // StorageService 側も [from, to) の半開区間・昇順返却である前提
+                // StorageService also uses [from, to) half-open interval and ascending order
                 return StorageService.getLocationsBetween(
                     ctx = appContext,
                     from = fromInclusive,
@@ -35,3 +36,4 @@ object SelectorUseCases {
         return BuildSelectedSlots(repo)
     }
 }
+

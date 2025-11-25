@@ -3,13 +3,13 @@ package com.mapconductor.plugin.provider.geolocation.repository
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 
 /**
- * LocationSample の取得元を抽象化するインターフェース。
- * - dataselector は Room/DAO を知らず、このインターフェースだけに依存する。
+ * Abstraction for the source of LocationSample records.
+ * - dataselector does not know about Room/DAO and depends only on this interface.
  */
 interface LocationSampleSource {
 
     /**
-     * [fromInclusive, toExclusive) の半開区間で昇順に LocationSample を取得する。
+     * Fetch LocationSample records in the half-open interval [fromInclusive, toExclusive) in ascending order.
      */
     suspend fun findBetween(
         fromInclusive: Long,

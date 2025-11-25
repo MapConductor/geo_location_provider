@@ -19,9 +19,9 @@ import okio.source
 import org.json.JSONObject
 import java.io.IOException
 
-// Google Drive REST API v3 向けの軽量クライアントと関連モデル
+// Lightweight client and models for Google Drive REST API v3.
 
-// 汎用 API 結果
+// Generic API result wrapper.
 sealed class ApiResult<out T> {
     data class Success<T>(val data: T) : ApiResult<T>()
     data class HttpError(val code: Int, val body: String) : ApiResult<Nothing>()
@@ -35,26 +35,26 @@ data class UploadResponse(
     val webViewLink: String?
 )
 
-// About.get のモデル
+// About.get response.
 data class AboutResponse(val user: User?) {
     data class User(val displayName: String?, val emailAddress: String?)
 }
 
-// ValidateFolder のモデル
+// ValidateFolder response (simplified).
 data class FolderInfo(val id: String, val name: String, val mimeType: String) {
     val isFolder: Boolean get() = mimeType == "application/vnd.google-apps.folder"
 }
 
-// アップロード結果
+// Upload result.
 sealed class UploadResult {
-    /** HTTP 2xx 成功 */
+    /** HTTP 2xx success. */
     data class Success(
         val id: String,
         val name: String,
         val webViewLink: String
     ) : UploadResult()
 
-    /** 失敗（HTTP 非 2xx やネットワーク例外） */
+    /** Failure (HTTP non-2xx or network error mapped by caller). */
     data class Failure(
         val code: Int,
         val body: String,
@@ -62,7 +62,7 @@ sealed class UploadResult {
     ) : UploadResult()
 }
 
-// フォルダ ID 抽出ユーティリティ
+// Utility for extracting Drive folder IDs from URLs or raw IDs.
 object DriveFolderId {
     private val patterns = listOf(
         Regex("""/folders/([A-Za-z0-9_-]{10,})"""),
@@ -95,7 +95,7 @@ object DriveFolderId {
     }
 }
 
-/** ストリーミングでファイルを送る RequestBody */
+/** RequestBody that streams file content from a ContentResolver + Uri. */
 internal class InputStreamRequestBody(
     private val mediaType: MediaType,
     private val contentResolver: ContentResolver,
@@ -111,7 +111,7 @@ internal class InputStreamRequestBody(
     }
 }
 
-/** Google Drive REST (v3) の軽量クライアント（multipart/related アップロードなどを提供） */
+/** Lightweight Google Drive REST (v3) client (multipart/related upload, etc). */
 class DriveApiClient(
     private val context: Context,
     private val http: OkHttpClient = DriveHttp.client()
@@ -123,7 +123,7 @@ class DriveApiClient(
         val JSON: MediaType = "application/json; charset=UTF-8".toMediaType()
     }
 
-    /** GET /about?fields=user(displayName,emailAddress) を呼び出す */
+    /** Call GET /about?fields=user(displayName,emailAddress). */
     suspend fun aboutGet(token: String): ApiResult<AboutResponse> = withContext(Dispatchers.IO) {
         try {
             val url = "$BASE/about?fields=user(displayName,emailAddress)"
@@ -136,15 +136,14 @@ class DriveApiClient(
 
             http.newCall(req).execute().use { resp ->
                 val body = resp.body?.string().orEmpty()
-                if (!resp.isSuccessful) {
-                    return@withContext ApiResult.HttpError(resp.code, body)
-                }
+                if (!resp.isSuccessful) return@withContext ApiResult.HttpError(resp.code, body)
+
                 val obj = JSONObject(body)
-                val u = obj.optJSONObject("user")
-                val user = if (u != null) {
+                val userObj = obj.optJSONObject("user")
+                val user = if (userObj != null) {
                     AboutResponse.User(
-                        displayName = u.optStringOrNull("displayName"),
-                        emailAddress = u.optStringOrNull("emailAddress")
+                        displayName = userObj.optStringOrNull("displayName"),
+                        emailAddress = userObj.optStringOrNull("emailAddress")
                     )
                 } else null
                 ApiResult.Success(AboutResponse(user))
@@ -155,10 +154,10 @@ class DriveApiClient(
     }
 
     /**
-     * Public wrapper: Drive の About API からメールアドレスだけを取得する。
+     * Public wrapper: get only emailAddress from Drive About API.
      *
-     * - 正常系: emailAddress があればそれを返す（なければ null）
-     * - 異常系: ネットワークエラー / HTTP エラーなどはすべて null 扱い
+     * - Success: returns emailAddress when present, otherwise null.
+     * - Failure: network / HTTP errors are all treated as null.
      */
     suspend fun getAccountEmail(token: String): String? = when (val res = aboutGet(token)) {
         is ApiResult.Success -> res.data.user?.emailAddress
@@ -168,7 +167,7 @@ class DriveApiClient(
 
     /**
      * GET /files/{id}?fields=id,name,mimeType,capabilities/canAddChildren,shortcutDetails/targetId
-     * でフォルダかどうか・書き込み可能かなどを検証する。
+     * and validate whether it is a folder and whether it is writable.
      */
     data class ValidateResult(
         val id: String,
@@ -223,10 +222,11 @@ class DriveApiClient(
     }
 
     /**
-     * アップロード対象のフォルダ ID を解決するヘルパー。
-     * - URL が渡された場合は ID を抽出する
-     * - ショートカットの場合は実体フォルダを検証する
-     * - 書き込み不可の場合は HttpError を返す
+     * Resolve folder ID for upload.
+     *
+     * - When a URL is given, extract ID.
+     * - When shortcut, validate and resolve actual target folder.
+     * - If not writable folder, returns HttpError.
      */
     suspend fun resolveFolderIdForUpload(
         token: String,
@@ -259,10 +259,10 @@ class DriveApiClient(
     }
 
     /**
-     * Public wrapper: URL/ID + resourceKey から「アップロード可能なフォルダ ID」を取得する。
+     * Public wrapper: resolve uploadable folder ID from URL/ID + resourceKey.
      *
-     * - 正常系: フォルダかつ書き込み可能な場合に、その ID を返す
-     * - 異常系: それ以外（ショートカット先を含めて検証 NG / ネットワークエラー）は null 扱い
+     * - Success: returns folder ID when it is writable.
+     * - Failure: shortcut target invalid, network/HTTP errors, etc -> null.
      */
     suspend fun resolveFolderIdForUploadOrNull(
         token: String,
@@ -275,10 +275,11 @@ class DriveApiClient(
     }
 
     /**
-     * Drive の multipart/related アップロードを行う。
-     * - 各 Part の Header に "Content-Type" を重ねて指定しない
-     * - メディアパートの MIME タイプは RequestBody.contentType() で指定する
-     * - multipart 全体の Content-Type は "multipart/related"
+     * Perform Drive multipart/related upload.
+     *
+     * - Do not set "Content-Type" header for each part; let OkHttp handle it.
+     * - Media part MIME type is specified via RequestBody.contentType().
+     * - Overall multipart content type is "multipart/related".
      */
     suspend fun uploadMultipart(
         token: String,
@@ -368,3 +369,4 @@ class DriveApiClient(
         }
     }
 }
+

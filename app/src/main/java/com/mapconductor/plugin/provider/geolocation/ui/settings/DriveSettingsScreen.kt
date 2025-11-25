@@ -61,7 +61,6 @@ fun DriveSettingsScreen(
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    val credentialManagerTokenProvider = remember { CredentialManagerAuth.get(ctx) }
 
     val status by vm.status.collectAsState()
     val folderId by vm.folderId.collectAsState()
@@ -79,6 +78,9 @@ fun DriveSettingsScreen(
             null
         }
     }
+
+    var showPreviewDialog by remember { mutableStateOf(false) }
+    var uiMsg by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -99,7 +101,7 @@ fun DriveSettingsScreen(
                 .fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 認証方式をラジオボタンで選択
+            // Auth method selection
             Text("Auth method", style = MaterialTheme.typography.titleMedium)
             Column {
                 DriveAuthMethod.values().forEach { method ->
@@ -114,185 +116,109 @@ fun DriveSettingsScreen(
                             selected = authMethod == method,
                             onClick = { vm.setAuthMethod(method) }
                         )
-                        Text(
-                            text = method.label,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
+                        Text(method.label)
                     }
                 }
             }
 
-            // Drive 基本設定
+            HorizontalDivider(color = DividerDefaults.color)
+
+            // Basic Drive settings
+            Text("Drive settings", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
                 value = folderId,
                 onValueChange = { vm.updateFolderId(it) },
-                label = { Text("Folder ID / URL") },
-                modifier = Modifier.fillMaxWidth()
+                label = { Text("Folder URL or ID") }
             )
-            Text(text = "Account: $account")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { vm.validateFolder() }) {
+                    Text("Validate folder")
+                }
+            }
+
+            HorizontalDivider(color = DividerDefaults.color)
+
+            // Auth-method specific UI (currently only Credential Manager sample)
+            Text("Auth actions", style = MaterialTheme.typography.titleMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    val provider = CredentialManagerAuth.get(ctx)
+                    scope.launch(Dispatchers.IO) {
+                        val token = provider.getAccessToken()
+                        withContext(Dispatchers.Main) {
+                            if (token != null) {
+                                vm.setStatus("CM Token OK: ${token.take(12)}...")
+                            } else {
+                                vm.setStatus("CM Token is null (sign-in required?)")
+                            }
+                        }
+                    }
+                }) {
+                    Text("CM: Get token")
+                }
+
+                OutlinedButton(onClick = {
+                    val intent = android.content.Intent(ctx, AppAuthSignInActivity::class.java)
+                    ctx.startActivity(intent)
+                }) {
+                    Text("AppAuth: Start sign-in")
+                }
+            }
+
+            HorizontalDivider(color = DividerDefaults.color)
+
+            // Backup and preview actions
+            Text("Backup & preview", style = MaterialTheme.typography.titleMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                OutlinedButton(onClick = {
+                    MidnightExportWorker.runNow(ctx.applicationContext)
+                    uiMsg = "Started backup for days before today."
+                }) {
+                    Text("Backup days before today")
+                }
+
+                OutlinedButton(onClick = { showPreviewDialog = true }) {
+                    Text("Today preview")
+                }
+            }
+
+            HorizontalDivider(color = DividerDefaults.color)
+
+            // Status section
+            if (!status.isNullOrBlank()) {
+                Text("Status:", style = MaterialTheme.typography.titleMedium)
+                Text(status)
+            }
+            if (!account.isNullOrBlank()) {
+                Text("Account: $account")
+            }
             if (lastRefreshText != null) {
-                Text(text = lastRefreshText, style = MaterialTheme.typography.bodySmall)
+                Text(lastRefreshText)
             }
-
-            // 認証方式ごとの UI（現時点では CM のみ実装）
-            if (authMethod == DriveAuthMethod.CREDENTIAL_MANAGER) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val credential = credentialManagerTokenProvider.signIn(ctx)
-                                if (credential != null) {
-                                    vm.setStatus("Credential Manager sign-in completed")
-                                } else {
-                                    vm.setStatus("Credential Manager sign-in failed")
-                                }
-                            }
-                        }
-                    ) {
-                        Text("Sign in (CM)")
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val token = credentialManagerTokenProvider.getAccessToken()
-                                if (token != null) {
-                                    vm.setStatus("CM Token OK: ${token.take(12)}…")
-                                } else {
-                                    vm.setStatus("CM Token failed")
-                                }
-                            }
-                        }
-                    ) {
-                        Text("Get Token (CM)")
-                    }
-                }
-            } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = {
-                            // AppAuth のブラウザフローを開始
-                            val intent = android.content.Intent(ctx, AppAuthSignInActivity::class.java)
-                            ctx.startActivity(intent)
-                        }
-                    ) {
-                        Text("Sign in (AppAuth)")
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val provider = AppAuthAuth.get(ctx)
-                                val token = provider.getAccessToken()
-                                if (token != null) {
-                                    vm.setStatus("AppAuth Token OK: ${token.take(12)}…")
-                                } else {
-                                    vm.setStatus("AppAuth Token failed")
-                                }
-                            }
-                        }
-                    ) {
-                        Text("Get Token (AppAuth)")
-                    }
-                }
+            if (!uiMsg.isNullOrBlank()) {
+                Text(uiMsg!!)
             }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { vm.callAboutGet() }) {
-                    Text("About.get")
-                }
-                OutlinedButton(onClick = { vm.validateFolder() }) {
-                    Text("Validate Folder")
-                }
-                Button(onClick = { vm.uploadSampleNow() }) {
-                    Text("Sample Upload")
-                }
-            }
-
-            HorizontalDivider(
-                modifier = Modifier,
-                thickness = DividerDefaults.Thickness,
-                color = DividerDefaults.color
-            )
-
-            Text(text = status, style = MaterialTheme.typography.bodyMedium)
-
-            // バックアップ系操作（前日以前のバックログ + 今日のプレビュー）
-            BackupSection(modifier = Modifier.fillMaxWidth())
-        }
-    }
-}
-
-/**
- * 「前日以前を Backup」「今日の Preview」を提供するセクション。
- *
- * - 前日以前を Backup: MidnightExportWorker に任せる（前日より前を日付ごとにアップロード）
- * - 今日の Preview: 0:00〜現在のデータを ZIP 化し、アップロード有無を選択可能
- */
-@Composable
-private fun BackupSection(modifier: Modifier = Modifier) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var uiMsg by remember { mutableStateOf("") }
-    var showPreviewChoice by remember { mutableStateOf(false) }
-
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Backup", style = MaterialTheme.typography.titleMedium)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = {
-                // 前日以前のバックログを即時実行（uniqueWork REPLACE）
-                scope.launch(Dispatchers.Default) {
-                    MidnightExportWorker.runNow(ctx)
-                    uiMsg = "前日以前のバックアップを開始しました"
-                }
-            }) {
-                Text("前日以前をBackup")
-            }
-
-            Button(onClick = { showPreviewChoice = true }) {
-                Text("今日のPreview")
-            }
-        }
-
-        if (uiMsg.isNotEmpty()) {
-            Text(uiMsg, style = MaterialTheme.typography.bodySmall)
         }
     }
 
-    // 「今日のPreview」の選択ダイアログ
-    if (showPreviewChoice) {
-        AlertDialog(
-            onDismissRequest = { showPreviewChoice = false },
-            title = { Text("今日のPreview") },
-            text = {
-                Text(
-                    "アップロードしますか？\n" +
-                        "アップロードする場合はローカルの GeoJSON/zip を削除します。\n" +
-                        "アップロードしない場合は Downloads に保存します。\n" +
-                        "Room のデータは削除しません。"
-                )
-            },
-            confirmButton = {
-                Button(onClick = {
-                    showPreviewChoice = false
-                    // アップロードする: IO スレッドで実行
-                    scope.launch(Dispatchers.IO) {
-                        val msg = runTodayPreviewIO(ctx, upload = true)
-                        withContext(Dispatchers.Main) { uiMsg = msg }
-                    }
-                }) {
-                    Text("アップロードする")
+    if (showPreviewDialog) {
+        TodayPreviewDialog(
+            onDismiss = { showPreviewDialog = false },
+            onUpload = {
+                showPreviewDialog = false
+                // Run upload path on IO dispatcher
+                scope.launch(Dispatchers.IO) {
+                    val msg = runTodayPreviewIO(ctx, upload = true)
+                    withContext(Dispatchers.Main) { uiMsg = msg }
                 }
             },
-            dismissButton = {
-                Button(onClick = {
-                    showPreviewChoice = false
-                    // アップロードしない: IO スレッドで実行
-                    scope.launch(Dispatchers.IO) {
-                        val msg = runTodayPreviewIO(ctx, upload = false)
-                        withContext(Dispatchers.Main) { uiMsg = msg }
-                    }
-                }) {
-                    Text("アップロードしない")
+            onLocalOnly = {
+                showPreviewDialog = false
+                // Run local-only path on IO dispatcher
+                scope.launch(Dispatchers.IO) {
+                    val msg = runTodayPreviewIO(ctx, upload = false)
+                    withContext(Dispatchers.Main) { uiMsg = msg }
                 }
             }
         )
@@ -300,8 +226,41 @@ private fun BackupSection(modifier: Modifier = Modifier) {
 }
 
 /**
- * 今日 (0:00〜現在) のみを対象に Preview 実行する処理本体。
- * UI から呼び出す想定。
+ * Dialog for "today preview" that asks whether to upload or keep local.
+ */
+@Composable
+private fun TodayPreviewDialog(
+    onDismiss: () -> Unit,
+    onUpload: () -> Unit,
+    onLocalOnly: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Today preview") },
+        text = {
+            Text(
+                "Upload today data?\n" +
+                    "- If you upload, the local GeoJSON/ZIP in Downloads will be deleted.\n" +
+                    "- If you do not upload, the file will remain in Downloads.\n" +
+                    "- Room data will NOT be deleted in either case."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onUpload) {
+                Text("Upload")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onLocalOnly) {
+                Text("Do not upload")
+            }
+        }
+    )
+}
+
+/**
+ * Run "today preview" for [upload] == true/false.
+ * Targets only records from today (00:00 to now).
  */
 private suspend fun runTodayPreviewIO(
     ctx: android.content.Context,
@@ -312,10 +271,10 @@ private suspend fun runTodayPreviewIO(
     val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
     val todayEpochDay = today0.toLocalDate().toEpochDay()
 
-    // LocationSample エンティティ一覧を StorageService 経由で取得
+    // Load LocationSample list via StorageService
     val all = StorageService.getAllLocations(ctx)
 
-    // エンティティのタイムスタンプを安全に取得（フィールド名の違いに対応）
+    // Safely extract timestamp in millis from entity (tolerant to field name differences)
     fun extractMillis(rec: Any): Long {
         val candidates = arrayOf(
             "timestampMillis", "timeMillis", "createdAtMillis",
@@ -347,31 +306,31 @@ private suspend fun runTodayPreviewIO(
     }
 
     if (todays.isEmpty()) {
-        return@withContext "今日のデータはありません"
+        return@withContext "No data for today."
     }
 
     val baseName = "glp-" + DateTimeFormatter.ofPattern("yyyyMMdd")
         .format(LocalDate.ofEpochDay(todayEpochDay))
 
-    // ZIP を Downloads/GeoLocationProvider に出力
+    // Export to Downloads/GeoLocationProvider as ZIP
     val outUri = GeoJsonExporter.exportToDownloads(
         context = ctx,
         records = todays,
         baseName = baseName,
         compressAsZip = true
-    ) ?: return@withContext "ZIP の作成に失敗しました"
+    ) ?: return@withContext "Failed to create ZIP."
 
     if (!upload) {
-        // 保存のみ: Room は削除しない
-        return@withContext "今日のデータを Downloads に保存しました（$baseName.zip）。Room は削除していません"
+        // Save only: keep Room data
+        return@withContext "Saved today's data to Downloads as $baseName.zip (Room data kept)."
     }
 
-    // ここから「アップロードする」経路
+    // Upload flow
     val tokenProvider = CredentialManagerAuth.get(ctx)
     val token = tokenProvider.getAccessToken()
     if (token == null) {
         runCatching { ctx.contentResolver.delete(outUri, null, null) }
-        return@withContext "Drive 認可が不足しています。設定画面から権限を付与してください。ZIP は削除しましたが、Room は削除していません"
+        return@withContext "Drive authorization is missing. ZIP was deleted; Room data is kept."
     }
 
     val snapshot = AppPrefs.snapshot(ctx)
@@ -383,35 +342,36 @@ private suspend fun runTodayPreviewIO(
     )
 
     if (uploader == null || folderId.isNullOrBlank()) {
-        // ZIP は削除、Room は残す
+        // Delete ZIP, keep Room data
         runCatching { ctx.contentResolver.delete(outUri, null, null) }
-        return@withContext "アップロード設定が不足しています（Engine / folderId）。ZIP は削除しましたが、Room は削除していません"
+        return@withContext "Upload settings are incomplete (engine or folderId). ZIP was deleted; Room data is kept."
     }
 
     var success = false
     for (attempt in 0 until 5) {
         when (val result = uploader.upload(outUri, folderId, null)) {
             is UploadResult.Success -> {
-                // 成功しても Preview なので Room は削除しない
+                // Preview mode: Room data is not deleted
                 success = true
                 break
             }
 
             is UploadResult.Failure -> {
                 if (attempt < 4) {
-                    // 15s, 30s, 60s, 120s の指数バックオフ
+                    // Exponential backoff: 15s, 30s, 60s, 120s
                     delay(15_000L * (1 shl attempt))
                 }
             }
         }
     }
 
-    // ZIP は成功 / 失敗に関わらず削除。Room は削除しない
+    // Delete ZIP regardless of success/failure; keep Room data
     runCatching { ctx.contentResolver.delete(outUri, null, null) }
 
     if (success) {
-        "今日のデータをアップロードしました（$baseName.zip）。ローカル ZIP は削除し、Room は削除していません"
+        "Uploaded today's data as $baseName.zip. Local ZIP was deleted; Room data is kept."
     } else {
-        "今日のアップロードに失敗しました（リトライ 5 回）。ZIP は削除し、Room は削除していません"
+        "Failed to upload today's data after 5 attempts. ZIP was deleted; Room data is kept."
     }
 }
+

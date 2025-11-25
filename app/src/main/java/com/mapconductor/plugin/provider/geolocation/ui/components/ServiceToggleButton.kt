@@ -25,13 +25,13 @@ fun ServiceToggleAction() {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // true = 動作中（Stop 表示） / false = 停止中（Start 表示）
+    // true = service running (show Stop) / false = stopped (show Start)
     val runningState = remember { mutableStateOf(false) }
 
-    // 二重タップ防止
+    // Prevent double taps while a request is in flight
     val busyState = remember { mutableStateOf(false) }
 
-    // 状態問い合わせ用の CoroutineScope
+    // Scope used for periodic state checks
     val scope = remember { CoroutineScope(Dispatchers.Main + Job()) }
 
     fun refreshState() {
@@ -44,7 +44,7 @@ fun ServiceToggleAction() {
         }
     }
 
-    // 初回起動以降も、一定間隔で状態を問い合わせる
+    // Periodically poll service state
     LaunchedEffect(Unit) {
         while (true) {
             refreshState()
@@ -52,7 +52,7 @@ fun ServiceToggleAction() {
         }
     }
 
-    // 画面復帰時にも状態を取り直す
+    // Refresh state when the screen returns to foreground
     LaunchedEffect(lifecycleOwner) {
         val obs = LifecycleEventObserver { _, ev ->
             if (ev == Lifecycle.Event.ON_RESUME) {
@@ -67,20 +67,20 @@ fun ServiceToggleAction() {
             if (busyState.value) return@IconButton
             busyState.value = true
 
-            // UI は先にトグル状態を反転し、後からサービス側の状態で補正する
+            // Optimistically flip UI state, then correct after service responds
             val currentlyRunning = runningState.value
             val targetRunning = !currentlyRunning
             runningState.value = targetRunning
 
             if (currentlyRunning) {
-                // 停止要求
+                // Request stop
                 context.startService(
                     Intent(context, GeoLocationService::class.java).apply {
                         action = GeoLocationService.ACTION_STOP
                     }
                 )
             } else {
-                // 起動要求
+                // Request start as foreground service
                 ContextCompat.startForegroundService(
                     context,
                     Intent(context, GeoLocationService::class.java).apply {
@@ -89,9 +89,9 @@ fun ServiceToggleAction() {
                 )
             }
 
-            // 少し待ってから実際の状態を再取得して補正する
+            // Wait a bit and then re-query the real state
             scope.launch {
-                delay(500) // 必要なら 700〜1000 に伸ばしてもよい
+                delay(500) // Increase to 700-1000ms if needed
                 refreshState()
                 busyState.value = false
             }
@@ -101,3 +101,4 @@ fun ServiceToggleAction() {
         Text(if (runningState.value) "Stop" else "Start")
     }
 }
+

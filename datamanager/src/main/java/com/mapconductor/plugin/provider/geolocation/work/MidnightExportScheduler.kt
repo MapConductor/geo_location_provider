@@ -20,8 +20,8 @@ object MidnightExportScheduler {
         val delayMs = calcDelayUntilNextMidnightMillis()
 
         val constraints = Constraints.Builder()
-            // ローカル ZIP だけでも動かしたいなら CONNECTED 制約は付けない方が安全
-            // （アップロードはワーカー内部でネット判定＆再試行）
+            // Use NOT_REQUIRED so local ZIP export can run even without network.
+            // Drive upload itself checks network and retries inside the worker.
             .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
             .build()
 
@@ -45,3 +45,4 @@ object MidnightExportScheduler {
         return Duration.between(now, nextMidnight).toMillis()
     }
 }
+

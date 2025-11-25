@@ -7,14 +7,14 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 
 /**
- * AppAuth のサインインフローを開始し、結果を受け取ってトークン交換まで行うための Activity。
+ * Transparent Activity that drives the AppAuth sign-in flow and exchanges the token.
  *
- * - 起動と同時に AppAuthTokenProvider.buildAuthorizationIntent() を呼び出し、
- *   ブラウザ / Custom Tab を開く。
- * - コールバックで戻ってきた Intent を handleAuthorizationResponse() に渡し、
- *   トークン取得が終わったら自動的に finish() する。
+ * - On creation it calls AppAuthTokenProvider.buildAuthorizationIntent() and opens
+ *   the browser / Custom Tab.
+ * - When the callback Intent returns, it forwards it to handleAuthorizationResponse(),
+ *   then finishes itself.
  *
- * UI には何も描画せず、あくまでフロー専用の透明な Activity として扱う想定。
+ * No UI is drawn; this Activity exists only to host the OAuth flow.
  */
 @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 class AppAuthSignInActivity : ComponentActivity() {
@@ -31,7 +31,7 @@ class AppAuthSignInActivity : ComponentActivity() {
             val intent = provider.buildAuthorizationIntent()
             startActivityForResult(intent, REQUEST_CODE_AUTH)
         } else {
-            // すでにフロー中であれば何もしない
+            // Already in the middle of the flow; nothing to do here
         }
     }
 
@@ -41,7 +41,7 @@ class AppAuthSignInActivity : ComponentActivity() {
         if (requestCode == REQUEST_CODE_AUTH) {
             val provider = AppAuthAuth.get(this)
             lifecycleScope.launch {
-                // 成否はログや呼び出し側の getAccessToken() で確認してもらう
+                // Result is consumed and the actual getAccessToken() call is made by the caller
                 runCatching { provider.handleAuthorizationResponse(data) }
                 finish()
             }

@@ -67,12 +67,12 @@ object Formatters {
         }
 
     fun headingText(deg: Float?): String =
-        deg?.let { "${oneDecimal(it)}°" } ?: "-"
+        deg?.let { "${oneDecimal(it)} deg" } ?: "-"
 
     fun courseText(deg: Float?): String =
-        deg?.let { "${oneDecimal(it)}°" } ?: "-"
+        deg?.let { "${oneDecimal(it)} deg" } ?: "-"
 
-    /** m/s -> "0.0Km/h(0.0m/s)"。null の場合は "-"。 */
+    /** m/s -> "0.0 Km/h (0.0 m/s)". Returns "-" when null. */
     fun speedText(mps: Float?): String =
         mps?.let { "${oneDecimal(it * 3.6f)} Km/h (${oneDecimal(it)} m/s)" } ?: "-"
 
@@ -114,7 +114,7 @@ object Formatters {
             modifier = modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            // 1行目: Provider / [GNSS] Used/Total / [搬送波対雑音比] C/N0
+            // Line 1: Provider / [GNSS] Used/Total / [Signal] C/N0
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.GpsFixed,
@@ -125,34 +125,32 @@ object Formatters {
                 BoldLabel("Provider")
                 Text(prov, style = MaterialTheme.typography.bodyMedium)
 
-                if (prov == "GPS") {
-                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+                Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                    Icon(
-                        Icons.Outlined.SignalCellularAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE)
-                    )
-                    Spacer(Modifier.width(SPACER_SIZE))
-                    BoldLabel("GNSS")
-                    Text(gnss, style = MaterialTheme.typography.bodyMedium)
+                Icon(
+                    Icons.Outlined.SignalCellularAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
+                Spacer(Modifier.width(SPACER_SIZE))
+                BoldLabel("GNSS")
+                Text(gnss, style = MaterialTheme.typography.bodyMedium)
 
-                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+                Text(" / ", style = MaterialTheme.typography.bodyMedium)
 
-                    Icon(
-                        Icons.Outlined.SignalCellularAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE)
-                    )
-                    Spacer(Modifier.width(SPACER_SIZE))
-                    BoldLabel("C/N0")
-                    Text(cn0, style = MaterialTheme.typography.bodyMedium)
-                }
+                Icon(
+                    Icons.Outlined.SignalCellularAlt,
+                    contentDescription = null,
+                    modifier = Modifier.size(ICON_SIZE)
+                )
+                Spacer(Modifier.width(SPACER_SIZE))
+                BoldLabel("C/N0")
+                Text(cn0, style = MaterialTheme.typography.bodyMedium)
             }
 
-            // 2行目: Ideal / Δt
+            // Line 2: Ideal / Delta t
             if ((slot.idealMs != 0L) || (slot.deltaMs != 0L)) {
-                // Ideal=0, Delta=0 なら主画面なのでこの行は非表示
+                // Hide this line for the "main" histogram item
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Outlined.Schedule,
@@ -170,13 +168,13 @@ object Formatters {
                             modifier = Modifier.size(ICON_SIZE)
                         )
                         Spacer(Modifier.width(SPACER_SIZE))
-                        BoldLabel("Δt")
+                        BoldLabel("Delta t")
                         Text(delta, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }
 
-            // 3行目: [時間] Time / [電池] Battery
+            // Line 3: Time / Battery
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.AccessTime,
@@ -199,7 +197,7 @@ object Formatters {
                 Text(battery, style = MaterialTheme.typography.bodyMedium)
             }
 
-            // 4行目: [位置] Lat/Lon/Acc
+            // Line 4: Lat/Lon/Acc
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.LocationOn,
@@ -211,7 +209,7 @@ object Formatters {
                 Text(latlon, style = MaterialTheme.typography.bodyMedium)
             }
 
-            // 5行目: [方位] Heading / Course / [速度] Speed
+            // Line 5: Heading / Course / Speed
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     Icons.Outlined.CompassCalibration,

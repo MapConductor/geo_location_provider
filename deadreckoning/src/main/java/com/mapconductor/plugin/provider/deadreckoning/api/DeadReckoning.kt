@@ -3,10 +3,11 @@ package com.mapconductor.plugin.provider.geolocation.deadreckoning.api
 import java.io.Closeable
 
 /**
- * DeadReckoning の公開インターフェース。
- * - start()/stop() でセンサー購読を開始/停止
- * - GPS真値を submitGpsFix() で渡すとドリフト補正
- * - predict() で指定時刻範囲の予測点を生成して返す
+ * Public interface of DeadReckoning.
+ *
+ * - start()/stop() control sensor subscription.
+ * - GPS fixes are passed via submitGpsFix() to correct drift.
+ * - predict() returns predicted points for a given time range.
  */
 interface DeadReckoning : Closeable {
     fun start()
@@ -15,13 +16,15 @@ interface DeadReckoning : Closeable {
     suspend fun submitGpsFix(fix: GpsFix)
 
     /**
-     * [fromMillis, toMillis] の範囲で、UI設定の刻みに従って挿入用の予測点を返します。
-     * 刻みの決定は呼び出し側（アプリ側）のスケジューラで行い、
-     * DeadReckoning 側は内部状態から各時点の代表値を返す方針です。
+     * Return predicted points for [fromMillis, toMillis].
+     *
+     * Time step selection is delegated to the caller's scheduler
+     * (for example driven by UI settings), and DeadReckoning returns
+     * representative values based on its internal state.
      */
     suspend fun predict(fromMillis: Long, toMillis: Long): List<PredictedPoint>
 
-    /** 必須センサー(加速度/ジャイロ)が利用可能か */
+    /** Whether required sensors (accelerometer/gyro) are available. */
     fun isImuCapable(): Boolean
 
     override fun close() = stop()
@@ -39,7 +42,8 @@ data class PredictedPoint(
     val timestampMillis: Long,
     val lat: Double,
     val lon: Double,
-    val accuracyM: Float?,      // 推定誤差の近似
-    val speedMps: Float?,       // 推定速度
-    val horizontalStdM: Float?  // 等方1σ(平面合成) Tier A
+    val accuracyM: Float?,      // Approximation of estimation error.
+    val speedMps: Float?,       // Estimated speed.
+    val horizontalStdM: Float?  // Isotropic 1-sigma (horizontal) for Tier A.
 )
+

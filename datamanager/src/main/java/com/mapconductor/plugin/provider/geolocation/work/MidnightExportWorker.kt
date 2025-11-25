@@ -25,10 +25,10 @@ import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 
 /**
- * 定時バックアップ（前日以前のバックログ処理も包含）
+ * Daily export worker that processes backlog up to the previous day.
  *
- * - LocationSample / ExportedDay ともに storageservice の DB を使用し、
- *   ここからは StorageService 経由でのみアクセスする。
+ * - Both LocationSample and ExportedDay are stored in storageservice DB.
+ *   All access is done via StorageService from this class.
  */
 class MidnightExportWorker(
     appContext: Context,
@@ -42,7 +42,7 @@ class MidnightExportWorker(
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
-        // --- 初回シード：昨日までの最大365日を ensure --- //
+        // --- Initial seed: ensure up to 365 days of past records (before yesterday). --- //
         var oldest = StorageService.oldestNotUploadedDay(applicationContext)
         if (oldest == null) {
             val backMaxDays = 365L
@@ -55,7 +55,7 @@ class MidnightExportWorker(
             oldest = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
-        // --- バックログ処理ループ（今日以降は対象外） --- //
+        // --- Backlog processing loop (days before "today" only). --- //
         while (oldest != null && oldest.epochDay < todayEpochDay) {
             val target = oldest
             val localDate = LocalDate.ofEpochDay(target.epochDay)
@@ -63,7 +63,7 @@ class MidnightExportWorker(
             val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
             val baseName = "glp-${dateFmt.format(localDate)}"
 
-            // 1日のレコード取得（storageservice 側 DB を StorageService 経由で読む）
+            // Fetch one-day records from storageservice DB via StorageService.
             val records = StorageService.getLocationsBetween(
                 ctx = applicationContext,
                 from = startMillis,
@@ -71,7 +71,7 @@ class MidnightExportWorker(
                 softLimit = 1_000_000
             )
 
-            // GeoJSON を ZIP でローカル生成
+            // Generate local GeoJSON as ZIP.
             val exported: Uri? = GeoJsonExporter.exportToDownloads(
                 context = applicationContext,
                 records = records,
@@ -79,10 +79,10 @@ class MidnightExportWorker(
                 compressAsZip = true
             )
 
-            // ローカル出力成功の印（空日でも成功扱い）
+            // Mark local export as succeeded (even for empty day).
             StorageService.markExportedLocal(applicationContext, target.epochDay)
 
-            // アップロード（設定が揃っている場合のみ）
+            // Upload to Drive only when settings are configured.
             val prefs = AppPrefs.snapshot(applicationContext)
             val engineOk = (prefs.engine == UploadEngine.KOTLIN)
             val folderOk = !prefs.folderId.isNullOrBlank()
@@ -123,34 +123,34 @@ class MidnightExportWorker(
                 }
             }
 
-            // ZIP は必ず削除
+            // Always delete ZIP to avoid filling local storage.
             exported?.let { safeDelete(it) }
 
-            // 成功時のみ当日のレコードを削除（storageservice 側の DB）
+            // Only when upload succeeds and there are records, delete that day's records from DB.
             if (uploadSucceeded && records.isNotEmpty()) {
                 try {
                     StorageService.deleteLocations(applicationContext, records)
                 } catch (e: Throwable) {
-                    // 失敗は致命ではない（次周で再対象）
+                    // Failure is not fatal; they will be retried next run.
                     Log.w(TAG, "Failed to delete uploaded records, will retry next time", e)
                 }
             }
 
-            // 次の未アップロード日へ
+            // Move on to the next not-uploaded day.
             oldest = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
-        // 実行後は翌日0:00に再スケジュール
+        // After processing, schedule next run at next midnight.
         scheduleNext(applicationContext)
         return Result.success()
     }
 
-    // ---- ここからはクラスメンバ（ローカル関数にしない） ----
+    // ---- Class-level helper methods (not local functions). ----
 
     private fun scheduleNext(context: Context) {
         val delayMs = calcDelayUntilNextMidnightMillis()
         val constraints = Constraints.Builder()
-            // Network is required for uploading to Google Drive
+            // Network is required for uploading to Google Drive.
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
@@ -174,7 +174,7 @@ class MidnightExportWorker(
         try {
             applicationContext.contentResolver.delete(uri, null, null)
         } catch (_: Throwable) {
-            // 端末/権限状況により失敗することがあるが致命ではない
+            // Ignore deletion errors (e.g., missing file or permission issues).
         }
     }
 
@@ -182,7 +182,7 @@ class MidnightExportWorker(
         private const val TAG = "MidnightExportWorker"
         private const val UNIQUE_NAME = "midnight-export-worker"
 
-        /** UI から即時にバックログ処理を起動するためのヘルパー */
+        /** Helper for triggering backlog processing immediately from UI. */
         @JvmStatic
         fun runNow(context: Context) {
             val constraints = Constraints.Builder()
@@ -199,3 +199,4 @@ class MidnightExportWorker(
         }
     }
 }
+

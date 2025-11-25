@@ -19,7 +19,7 @@ internal class SensorAdapter(
         val timestampNanos: Long,
         val acc: FloatArray?,   // m/s^2
         val gyro: FloatArray?,  // rad/s
-        val mag: FloatArray?    // μT
+        val mag: FloatArray?    // microtesla
     )
 
     fun isImuCapable(): Boolean {
@@ -29,9 +29,11 @@ internal class SensorAdapter(
     }
 
     /**
-     * SENSOR_DELAY_GAME を標準、画面OFFかつ低運動で SENSOR_DELAY_NORMAL に落とすのは
-     * 呼び出し側(上位)の状態判断でもよいが、まずは GAME 固定で配信しておき、
-     * 将来ここに切替ロジックを入れられるようにする。
+     * Provide a Flow of combined accelerometer/gyro/magnetometer samples.
+     *
+     * Implementation detail:
+     * - Uses SENSOR_DELAY_GAME as default rate.
+     * - For simplicity, screen-off / low-motion optimizations are left as future work.
      */
     fun sensorFlow() = callbackFlow<Sample> {
         val acc = manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -69,3 +71,4 @@ internal class SensorAdapter(
         }
     }
 }
+

@@ -1,13 +1,13 @@
 package com.mapconductor.plugin.provider.geolocation.drive.auth
 
 /**
- * 背景スレッド（Worker など）から利用する GoogleDriveTokenProvider の登録・取得用レジストリ。
+ * Registry for GoogleDriveTokenProvider used from background threads (Worker, etc).
  *
- * ホストアプリ側で、起動時などに Credential Manager / AppAuth 実装を登録しておき、
- * datamanager 側はこのレジストリ経由でトークンプロバイダを取得する。
+ * Host app should register Credential Manager / AppAuth implementations at startup.
+ * datamanager then uses this registry to obtain providers without knowing app wiring.
  *
- * - UI を伴うフローはホストアプリの責務とし、ここには渡さない前提。
- * - provider はアプリプロセス内で共有されるシングルトン的な扱い。
+ * - UI flows are responsibility of the host app and must not be launched from here.
+ * - Provider behaves like a process-wide singleton within the app.
  */
 object DriveTokenProviderRegistry {
 
@@ -15,16 +15,15 @@ object DriveTokenProviderRegistry {
     private var backgroundProvider: GoogleDriveTokenProvider? = null
 
     /**
-     * バックグラウンド処理で使用するトークンプロバイダを登録する。
-     * null を渡すと登録をクリアする。
+     * Register token provider used from background processing.
+     * Passing null clears the current registration.
      */
     fun registerBackgroundProvider(provider: GoogleDriveTokenProvider?) {
         backgroundProvider = provider
     }
 
     /**
-     * 登録済みのバックグラウンド用トークンプロバイダを返す。
-     * 未登録の場合は null。
+     * Get registered background token provider, or null when not registered.
      */
     fun getBackgroundProvider(): GoogleDriveTokenProvider? = backgroundProvider
 }

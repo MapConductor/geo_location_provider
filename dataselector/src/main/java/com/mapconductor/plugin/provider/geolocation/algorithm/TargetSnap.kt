@@ -6,14 +6,14 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * グリッドのターゲット時刻列を生成するユーティリティ。
+ * Utility to build grid target timestamps.
  *
- * @param startInclusive 開始時刻（ミリ秒, inclusive）
- * @param endInclusive   終了時刻（ミリ秒, inclusive）
- * @param intervalMs     グリッド間隔（ミリ秒, 0 以下なら空）
+ * @param startInclusive start timestamp (milliseconds, inclusive)
+ * @param endInclusive   end timestamp (milliseconds, inclusive)
+ * @param intervalMs     grid interval (milliseconds, empty when <= 0)
  *
- * - NewestFirst では To(=endInclusive) を基準に生成したいので [buildTargetsFromEnd] を使用。
- * - OldestFirst では From(=startInclusive) を基準に生成したいので [buildTargetsFromStart] を使用。
+ * - For NewestFirst, build based on To (= endInclusive) using [buildTargetsFromEnd].
+ * - For OldestFirst, build based on From (= startInclusive) using [buildTargetsFromStart].
  */
 internal fun buildTargetsFromEnd(
     startInclusive: Long,
@@ -29,7 +29,7 @@ internal fun buildTargetsFromEnd(
         result.add(g)
         g -= intervalMs
     }
-    // 降順で溜めているので昇順に並べ替える。
+    // Currently collected in descending order; reverse to ascending.
     result.reverse()
     return result
 }
@@ -53,14 +53,14 @@ internal fun buildTargetsFromStart(
 }
 
 /**
- * グリッド吸着ロジック。
+ * Grid snapping logic.
  *
- * 各グリッド時刻 g について [g - halfWindowMs, g + halfWindowMs] 内に入る sample を探索し、
- * |Δt| が最小のものを 1 件だけ採用する。同差の場合は「より過去側」が優先される。
+ * For each grid time g, search samples in [g - halfWindowMs, g + halfWindowMs]
+ * and select exactly one sample with the smallest absolute time difference; on ties, prefer the earlier sample.
  *
- * @param records timeMillis 昇順の LocationSample 一覧
- * @param grid    グリッド時刻列（ミリ秒, 昇順）
- * @param halfWindowMs 吸着窓の半幅（ミリ秒）
+ * @param records list of LocationSample in ascending timeMillis order
+ * @param grid    sorted list of grid timestamps (milliseconds, ascending)
+ * @param halfWindowMs half-width of the snapping window (milliseconds)
  */
 internal fun snapToGrid(
     records: List<LocationSample>,
@@ -73,7 +73,7 @@ internal fun snapToGrid(
         val left = g - halfWindowMs
         val right = g + halfWindowMs
 
-        // 左端までポインタを進める
+        // Move pointer to the left edge.
         while (p < records.size && records[p].timeMillis < left) p++
 
         var bestIdx = -1
@@ -87,7 +87,7 @@ internal fun snapToGrid(
                 bestAbs = ad
                 bestIdx = q
             }
-            // 同差は先勝ち -> より過去側を優先
+            // On ties, earlier sample wins.
             q++
         }
 
@@ -108,7 +108,7 @@ internal fun snapToGrid(
 }
 
 /**
- * ダイレクト抽出（グリッド無し）の結果を SelectedSlot に変換する。
+ * Convert direct-extraction records (no grid) into SelectedSlot.
  * - idealMs = sample.timeMillis
  * - deltaMs = 0
  */
@@ -116,17 +116,17 @@ internal fun directToSlots(records: List<LocationSample>): List<SelectedSlot> =
     records.map { SelectedSlot(idealMs = it.timeMillis, sample = it, deltaMs = 0L) }
 
 /**
- * limit 値の正規化。
+ * Normalize limit value.
  *
- * @return 1 以上ならその値、それ以外（null / 0 以下）の場合は null（= 無制限）
+ * @return value when >= 1, else null (unlimited).
  */
 internal fun effectiveLimit(maxCount: Int?): Int? =
     maxCount?.takeIf { it > 0 }
 
 /**
- * グリッド取得時の「候補読み込み件数」のソフト上限を計算する。
- * - limit が指定されている場合は、その値の 5 倍をベースとしつつ [1,000, 200,000] にクランプ。
- * - limit が null の場合は、デフォルト 100 件相当をベースにする。
+ * Compute soft upper bound of candidate rows for grid mode.
+ * - When limit is specified, base = limit * 5 clamped to [1,000, 200,000].
+ * - When limit is null, base is equivalent to default 100 rows.
  */
 internal fun softLimitForGrid(limit: Int?): Int {
     val baseLimit = effectiveLimit(limit) ?: 100

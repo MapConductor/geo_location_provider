@@ -80,7 +80,7 @@ internal class GoogleAuthRepository(private val context: Context) : GoogleDriveT
         }
 
     override suspend fun refreshToken(): String? {
-        // GoogleAuthUtil 側でトークンの再取得が処理されるため、getAccessToken() を呼び直す。
+        // GoogleAuthUtil handles token refresh internally, so just call getAccessToken() again.
         return getAccessToken()
     }
 
@@ -89,7 +89,7 @@ internal class GoogleAuthRepository(private val context: Context) : GoogleDriveT
 
     fun signOut(activity: Activity) {
         GoogleSignIn.getClient(activity, gso).signOut()
-        // 必要であれば revokeAccess() も併用することを検討する。
+        // If needed, also consider calling revokeAccess() to fully revoke access.
         // GoogleSignIn.getClient(activity, gso).revokeAccess()
     }
 }

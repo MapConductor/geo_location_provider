@@ -5,10 +5,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * UI / UseCase 側が扱いやすい形に整えるための DrivePrefs ラッパ。
+ * Wrapper around DrivePrefs that provides a UI/UseCase-friendly view of Drive settings.
  *
- * - null / blank の扱いをある程度ここで吸収する
- * - ViewModel / UseCase は原則このリポジトリ経由で Drive 設定を参照する
+ * - Normalizes null / blank handling in this layer.
+ * - ViewModels and UseCases should generally read Drive settings through this repository.
  */
 class DrivePrefsRepository(context: Context) {
 
@@ -16,28 +16,28 @@ class DrivePrefsRepository(context: Context) {
 
     // ---- Read Flows ----
 
-    /** Drive フォルダ ID（未設定なら空文字） */
+    /** Drive folder ID (empty string when not set). */
     val folderIdFlow: Flow<String> = prefs.folderId
 
-    /** フォルダの resourceKey（未設定・空文字なら null） */
+    /** Folder resourceKey (null when not set or blank). */
     val folderResourceKeyFlow: Flow<String?> =
         prefs.folderResourceKey.map { it?.takeIf { s -> s.isNotBlank() } }
 
-    /** サインイン中アカウント（未設定なら空文字） */
+    /** Signed-in account email (empty string when not set). */
     val accountEmailFlow: Flow<String> = prefs.accountEmail
 
-    /** アップロードエンジン名（未設定なら空文字） */
+    /** Upload engine name (empty string when not set). */
     val uploadEngineNameFlow: Flow<String> = prefs.uploadEngine
 
-    /** 認証方式（Credential Manager / AppAuth）。未設定なら空文字 */
+    /** Auth method name (Credential Manager / AppAuth); empty string when not set. */
     val authMethodFlow: Flow<String> = prefs.authMethod
 
-    /** 最終トークン更新時刻（ミリ秒単位）。未保存なら 0L */
+    /** Last token refresh timestamp in milliseconds; 0L when never refreshed. */
     val tokenUpdatedAtMillisFlow: Flow<Long> = prefs.tokenUpdatedAtMillis
 
-    // --- 既存コード互換エイリアス ---
+    // --- Derived helper flows ---
 
-    /** 互換用: ViewModel 等が参照する想定の名前 */
+    /** Alias for tokenUpdatedAtMillisFlow for ViewModel convenience. */
     val tokenLastRefreshFlow: Flow<Long> = tokenUpdatedAtMillisFlow
 
     // ---- Write APIs ----
@@ -54,12 +54,12 @@ class DrivePrefsRepository(context: Context) {
 
     suspend fun setTokenUpdatedAt(millis: Long) = prefs.setTokenUpdatedAt(millis)
 
-    // --- 既存コード互換エイリアス ---
+    // --- Derived write helpers ---
 
-    /** 互換用: nowMillis を保存する */
+    /** Convenience: mark token refreshed at given time (millis). */
     suspend fun markTokenRefreshed(nowMillis: Long) = prefs.setTokenUpdatedAt(nowMillis)
 
-    /** 互換用オーバーロード: 現在時刻で更新 */
+    /** Convenience: mark token refreshed at current system time. */
     suspend fun markTokenRefreshed() =
         prefs.setTokenUpdatedAt(System.currentTimeMillis())
 }
