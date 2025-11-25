@@ -450,6 +450,16 @@ Para usar la subida a Drive, configura OAuth 2.0 en Google Cloud Console:
 - Tareas en segundo plano con WorkManager (`MidnightExportWorker`, `MidnightExportScheduler`).
 - Formateo y lógica de presentación común centralizados en utilidades como `Formatters.kt`.
 
+### Codificación de fuentes y comentarios
+
+- Todo el código de producción de este repositorio (Kotlin / Java / XML / scripts Gradle, etc.) está escrito usando **solo caracteres ASCII**.  
+  No se usan caracteres multibyte en código, comentarios ni literales de cadena, para evitar problemas de codificación entre herramientas y plataformas.
+- La documentación multilingüe (japonés / español) se ofrece por separado en `README_JA.md`, `README_ES.md` y otros archivos `*.md`.
+- El estilo de comentarios se ha unificado entre módulos:
+  - APIs públicas y clases principales: KDoc (`/** ... */`) describiendo rol, política de diseño, uso y contrato.
+  - Detalles internos de implementación: comentarios de una línea `// ...` y encabezados de sección simples como `// ---- Section ----`.
+  - Se evitan banners decorativos o estilos de separador inconsistentes entre módulos.
+
 ---
 
 ## Estado de implementación de funcionalidades
@@ -464,4 +474,3 @@ Para usar la subida a Drive, configura OAuth 2.0 en Google Cloud Console:
 | UI: DriveSettingsScreen         | [v] Implementado | Ajustes de autenticación, carpeta y pruebas       |
 | UI: PickupScreen                | [v] Implementado | Entrada de condiciones y lista de resultados      |
 | UI: lista de historial          | [v] Implementado | Visualización cronológica de muestras guardadas   |
-

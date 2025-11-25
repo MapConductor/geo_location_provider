@@ -450,6 +450,16 @@ To use Drive upload, prepare OAuth 2.0 settings in Google Cloud Console:
 - Background jobs implemented with WorkManager (`MidnightExportWorker`, `MidnightExportScheduler`).
 - Common formatting helpers live in utility classes such as `Formatters.kt`.
 
+### Source encoding and comments
+
+- All production source files in this repository (Kotlin / Java / XML / Gradle scripts, etc.) are written using **ASCII characters only**.  
+  Non-ASCII characters are not used in code, comments, or string literals to avoid encoding issues across tools and platforms.
+- Multilingual documentation (Japanese / Spanish) is provided separately in `README_JA.md`, `README_ES.md` and other `*.md` files.
+- Comment style is unified across modules:
+  - Public APIs and key classes use KDoc (`/** ... */`) to describe role, design policy, usage, and contracts.
+  - Internal implementation details use simple `// ...` line comments and minimal section headers such as `// ---- Section ----`.
+  - Decorative banners or inconsistent separator styles are avoided.
+
 ---
 
 ## Feature Implementation Status
@@ -464,4 +474,3 @@ To use Drive upload, prepare OAuth 2.0 settings in Google Cloud Console:
 | UI: DriveSettingsScreen    | [v] Implemented | Auth, folder settings, connectivity tests         |
 | UI: PickupScreen           | [v] Implemented | Input conditions and display of extracted results |
 | UI: History list           | [v] Implemented | Chronological view of saved samples               |
-

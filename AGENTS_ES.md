@@ -75,6 +75,15 @@ Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cam
   - Uso previsto
   - Contrato (qué puede y no puede esperar el llamador)
 
+### Política de comentarios y codificación
+
+- Todo el código de producción (Kotlin / Java / XML / scripts Gradle, etc.) debe escribirse usando **solo caracteres ASCII**.  
+  No uses caracteres multibyte en código, comentarios ni literales de cadena.
+- El contenido multilingüe (japonés / español, etc.) se permite únicamente en archivos de documentación como `README_JA.md`, `README_ES.md` y otros `*.md`.
+- Para APIs públicas y clases principales, prefiere KDoc (`/** ... */`); para notas internas de implementación, usa comentarios de una línea `// ...`.
+- Los encabezados de sección dentro del código deben seguir un estilo simple (por ejemplo, `// ---- Section ----` o `// ------------------------`) evitando banners decorativos.
+- Al refactorizar o mover lógica entre módulos, intenta mantener **el mismo nivel de detalle y tono en los comentarios** para componentes equivalentes.
+
 ---
 
 ## Capas y reparto de responsabilidades
@@ -309,4 +318,3 @@ Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cam
 
 Los tipos que no aparecen aquí deberían permanecer `internal` o no públicos siempre que sea posible,  
 para mantener pequeña y estable la superficie de API binaria visible para los consumidores de la librería.
-

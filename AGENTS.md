@@ -75,6 +75,15 @@ Please read it once before changing code and follow these guidelines when implem
   - Intended usage
   - Contract (what callers can and cannot expect)
 
+### Comment and Encoding Policy
+
+- All production source files (Kotlin / Java / XML / Gradle scripts, etc.) must be written using **ASCII characters only**.  
+  Do not use multibyte characters in code, comments, or string literals.
+- Multilingual text (Japanese / Spanish) is allowed only in documentation files such as `README_JA.md`, `README_ES.md`, and other `*.md` documents.
+- Prefer KDoc (`/** ... */`) for public APIs and key classes, and simple `// ...` line comments for internal implementation notes.
+- Section headers inside code should use a simple style (for example `// ---- Section ----` or `// ------------------------`) and avoid overly decorative banners.
+- When porting or refactoring, keep the **level of detail and tone of comments consistent** across modules so that similar components are documented in a similar way.
+
 ---
 
 ## Layering and Responsibilities
@@ -309,4 +318,3 @@ Please read it once before changing code and follow these guidelines when implem
 
 Types not listed here should stay `internal` or otherwise non-public whenever possible  
 so that the binary public surface remains small and stable for library consumers.
-
