@@ -1,129 +1,140 @@
-# GeoLocationProvider
+# GeoLocationProvider (日本語版)
 
-GeoLocationProvider は、Android 上で **位置情報を記録・保存・エクスポート** するための SDK & サンプルアプリケーションです。  
-エクスポートしたデータを **Google Drive にアップロード** する機能も提供します。
+GeoLocationProvider は、Android 上で **位置情報を記録・保存・エクスポート・アップロード** するための SDK & サンプルアプリケーションです。  
+バックグラウンドで位置情報を Room データベースに保存し、GeoJSON+ZIP 形式でエクスポートし、**Google Drive へのアップロード** も行えます。
 
 ---
 
-## 機能 (Features)
+## 機能概要
 
-- バックグラウンドでの位置情報取得（サンプリング間隔は設定可能）
-- Room データベースによる永続化
+- バックグラウンド位置情報取得（サンプリング間隔は設定可能）
+- Room データベースへの保存（`LocationSample`, `ExportedDay`）
 - GeoJSON 形式へのエクスポート（ZIP 圧縮付き）
-- 毎日 0 時に自動実行されるエクスポート（Midnight Export Worker）
-- 昨日のバックアップ・今日のプレビュー用の手動エクスポート
-- Pickup 機能（期間や件数などの条件に基づき代表サンプルを抽出）
+- 毎日 0 時の自動エクスポート（`MidnightExportWorker`）
+- 昨日のバックアップ / 今日のプレビュー用の手動エクスポート
+- Pickup 機能（期間・件数などの条件に基づく代表サンプル抽出）
 - Google Drive へのアップロード（フォルダ選択付き）
 
 ---
 
-## アーキテクチャ (Architecture)
+## アーキテクチャ
 
-### モジュール構成 (Module Structure)
+### モジュール構成
 
-> 本リポジトリには `app`, `core`, `dataselector`, `datamanager`, `storageservice`, `deadreckoning`, `auth-*` のモジュールが含まれています。  
-> サンプルアプリの構成をそのまま利用することも、必要なモジュールだけを取り出して自アプリに組み込むこともできます。
+本リポジトリはマルチモジュール構成の Gradle プロジェクトです:
 
-- **:core**  
-  位置取得サービス (`GeoLocationService`)、センサー周辺ロジック、サンプリング間隔などの設定反映を担当。  
-  永続化は `:storageservice` に委譲し、Dead Reckoning は `:deadreckoning` を利用します。
+- **`:app`** – Jetpack Compose ベースのサンプル UI（履歴一覧、Pickup 画面、Drive 設定画面、手動エクスポートなど）。
+- **`:core`** – 位置取得サービス（`GeoLocationService`）、センサー処理、サンプリング間隔の適用。永続化は `:storageservice` に委譲し、DR は `:deadreckoning` を利用します。
+- **`:storageservice`** – Room `AppDatabase` / DAO と `StorageService` ファサード。位置ログとエクスポート状況の唯一の入口です。
+- **`:dataselector`** – Pickup 向けの選択ロジック。`LocationSample` を条件でフィルタし、代表行 `SelectedSlot` を構築します。
+- **`:datamanager`** – GeoJSON エクスポート、ZIP 圧縮、`MidnightExportWorker` / `MidnightExportScheduler`、Google Drive 連携を担当します。
+- **`:deadreckoning`** – Dead Reckoning エンジンと公開 API（`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`）。
+- **`:auth-appauth`** – AppAuth ベースの `GoogleDriveTokenProvider` 実装。
+- **`:auth-credentialmanager`** – Credential Manager + Identity ベースの `GoogleDriveTokenProvider` 実装。
 
-- **:storageservice**  
-  Room の `AppDatabase`・DAO と、それらへの唯一の入口となる `StorageService` を提供。  
-  位置ログ (`LocationSample`) と日次エクスポート状態 (`ExportedDay`) を一元管理します。
+依存関係の向き（概要）は次の通りです:
 
-- **:dataselector**  
-  Pickup などの条件に基づくデータ抽出ロジック。  
-  `SelectorCondition`, `SelectedSlot`, `SelectorRepository`, `BuildSelectedSlots` などを公開します。
+- `:app` → `:core`, `:dataselector`, `:datamanager`, `:storageservice`, 認証系モジュール  
+- `:core` → `:storageservice`, `:deadreckoning`  
+- `:datamanager` → `:storageservice`, Drive 連携クラス  
+- `:dataselector` → `LocationSampleSource` 抽象のみ（具体実装は `:app` 側で `StorageService` をラップ）
 
-- **:datamanager**  
-  GeoJSON へのエクスポート、ZIP 圧縮、`MidnightExportWorker` / `MidnightExportScheduler`、  
-  および Google Drive 連携（`GoogleDriveTokenProvider`, `Uploader`, `DriveTokenProviderRegistry` など）を担当します。
+### 主なコンポーネント
 
-- **:deadreckoning**  
-  Dead Reckoning エンジンと API (`DeadReckoning`, `GpsFix`, `PredictedPoint`) を提供し、`GeoLocationService` から利用されます。
+- **エンティティ: `LocationSample` / `ExportedDay`**  
+  `LocationSample` は緯度・経度・タイムスタンプ・速度・バッテリー残量などを保持します。  
+  `ExportedDay` は日ごとのエクスポート状態（ローカル出力済みか、アップロード結果、最終エラーなど）を管理します。
 
-- **:auth-appauth / :auth-credentialmanager**  
-  `GoogleDriveTokenProvider` の実装モジュール。AppAuth / Android Credential Manager + Identity による認証フローを提供します。
+- **`StorageService`**  
+  Room (`AppDatabase` / DAO) への唯一の入口となるファサードです。  
+  他モジュールは DAO を直接触らず、`StorageService` 経由で DB にアクセスします。
 
-- **:app**  
-  Jetpack Compose ベースのサンプル UI（履歴リスト、Pickup 画面、Drive 設定画面など）を実装します。
+- **Pickup（`:dataselector`）**  
+  `SelectorCondition`, `SelectorRepository`, `BuildSelectedSlots`, `SelectorPrefs` などが Pickup の中核です。  
+  ログを間引き・グリッド吸着して代表サンプルを作成し、欠測は `SelectedSlot(sample = null)` として表現します。  
+  `LocationSampleSource` がサンプルの供給元を抽象化し、サンプルアプリでは `StorageService` を使った実装を提供します。
 
-### 主なコンポーネント (Key Components)
+- **Dead Reckoning（`:deadreckoning`）**  
+  公開 API（`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`）と、internal なエンジン実装（`DeadReckoningEngine`, `DeadReckoningImpl` など）で構成されます。  
+  `GeoLocationService` は `DeadReckoningFactory.create(applicationContext)` でインスタンスを生成し、`start()` / `stop()` で制御します。
 
-- **LocationSample / ExportedDay エンティティ**  
-  `LocationSample` は緯度・経度・タイムスタンプ・速度・バッテリー残量などを保持する位置ログです。  
-  `ExportedDay` は「どの日付がエクスポート済みか」「Drive アップロードが成功したか」「エラー内容」などを記録します。
+- **日次エクスポート（`MidnightExportWorker` / `MidnightExportScheduler`）**  
+  WorkManager ベースのパイプラインで、次の処理を行います:
+  - タイムゾーン `Asia/Tokyo` で「前日まで」の日付を走査
+  - 各日について `StorageService.getLocationsBetween` で `LocationSample` を取得
+  - `GeoJsonExporter.exportToDownloads` で GeoJSON+ZIP に変換
+  - `markExportedLocal` によるローカル出力済みフラグの設定
+  - `UploaderFactory` + `GoogleDriveTokenProvider` による Drive へのアップロード
+  - `markUploaded` / `markExportError` によるアップロード状態の記録
+  - ZIP ファイルの削除、およびアップロード成功時の古いログ削除
 
-- **StorageService**  
-  Room (`AppDatabase` / DAO) への「唯一の入り口」となるファサードです。  
-  他モジュールは `StorageService` 経由でのみ DB にアクセスし、DAO や `AppDatabase` を直接 import しない方針です。
+- **Drive 連携（`GoogleDriveTokenProvider` など）**  
+  `GoogleDriveTokenProvider` が Drive アクセストークン取得を抽象化し、  
+  `DriveTokenProviderRegistry` がバックグラウンド用のプロバイダを提供します。  
+  `Uploader` / `UploaderFactory`（実体は `KotlinDriveUploader`）がアップロードを行い、`DriveApiClient` が `/files` / `/about` などの REST 呼び出しを担当します。  
+  旧来の `GoogleAuthRepository`（GoogleAuthUtil ベース）は後方互換のために残していますが、新規コードでは非推奨です。
 
-- **Pickup / dataselector**  
-  `SelectorCondition`, `SelectorRepository`, `BuildSelectedSlots` が Pickup ロジックの中核です。  
-  条件に従ってログを間引き・グリッド吸着し、欠測は `SelectedSlot(sample = null)` で表現します。
-
-- **MidnightExportWorker & MidnightExportScheduler**  
-  WorkManager を用いたバックグラウンドタスク。毎日 0 時に前日分のログを GeoJSON + ZIP にエクスポートし、  
-  Google Drive へのアップロードと `ExportedDay` 状態の更新までを自動実行します。
-
-- **GoogleDriveTokenProvider / Uploader / DriveApiClient**  
-  Drive 連携の中核コンポーネントです。  
-  `GoogleDriveTokenProvider` はアクセス トークン取得を抽象化し、`Uploader` / `UploaderFactory` は Drive へのアップロード処理、  
-  `DriveApiClient` は `/files`・`/about` などの REST 呼び出しを扱います。  
-  GoogleAuthUtil ベースのレガシー実装 `GoogleAuthRepository` も互換用として残っていますが、新規コードでは使用しません。
+- **UI（Compose）– `MainActivity`, `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen`**  
+  UI は 2 段構えの `NavHost` で構成されています。
+  - Activity レベル: `"home"`, `"drive_settings"`（AppBar の Drive メニューから Drive 設定へ遷移）
+  - アプリレベル: `"home"`, `"pickup"`（AppBar のボタンで Home / Pickup を切り替え）  
+  パーミッションは `ActivityResultContracts.RequestMultiplePermissions` で取得し、サービスの Start/Stop トグルは `ServiceToggleAction` にまとめています。
 
 ---
 
-## Public API / 公開 API
+## 公開 API 概要
 
-GeoLocationProvider は「再利用可能なライブラリ + サンプルアプリ」という構成です。  
-他アプリから再利用する際には、主に次のモジュール・クラスを公開 API として利用する想定です。
+GeoLocationProvider は、
 
-### モジュールと主なエントリポイント
+- そのまま動かせる **サンプルアプリ**（`:app`）と
+- 自作アプリに組み込める **ライブラリモジュール群**
+
+として設計されています。ライブラリを利用する際によく依存する型は次の通りです。
+
+### モジュールと主な入口
 
 - **`:core`**
-  - `GeoLocationService` … 位置情報を記録する Foreground Service。`LocationSample` を DB に書き込みます。
-  - `UploadEngine` … エクスポート／アップロード方式の種別を表す Enum。
+  - `GeoLocationService` – 位置ログ（`LocationSample`）を記録するフォアグラウンドサービス。
+  - `UploadEngine` – 使用するアップロードエンジンを表す enum。
 
 - **`:storageservice`**
-  - `StorageService` … Room (`LocationSample`, `ExportedDay`) への唯一のファサード。
-  - `LocationSample`, `ExportedDay` … 位置ログとエクスポート状態を表すエンティティ。
-  - `SettingsRepository` … サンプリング間隔・DR 間隔などの設定値を管理。
+  - `StorageService` – Room（`LocationSample`, `ExportedDay`）のファサード。
+  - `LocationSample`, `ExportedDay` – 位置ログと日次エクスポート状態の主要エンティティ。
+  - `SettingsRepository` – サンプリング / Dead Reckoning 間隔の設定。
 
 - **`:dataselector`**
-  - `SelectorCondition`, `SelectedSlot`, `SortOrder` … Pickup / クエリのドメインモデル。
-  - `LocationSampleSource` … `LocationSample` の取得元を抽象化するインターフェース。
-  - `SelectorRepository`, `BuildSelectedSlots` … コアな選択ロジックと UI 用のユースケース。
-  - `SelectorPrefs` … Pickup 条件を永続化する DataStore ファサード。
+  - `SelectorCondition`, `SelectedSlot`, `SortOrder` – Pickup / クエリのドメインモデル。
+  - `LocationSampleSource` – `LocationSample` の取得元を抽象化するインターフェース。
+  - `SelectorRepository`, `BuildSelectedSlots` – 選択ロジックと小さな UseCase ラッパー。
+  - `SelectorPrefs` – Pickup 条件を永続化する DataStore ラッパー。
 
 - **`:datamanager`**
-  - `GeoJsonExporter` … `LocationSample` を GeoJSON + ZIP にエクスポート。
-  - `GoogleDriveTokenProvider` … Drive アクセストークン取得の抽象インターフェース。
-  - `DriveTokenProviderRegistry` … バックグラウンド用のトークンプロバイダ レジストリ。
-  - `Uploader`, `UploaderFactory` … Drive へのアップロードを行う高レベル API。
-  - `DriveApiClient`, `DriveFolderId`, `UploadResult` … Drive REST 呼び出しと結果表現。
-  - `MidnightExportWorker`, `MidnightExportScheduler` … 日次エクスポートの Worker とスケジューラ。
+  - `GeoJsonExporter` – `LocationSample` を GeoJSON + ZIP にエクスポート。
+  - `GoogleDriveTokenProvider` – Drive アクセストークンの抽象。
+  - `DriveTokenProviderRegistry` – バックグラウンド用トークンプロバイダのレジストリ。
+  - `Uploader`, `UploaderFactory` – Drive アップロードの高レベルエントリポイント。
+  - `DriveApiClient`, `DriveFolderId`, `UploadResult` – Drive REST ヘルパーと結果モデル。
+  - `MidnightExportWorker`, `MidnightExportScheduler` – 日次エクスポートのパイプライン。
 
 - **`:deadreckoning`**
-  - `DeadReckoning`, `GpsFix`, `PredictedPoint` … DR エンジンの公開 API（`GeoLocationService` から利用）。
+  - `DeadReckoning`, `GpsFix`, `PredictedPoint` – `GeoLocationService` から利用される DR エンジン API。
+  - `DeadReckoningConfig`, `DeadReckoningFactory` – DR インスタンスを生成するための設定とファクトリ。
 
-- **`:auth-credentialmanager` / `:auth-appauth`（任意）**
-  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider` … `GoogleDriveTokenProvider` の参照実装。
+- **`:auth-credentialmanager` / `:auth-appauth`**（任意）
+  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider` – `GoogleDriveTokenProvider` の参照実装。
 
-DAO や `AppDatabase`、具体的な `*Repository` 実装、低レベルな HTTP ヘルパーなどはライブラリ内部の詳細であり、  
-将来的に互換性なく変更される可能性があります。
+これ以外の型（DAO や `AppDatabase` 実装、各種 Repository 実装、低レベル HTTP ヘルパーなど）は **内部実装** とみなし、予告なく変更される可能性があります。
 
 ---
 
-## 最小構成の統合例 (Minimal integration example)
+## 最小統合例
 
-以下はホストアプリに組み込む際の、最小限のエンドツーエンド構成例です。
+自前アプリに組み込む際の最小例を示します。
 
-### 1. 位置記録サービスを起動し、履歴を監視する
+### 1. 位置サービスを開始し、履歴を監視する
 
 ```kotlin
-// Activity からサービスを起動／停止
+// Activity 内
 private fun startLocationService() {
     val intent = Intent(this, GeoLocationService::class.java)
         .setAction(GeoLocationService.ACTION_START)
@@ -138,7 +149,7 @@ private fun stopLocationService() {
 ```
 
 ```kotlin
-// ViewModel から最新 N 件の履歴を Flow で監視
+// ViewModel 内
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     val latest: StateFlow<List<LocationSample>> =
         StorageService.latestFlow(app.applicationContext, limit = 100)
@@ -146,10 +157,10 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
 }
 ```
 
-### 2. 保存済みログに対して Pickup を実行する
+### 2. 保存済みサンプルに対して Pickup（間引き・代表抽出）を実行する
 
 ```kotlin
-// StorageService を背後に持つ LocationSampleSource 実装
+// StorageService バックエンドの LocationSampleSource 実装
 class StorageSampleSource(
     private val context: Context
 ) : LocationSampleSource {
@@ -164,9 +175,9 @@ suspend fun runPickup(context: Context): List<SelectedSlot> {
     val useCase = BuildSelectedSlots(repo)
 
     val cond = SelectorCondition(
-        fromMillis = /* 開始時刻 (ms) */,
-        toMillis = /* 終了時刻 (ms) */,
-        intervalSec = 60,          // 60 秒グリッド
+        fromMillis = /* startMs */,
+        toMillis = /* endMs */,
+        intervalSec = 60,         // 60 秒グリッド
         limit = 1000,
         order = SortOrder.OldestFirst
     )
@@ -177,28 +188,28 @@ suspend fun runPickup(context: Context): List<SelectedSlot> {
 ### 3. Drive アップロードと日次エクスポートを設定する
 
 ```kotlin
-// Application でトークンプロバイダ登録とスケジューラ設定
+// Application クラス内
 class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // 例: :auth-credentialmanager の CredentialManagerTokenProvider を利用
+        // 例: :auth-credentialmanager の CredentialManagerTokenProvider を再利用
         val provider = CredentialManagerTokenProvider(
             context = this,
             serverClientId = BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
         )
 
-        // MidnightExportWorker から利用されるバックグラウンド用プロバイダを登録
+        // MidnightExportWorker 用のバックグラウンドプロバイダを登録
         DriveTokenProviderRegistry.registerBackgroundProvider(provider)
 
-        // 日次エクスポートをスケジュール（毎日 0 時）
+        // 日次エクスポートを 0 時にスケジュール
         MidnightExportScheduler.scheduleNext(this)
     }
 }
 ```
 
 ```kotlin
-// 任意のタイミングでファイルを Drive にアップロードする例（オプション）
+// 任意のファイルを Drive にアップロードする例（オプション）
 suspend fun uploadFileNow(
     context: Context,
     tokenProvider: GoogleDriveTokenProvider,
@@ -215,25 +226,144 @@ suspend fun uploadFileNow(
 }
 ```
 
-より詳細な説明やフルコードは、英語版の `README.md` も併せて参照してください。
+---
+
+## Google Drive 認証オプション
+
+すべての Drive アップロードは `GoogleDriveTokenProvider` を通じて行われます。基本的な契約は次の通りです。
+
+- トークンは `"Bearer "` なしの **生のアクセストークン文字列** を返す。
+- 通常の失敗（ネットワークエラー・未サインイン・同意不足など）は、例外ではなく **`null` を返す** ことで表現する。
+- バックグラウンドコンテキストから UI を直接起動してはいけない。UI が必要な場合は `null` を返し、呼び出し元が判断する。
+
+以下の実装から選ぶか、自前実装を用意できます。
+
+### オプション 1: AppAuth（標準 OAuth 2.0 / PKCE）
+
+AppAuth for Android を利用した、標準的な OAuth 2.0（ネイティブアプリ + PKCE）です。
+
+1) アプリモジュールに依存関係を追加:
+
+```gradle
+implementation(project(":auth-appauth"))
+```
+
+2) Google Cloud Console で OAuth 2.0 クライアントを作成:
+
+- OAuth 同意画面を設定する。
+- **インストールアプリ**（Android / その他インストールアプリ）としてクライアント ID を作成し、Web アプリ用クライアントは使わない。
+- カスタム URI スキーム（例: `com.mapconductor.plugin.provider.geolocation`）を許可する。
+- 次のようなリダイレクト URI を登録する:
+
+```text
+com.mapconductor.plugin.provider.geolocation:/oauth2redirect
+```
+
+3) トークンプロバイダを初期化（例）:
+
+```kotlin
+val tokenProvider = AppAuthTokenProvider(
+    context = applicationContext,
+    clientId = BuildConfig.APPAUTH_CLIENT_ID,
+    redirectUri = "com.mapconductor.plugin.provider.geolocation:/oauth2redirect"
+)
+
+// Activity から認可フローを開始
+val intent = tokenProvider.buildAuthorizationIntent()
+startActivityForResult(intent, REQUEST_CODE)
+
+// 結果を受け取る
+tokenProvider.handleAuthorizationResponse(data)
+
+// Uploader と組み合わせて利用
+val uploader = KotlinDriveUploader(context, tokenProvider)
+```
+
+サンプルプロジェクトでは、`APPAUTH_CLIENT_ID` は `secrets.properties` 内の `APPAUTH_CLIENT_ID` から `secrets-gradle-plugin` により生成されます。
+
+### オプション 2: Credential Manager（モダンな Android 認証 / サンプルアプリ既定）
+
+Android Credential Manager + Identity API を用いた認証です。サンプルアプリではこちらを既定の経路として利用しています（Android 14+ との相性が良好です）。
+
+1) アプリモジュールに依存関係を追加:
+
+```gradle
+implementation(project(":auth-credentialmanager"))
+```
+
+2) Google Cloud Console で OAuth 2.0 クライアントを作成:
+
+- **Web アプリケーション** としてクライアント ID を作成します。
+- 得られたクライアント ID を **サーバー用クライアント ID** として扱います。
+
+3) トークンプロバイダを初期化:
+
+```kotlin
+val tokenProvider = CredentialManagerTokenProvider(
+    context = applicationContext,
+    serverClientId = BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
+)
+
+// Activity / UI からサインイン
+val credential = tokenProvider.signIn()
+
+// アクセストークン取得（バックグラウンド利用も可能）
+val token = tokenProvider.getAccessToken()
+```
+
+サンプルアプリでは:
+
+- `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` は `BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID` から参照されます。
+- この値は `secrets.properties` の `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` に基づき、`secrets-gradle-plugin` によって生成されます。
+- `App` が `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))` を呼び出し、バックグラウンド用プロバイダとして登録します。
+
+### オプション 3: レガシー実装（後方互換のみ）
+
+`GoogleAuthRepository`（GoogleAuthUtil ベース）は互換性のために残っていますが、新規コードでは **非推奨** です。
+
+```kotlin
+@Deprecated("Use AppAuth or Credential Manager instead")
+val tokenProvider = GoogleAuthRepository(context)
+```
+
+### 必要な OAuth スコープ
+
+どの実装を使う場合も、次の Drive スコープを利用します。
+
+- `https://www.googleapis.com/auth/drive.file` – アプリが作成 / 開いたファイルへのアクセス。
+- `https://www.googleapis.com/auth/drive.metadata.readonly` – フォルダ ID 検証やメタデータ取得。
+
+### 独自 `GoogleDriveTokenProvider` を実装する場合
+
+```kotlin
+class MyCustomTokenProvider : GoogleDriveTokenProvider {
+    override suspend fun getAccessToken(): String? {
+        // 独自実装
+    }
+
+    override suspend fun refreshToken(): String? {
+        // 独自実装
+    }
+}
+```
 
 ---
 
-## クイックスタート (Quick Start)
+## クイックスタート
 
-> `app`, `core`, `dataselector`, `datamanager`, `storageservice`, `deadreckoning`, `auth-*` のソースコードはすでにリポジトリに含まれており、サンプルアプリとして配線済みです。  
-> ここではローカル専用ファイルの準備と、必要に応じた Google Drive 連携の前提条件だけを説明します。
+> `app`, `core`, `dataselector`, `datamanager`, `storageservice`, `deadreckoning`, `auth-*` のソースはすでに本リポジトリ内で配線済みです。  
+> ローカル設定ファイルと（必要であれば）Google Drive 向けの認証情報を用意すれば、サンプルアプリをそのままビルド・実行できます。
 
-### 0. 要件 (Requirements)
+### 0. 必要環境
 
-- AGP 8.11 以降に対応した Android Studio（または同梱の `./gradlew`）
-- JDK 17（Gradle / Kotlin の JVM ターゲットが 17）
-- Android SDK（少なくとも API 26 以上。`compileSdk = 36` を利用）
+- Android Studio（AGP 8.1+ 対応）または同梱の `./gradlew`
+- JDK 17（Gradle / Kotlin の JVM ターゲット 17）
+- Android SDK API 26 以上（プロジェクトは `compileSdk = 36` を使用）
 
 ### 1. `local.properties` の準備
 
-`local.properties` は **開発マシン固有の設定**（主に Android SDK のパスなど）を置くファイルです（通常は Git 管理外）。  
-多くの場合は Android Studio が自動生成しますが、存在しない場合はプロジェクトルートに作成してください。
+`local.properties` には **開発マシン固有の設定**（Android SDK のパスなど）を記述します（通常は Git 管理対象外）。  
+Android Studio が自動生成するのが一般的ですが、存在しない場合はプロジェクトルートに作成してください。
 
 **例: `local.properties`（ローカル専用・コミットしない）**
 
@@ -245,11 +375,11 @@ org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
 
 ### 2. `secrets.properties` の準備
 
-`secrets.properties` は、`secrets-gradle-plugin` 経由で BuildConfig に埋め込む **認証・API キーなどの機密情報** を置くためのローカルファイルです（Git 管理外）。  
-リポジトリにはテンプレートとして `local.default.properties` が含まれているので、これをコピーして編集する運用を想定しています。
+`secrets.properties` は `secrets-gradle-plugin` 経由で BuildConfig に埋め込む **認証情報やその他の機密値** を格納するファイルです。  
+リポジトリにはテンプレートとして `local.default.properties` が含まれているので、これをコピーして値を設定します。
 
 ```bash
-cp local.default.properties secrets.properties   # Windows の場合はエクスプローラー等でコピー
+cp local.default.properties secrets.properties   # Windows の場合はエクスプローラー等でコピーしても可
 ```
 
 **例: `local.default.properties`（テンプレート・コミット可）**
@@ -269,24 +399,27 @@ APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
 CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
 APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
 
-# サンプルアプリの Manifest から参照される Google Maps API キー（任意）
+# サンプルアプリの Manifest で参照される Google Maps API キー（任意）
 GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 ```
 
-> ローカルでビルドするだけならダミー値でも構いません。  
-> 実際に Drive 認証や地図表示を行う場合は、Cloud Console で取得した実際のクライアント ID / API キーを設定してください。
+ローカルでビルドして動作確認するだけであれば、ダミー値でも問題ありません。  
+実際に Drive 認証や Maps 表示を行う場合は、Cloud Console で取得した実際のクライアント ID / API キーを設定してください。
 
-### 3. Google Drive 連携の前提条件
+### 3. Google Drive 連携の前提設定
 
-1. Google Cloud Console でプロジェクトを作成  
-2. OAuth 同意画面を「公開」ステータスまで設定  
-3. 使用する認証方式に応じて、OAuth クライアント（**Android アプリ** と **Web アプリケーション** など）を作成  
-4. 発行されたクライアント ID を `secrets.properties` やアプリコードに設定  
-5. 使用するスコープ:
-   - `https://www.googleapis.com/auth/drive.file`  
+Drive アップロードを利用するには、Google Cloud Console で次の設定を行います。
+
+1. プロジェクト作成と OAuth 同意画面の設定  
+2. OAuth クライアント ID の作成  
+   - Credential Manager 用: **Web アプリケーション** クライアント（`CREDENTIAL_MANAGER_SERVER_CLIENT_ID`）  
+   - AppAuth 用: **インストールアプリ** クライアント（`APPAUTH_CLIENT_ID`、カスタムスキーム + リダイレクト URI）  
+3. Drive API を有効化し、次のスコープを許可:
+   - `https://www.googleapis.com/auth/drive.file`
    - `https://www.googleapis.com/auth/drive.metadata.readonly`
+4. 上記クライアント ID を `secrets.properties` に設定
 
-### 4. 権限の追加（確認用）
+### 4. パーミッションの追加（確認用）
 
 ```xml
 <!-- app/src/main/AndroidManifest.xml -->
@@ -297,7 +430,7 @@ GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.INTERNET" />
 
-<!-- 任意: Foreground Service や UI が見えていない状態でも位置取得が必要な場合のみ -->
+<!-- Foreground Service や UI が見えていない状態でも位置情報が必要な場合のみ -->
 <!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> -->
 ```
 
@@ -309,26 +442,26 @@ GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 
 ---
 
-## 開発スタイル (Development)
+## 開発スタイル
 
-- Kotlin コーディング規約に準拠
+- Kotlin のコーディング規約に準拠
 - UI は Jetpack Compose ベース
-- DataStore + Room による永続化
-- WorkManager によるバックグラウンド処理
+- 永続化は Room + DataStore（設定用）で実装
+- バックグラウンド処理は WorkManager（`MidnightExportWorker`, `MidnightExportScheduler`）で実装
 - 表示フォーマットなどは `Formatters.kt` などのユーティリティに集約
 
 ---
 
-## 機能実装状況 (Feature Implementation Status)
+## 機能実装状況
 
-| 機能                          | 状況       | 備考                                             |
-|-------------------------------|------------|--------------------------------------------------|
-| 位置ログ記録 (Room)           | [v] 実装済 | Room DB に保存                                   |
-| 日次エクスポート (GeoJSON+ZIP)| [v] 実装済 | `MidnightExportWorker` により 0 時に実行         |
-| Google Drive アップロード     | [v] 実装済 | Kotlin 実装のアップローダーを利用                |
-| Pickup (間隔 / 件数指定)      | [v] 実装済 | ViewModel + UseCase により UI と連携             |
-| Drive フルスコープ認証        | [-] 検討中 | `drive` フルスコープでの既存ファイル更新は未実装 |
-| UI: DriveSettingsScreen       | [v] 実装済 | 認証・フォルダ設定・接続テスト等                 |
-| UI: PickupScreen              | [v] 実装済 | 抽出条件入力と結果リスト表示                     |
-| UI: 履歴リスト                | [v] 実装済 | 保存済みサンプルの時系列表示                     |
+| 機能                           | 状況         | 備考                                          |
+|--------------------------------|--------------|-----------------------------------------------|
+| 位置ログ記録（Room）           | [v] 実装済み | Room DB に保存                                |
+| 日次エクスポート（GeoJSON+ZIP）| [v] 実装済み | `MidnightExportWorker` により 0 時に実行      |
+| Google Drive アップロード      | [v] 実装済み | Kotlin ベースの Uploader を利用               |
+| Pickup（間隔 / 件数指定）      | [v] 実装済み | ViewModel + UseCase + Compose UI で構成       |
+| Drive フルスコープ認証         | [-] 検討中   | 既存ファイルのフルブラウズ / 更新は未サポート |
+| UI: DriveSettingsScreen        | [v] 実装済み | 認証・フォルダ設定・接続テスト                |
+| UI: PickupScreen               | [v] 実装済み | 抽出条件入力と結果表示                        |
+| UI: 履歴リスト                 | [v] 実装済み | 保存済みサンプルの時系列表示                  |
 

@@ -1,7 +1,7 @@
-# Repository Guidelines
+# Repository Guidelines (versión en español)
 
-Este documento resume las políticas comunes, las convenciones de código y la separación de responsabilidades entre módulos al trabajar en el repositorio GeoLocationProvider.  
-Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementaciones.
+Este documento resume las **políticas comunes, las convenciones de código y la separación de responsabilidades entre módulos** al trabajar en el repositorio GeoLocationProvider.  
+Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cambios.
 
 ---
 
@@ -9,9 +9,9 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 
 - El proyecto Gradle raíz `GeoLocationProvider` se compone de los siguientes módulos:
   - `:app` – Aplicación de ejemplo basada en Compose (historial, Pickup, ajustes de Drive, copias de seguridad manuales, etc.).
-  - `:core` – Servicio de obtención de posición (`GeoLocationService`) y lógica relacionada con sensores. La persistencia se delega a `:storageservice`.
-  - `:storageservice` – `AppDatabase` de Room, DAOs y fachada `StorageService`. Gestiona centralmente los registros de posición y el estado de exportación.
-  - `:dataselector` – Lógica de selección para Pickup, etc. Filtra `LocationSample` por condiciones y construye filas de muestras representativas (`SelectedSlot`).
+  - `:core` – Servicio de obtención de localización (`GeoLocationService`) y lógica relacionada con sensores. La persistencia se delega a `:storageservice`.
+  - `:storageservice` – `AppDatabase` de Room, DAOs y fachada `StorageService`. Gestiona centralmente los registros de localización y el estado de exportación.
+  - `:dataselector` – Lógica de selección para Pickup. Filtra `LocationSample` por condiciones y construye filas de muestras representativas (`SelectedSlot`).
   - `:datamanager` – Exportación a GeoJSON, compresión ZIP, `MidnightExportWorker` / `MidnightExportScheduler` e integración con Google Drive.
   - `:deadreckoning` – Motor y API de Dead Reckoning. Se utiliza desde `GeoLocationService`.
   - `:auth-appauth` – Módulo de librería que proporciona una implementación de `GoogleDriveTokenProvider` basada en AppAuth.
@@ -26,9 +26,10 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 - El código de producción se encuentra en `src/main/java`, `src/main/kotlin` y `src/main/res` de cada módulo.  
   Los artefactos de build se generan en `build/` dentro de cada módulo.
 
-- La configuración específica de cada máquina (por ejemplo, la ruta al SDK de Android) se define en `local.properties` en el directorio raíz.  
+- La configuración específica de cada máquina (por ejemplo, la ruta al SDK de Android) se define en `local.properties` en la raíz.  
   Android Studio suele generar este archivo automáticamente; si no existe, créalo manualmente.
-- Los ajustes de secretos y autenticación viven en `secrets.properties`, que **no debe versionarse**.  
+
+- Los secretos y la configuración relacionada con autenticación viven en `secrets.properties`, que **no debe versionarse**.  
   La plantilla para este archivo es `local.default.properties`: cópiala a `secrets.properties` y reemplaza los valores con credenciales reales.
 
 ---
@@ -38,10 +39,10 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 - Comandos Gradle representativos (ejecutar en la raíz):
   - `./gradlew :app:assembleDebug` – Compila el APK Debug de la app de ejemplo.
   - `./gradlew :core:assemble` / `./gradlew :storageservice:assemble` – Compila los módulos de librería.
-  - `./gradlew lint` – Ejecuta análisis estático para Android / Kotlin.
+  - `./gradlew lint` – Ejecuta análisis estático de Android / Kotlin.
   - `./gradlew test` / `./gradlew :app:connectedAndroidTest` – Ejecuta tests unitarios / tests de UI e instrumentación.
 
-- En el desarrollo diario, se recomienda compilar y ejecutar desde Android Studio.  
+- Para el desarrollo diario se recomienda compilar y ejecutar desde Android Studio.  
   Usa Gradle por línea de comandos principalmente para CI y tareas de verificación.
 
 ---
@@ -81,49 +82,49 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 ### StorageService / Acceso a Room
 
 - El acceso a `AppDatabase` / DAOs de Room debe hacerse a través de `StorageService`.
-  - La única excepción es dentro del propio módulo `:storageservice` (implementaciones de DAOs y `AppDatabase`).
+  - La única excepción es dentro del propio módulo `:storageservice` (implementaciones de DAO y `AppDatabase`).
   - No importes tipos de DAO directamente desde `:app`, `:core`, `:datamanager` ni `:dataselector`.
 
 - Contratos principales de `StorageService`:
-  - `latestFlow(ctx, limit)` – Flow con las últimas `limit` muestras de `LocationSample`, ordenadas de la más nueva a la más antigua.
-  - `getAllLocations(ctx)` – Obtiene todas las posiciones en orden ascendente por `timeMillis`. Para conjuntos de datos pequeños (exportación masiva o vista previa).
-  - `getLocationsBetween(ctx, from, to, softLimit)` – Obtiene posiciones en el intervalo semiabierto `[from, to)`, ordenadas por `timeMillis` ascendente.  
-    Usa esta API para conjuntos de datos grandes.
-  - `insertLocation(ctx, sample)` – Inserta una muestra y registra en logs el número de filas antes/después con la etiqueta `DB/TRACE`.
-  - `deleteLocations(ctx, items)` – No hace nada con listas vacías; las excepciones se propagan tal cual.
+  - `latestFlow(ctx, limit)` – Devuelve un Flow con las últimas `limit` muestras de `LocationSample`, ordenadas de más nuevas a más antiguas.
+  - `getAllLocations(ctx)` – Devuelve todas las localizaciones en orden ascendente de `timeMillis`. Pensado para conjuntos pequeños (exportaciones puntuales, vistas previas).
+  - `getLocationsBetween(ctx, from, to, softLimit)` – Devuelve localizaciones en el intervalo `[from, to)` (intervalo semiabierto), ordenadas por `timeMillis` ascendente.  
+    Utiliza esta API para conjuntos de datos grandes.
+  - `insertLocation(ctx, sample)` – Inserta una muestra y registra en el log el número de filas antes y después con la etiqueta `DB/TRACE`.
+  - `deleteLocations(ctx, items)` – No hace nada si la lista está vacía; propaga las excepciones directamente.
   - `ensureExportedDay` / `oldestNotUploadedDay` / `markExportedLocal` / `markUploaded` / `markExportError` – Gestionan el estado de exportación diaria.
 
-- Se asume que todo acceso a la BD se ejecuta en `Dispatchers.IO`.  
-  El código llamador no necesita cambiar de dispatcher, pero debe evitar bloquear el hilo de UI.
+- Se asume que todo acceso a la base de datos se ejecuta en `Dispatchers.IO`.  
+  Los llamadores no necesitan cambiar de dispatcher, pero deben evitar bloquear el hilo de UI.
 
 ### dataselector / Pickup
 
-- El módulo `:dataselector` solo depende de la interfaz `LocationSampleSource` y no debe conocer directamente Room ni `StorageService`.
+- El módulo `:dataselector` depende únicamente de la interfaz `LocationSampleSource` y no debe conocer Room ni `StorageService` directamente.
   - `LocationSampleSource.findBetween(fromInclusive, toExclusive)` usa el intervalo semiabierto `[from, to)`.
 
 - Políticas de `SelectorRepository`:
-  - Cuando `intervalSec == null`: extracción directa (sin rejilla). Solo hace reducción simple y ordenación.
-  - Cuando `intervalSec != null`: modo de “snap” a rejilla:
-    - Con `T = intervalSec * 1000L`, se selecciona exactamente una muestra representativa dentro de una ventana `±T/2` para cada celda de la rejilla (en empate, se prioriza la muestra más antigua).
+  - Cuando `intervalSec == null`: extracción directa (sin rejilla). Solo realiza un adelgazamiento simple y ordenación.
+  - Cuando `intervalSec != null`: modo de ajuste a rejilla (grid-snapping).
+    - Sea `T = intervalSec * 1000L`. Para cada rejilla, se selecciona exactamente una muestra representativa dentro de una ventana `±T/2` (si hay varias, se prefiere la más temprana).
     - Para `SortOrder.NewestFirst`:
-      - La rejilla se genera desde el final usando `buildTargetsFromEnd(from, to, T)`, basada en **To (endInclusive)**, sin celdas antes de `from`.
-      - Al final se aplica `slots.asReversed()` para mostrar de la más nueva a la más antigua.
+      - Las rejillas se generan desde el final usando `buildTargetsFromEnd(from, to, T)`, basadas en **To (endInclusive)**, sin crear rejillas anteriores a `from`.
+      - Los resultados se invierten con `slots.asReversed()` para mostrarlos de más nuevo a más antiguo.
     - Para `SortOrder.OldestFirst`:
-      - La rejilla se genera desde el inicio usando `buildTargetsFromStart(from, to, T)`, basada en **From (startInclusive)**, sin celdas más allá de `to`.
-      - Los resultados se muestran tal cual, en orden ascendente (de más antigua a más nueva).
+      - Las rejillas se generan desde el inicio usando `buildTargetsFromStart(from, to, T)`, basadas en **From (startInclusive)**, sin crear rejillas posteriores a `to`.
+      - Los resultados se muestran tal cual en orden ascendente (de más antiguo a más nuevo).
 
 - `SelectorPrefs` persiste las condiciones de Pickup.  
-  Usa las mismas unidades que `SelectorCondition` (from/to en milisegundos, `intervalSec` en segundos).
+  Utiliza las mismas unidades que `SelectorCondition` (from/to en milisegundos, `intervalSec` en segundos).
 
-- La UI (`:app`) utiliza `:dataselector` a través de `SelectorUseCases.buildSelectedSlots(context)`.
-  - `PickupScreen` usa este caso de uso para obtener resultados de Pickup sin conocer tipos de DB/DAO.
+- La UI (`:app`) usa dataselector a través de `SelectorUseCases.buildSelectedSlots(context)`.  
+  `PickupScreen` usa este caso de uso para obtener resultados de Pickup sin conocer tipos de DB/DAO.
 
 ### GeoLocationService / Dead Reckoning
 
-- La obtención real de posición la realiza `GeoLocationService` en `:core`, que funciona como un Foreground Service (FGS).
+- La obtención real de localización la realiza `GeoLocationService` en el módulo `:core`, que se ejecuta como servicio en primer plano (FGS).
   - GNSS: usa `FusedLocationProviderClient` y `LocationRequest`.
   - IMU / Dead Reckoning: usa `HeadingSensor`, `GnssStatusSampler`, `DeadReckoning`.
-  - Ajustes: se suscribe a `SettingsRepository.intervalSecFlow` / `drIntervalSecFlow` para actualizar los intervalos dinámicamente.
+  - Ajustes: se suscribe a `SettingsRepository.intervalSecFlow` / `drIntervalSecFlow` para actualizar dinámicamente los intervalos.
 
 - API de Dead Reckoning (módulo `:deadreckoning`):
   - Interfaces públicas: `DeadReckoning`, `GpsFix`, `PredictedPoint` (paquete `...deadreckoning.api`).
@@ -134,20 +135,20 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
     - `velocityGain`
     - `windowSize`
     - etc.
-  - Fábrica: `DeadReckoningFactory.create(context, config = DeadReckoningConfig())`
-    - Los consumidores crean `DeadReckoning` sin depender de detalles de implementación.
-  - La implementación (`DeadReckoningImpl`) y el motor (`DeadReckoningEngine`, `SensorAdapter`, `DrState`, `DrUncertainty`) son internos y se pueden sustituir en el futuro.
+  - Factoría: `DeadReckoningFactory.create(context, config = DeadReckoningConfig())`  
+    Los llamadores crean `DeadReckoning` sin depender de detalles de implementación.
+  - Implementación (`DeadReckoningImpl`) y motor (`DeadReckoningEngine`, `SensorAdapter`, `DrState`, `DrUncertainty`) son internos y pueden cambiar en el futuro.
 
 - En `GeoLocationService`:
-  - Crea la instancia de DR mediante `DeadReckoningFactory.create(applicationContext)` y conéctala a `start()` / `stop()`.
-  - La política de inserción de muestras DR y la coordinación con muestras GNSS (bloqueos, etc.) deben mantenerse fuera de la API de `DeadReckoning`.
+  - Crea la instancia de DR mediante `DeadReckoningFactory.create(applicationContext)` y la conecta a `start()` / `stop()`.
+  - Las políticas de inserción de muestras de DR y la coordinación con muestras GNSS (bloqueos, etc.) deben permanecer fuera de la API de `DeadReckoning`.
 
 ### Gestión de ajustes (SettingsRepository)
 
-- Los intervalos de muestreo y de DR se gestionan en `storageservice.prefs.SettingsRepository`.
+- Los intervalos de muestreo y de Dead Reckoning se gestionan en `storageservice.prefs.SettingsRepository`.
   - `intervalSecFlow(context)` / `drIntervalSecFlow(context)` devuelven Flows en **segundos**, gestionando valores por defecto y mínimos.
-  - `currentIntervalMs(context)` / `currentDrIntervalSec(context)` existen por compatibilidad con código antiguo,  
-    pero el código nuevo debe preferir las APIs basadas en Flow.
+  - `currentIntervalMs(context)` / `currentDrIntervalSec(context)` se mantienen por compatibilidad,  
+    pero el código nuevo debería preferir las APIs basadas en Flow.
 
 ---
 
@@ -155,96 +156,96 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 
 ### GoogleDriveTokenProvider e implementaciones
 
-- La interfaz principal de autenticación para integrar con Drive es `GoogleDriveTokenProvider`.
+- La interfaz principal de autenticación para Drive es `GoogleDriveTokenProvider`.
   - El código nuevo debería usar `CredentialManagerTokenProvider` (`:auth-credentialmanager`) o `AppAuthTokenProvider` (`:auth-appauth`) como implementación.
-  - `GoogleAuthRepository` (basado en GoogleAuthUtil) es legado y solo para compatibilidad; no debe usarse en funcionalidades nuevas.
+  - La implementación heredada `GoogleAuthRepository` (basada en GoogleAuthUtil) existe solo por compatibilidad y **no** debe usarse en nuevas funciones.
 
 - Políticas para implementaciones de `GoogleDriveTokenProvider`:
-  - La cadena de token devuelta **no** debe incluir el prefijo `"Bearer "` (se añade al construir la cabecera Authorization).
-  - Para fallos “normales” (errores de red, no autenticado, falta de consentimiento, etc.) no se deben lanzar excepciones.  
-    En su lugar: registrar en logs y devolver `null`.
-  - Si se requiere un flujo con UI, el proveedor no debe lanzar ninguna UI.  
+  - Las cadenas de tokens devueltas **no** deben incluir el prefijo `"Bearer "` (se añade al construir la cabecera Authorization).
+  - Para fallos normales (errores de red, usuario no autenticado, falta de consentimiento, etc.), **no** se deben lanzar excepciones.  
+    En su lugar, registra el fallo en logs y devuelve `null`.
+  - Si se requiere un flujo de UI, el proveedor no debe lanzar la UI directamente.  
     Debe devolver `null` y delegar la decisión a la capa de app (Activity / Compose).
 
 ### Autenticación con Credential Manager
 
 - `CredentialManagerAuth` es un wrapper singleton alrededor de `CredentialManagerTokenProvider`.
   - Recibe `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` vía `BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID`  
-    y lo trata como el ID de cliente web / servidor de Google Identity.
-  - Este ID es para casos web/servidor y es distinto del client ID de AppAuth.
+    y lo trata como el **ID de cliente web / servidor** de Google Identity.
+  - Este ID es distinto del client ID usado por AppAuth; no deben mezclarse.
 
-### Autenticación AppAuth (AppAuthTokenProvider / AppAuthAuth)
+### Autenticación con AppAuth (AppAuthTokenProvider / AppAuthAuth)
 
-- `AppAuthTokenProvider` es la implementación de `GoogleDriveTokenProvider` en el módulo `:auth-appauth`.
+- `AppAuthTokenProvider` es la implementación de `GoogleDriveTokenProvider` incluida en el módulo `:auth-appauth`.
 
-- `AppAuthAuth` es su wrapper singleton, inicializado así:
+- Su wrapper `AppAuthAuth` se inicializa como:
   - `clientId = BuildConfig.APPAUTH_CLIENT_ID`
   - `redirectUri = "com.mapconductor.plugin.provider.geolocation:/oauth2redirect"`
 
-- `APPAUTH_CLIENT_ID` se genera a partir de la entrada `APPAUTH_CLIENT_ID` en `secrets.properties` mediante `secrets-gradle-plugin`.
+- `APPAUTH_CLIENT_ID` se genera a partir de la clave `APPAUTH_CLIENT_ID` en `secrets.properties` mediante `secrets-gradle-plugin`.
 
 #### Supuestos en Cloud Console
 
 - El client ID de AppAuth debe crearse como **aplicación instalada (Android / otras apps instaladas)**.
-  - No reutilices `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` (cliente web / servidor para Credential Manager).
+  - No reutilices `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` (client ID web / servidor) para AppAuth.
 
-- Configuración obligatoria para el client de AppAuth:
-  - Permitir el esquema URI personalizado `com.mapconductor.plugin.provider.geolocation`.
-  - Registrar el redirect URI:  
+- Ajustes necesarios para el client ID de AppAuth:
+  - Permitir el esquema de URI personalizado `com.mapconductor.plugin.provider.geolocation`.
+  - Registrar la URI de redirección:  
     `com.mapconductor.plugin.provider.geolocation:/oauth2redirect`
 
 #### AppAuthSignInActivity
 
 - `AppAuthSignInActivity` es una Activity transparente que inicia el flujo de inicio de sesión de AppAuth y recibe el resultado.
-  - Abre el navegador / Custom Tab mediante `buildAuthorizationIntent()` y pasa el Intent de callback a `handleAuthorizationResponse()`.
+  - Abre el navegador / Custom Tab mediante `buildAuthorizationIntent()` y pasa el `Intent` de callback a `handleAuthorizationResponse()`.
 
-- En el Manifest:
+- En el manifest:
   - `android:exported="true"`
-  - Filtro de intents:
-    - scheme: `com.mapconductor.plugin.provider.geolocation`
-    - path: `/oauth2redirect`
+  - Intent filter:
+    - `scheme="com.mapconductor.plugin.provider.geolocation"`
+    - `path="/oauth2redirect"`
 
-### DriveTokenProviderRegistry / Fondo
+### DriveTokenProviderRegistry / segundo plano
 
-- Para cargas a Drive en segundo plano (por ejemplo, `MidnightExportWorker`):
-  - No se debe iniciar ningún flujo con UI; si `GoogleDriveTokenProvider.getAccessToken()` devuelve `null`, se trata como “no autorizado”.
-  - El worker debe eliminar el archivo ZIP pero no los registros de Room, y guardar un mensaje de error en `ExportedDay.lastError`.
+- Para subidas en segundo plano (por ejemplo, `MidnightExportWorker`):
+  - Nunca inicies flujos de UI; si `GoogleDriveTokenProvider.getAccessToken()` devuelve `null`, trátalo como "no autorizado".
+  - El worker debe borrar el archivo ZIP pero no los registros de Room, y almacenar un mensaje de error en `ExportedDay.lastError`.
 
-- Los proveedores para segundo plano se registran mediante `DriveTokenProviderRegistry.registerBackgroundProvider(...)`.  
-  Toda lógica de subida en segundo plano debe obtener el proveedor a través de este registro.
+- Registra los proveedores de tokens para segundo plano mediante `DriveTokenProviderRegistry.registerBackgroundProvider(...)`.  
+  Toda lógica de subida en segundo plano debe obtener su proveedor a través de este registro.
 
-- `DriveTokenProviderRegistry` actúa como singleton dentro del proceso de la app.
+- `DriveTokenProviderRegistry` se comporta como un singleton dentro del proceso de la app.
   - En `App.onCreate()`, llama a `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))`.
 
 ### Persistencia de ajustes de Drive (AppPrefs / DrivePrefsRepository)
 
-- Los ajustes relacionados con Drive se persisten por dos vías:
-  - `core.prefs.AppPrefs` – Ajustes heredados basados en SharedPreferences, mantiene `UploadEngine` y `folderId`.  
-    Se usa principalmente en workers y rutas heredadas.
-  - `datamanager.prefs.DrivePrefsRepository` – Ajustes nuevos basados en DataStore, gestiona `folderId`, `resourceKey`, `accountEmail`,  
-    `uploadEngine`, `authMethod`, `tokenUpdatedAtMillis`, etc. como Flows.
+- Los ajustes relacionados con Drive se guardan en dos sistemas:
+  - `core.prefs.AppPrefs` – Ajustes heredados basados en SharedPreferences, que almacenan `UploadEngine` y `folderId`.  
+    Se usan principalmente desde workers y rutas heredadas.
+  - `datamanager.prefs.DrivePrefsRepository` – Ajustes más nuevos basados en DataStore.  
+    Gestiona `folderId`, `resourceKey`, `accountEmail`, `uploadEngine`, `authMethod`, `tokenUpdatedAtMillis`, etc., como Flows.
 
-- Pautas para código nuevo:
-  - Para leer ajustes de Drive desde UI / casos de uso, prefiere `DrivePrefsRepository`.  
-    Usa `AppPrefs` solo como capa de compatibilidad (por ejemplo, en workers).
-  - Al confirmar ajustes (por ejemplo, en `DriveSettingsViewModel.validateFolder()`), propaga también los valores a  
-    `AppPrefs.saveFolderId` / `saveEngine` para compartir configuración con rutas heredadas.
+- Recomendaciones para código nuevo:
+  - Para leer ajustes de Drive desde UI / casos de uso, utiliza `DrivePrefsRepository`.  
+    Usa `AppPrefs` solo como capa de compatibilidad para workers u otras rutas heredadas.
+  - Al confirmar ajustes (por ejemplo, en `DriveSettingsViewModel.validateFolder()`), además de guardar en `DrivePrefsRepository`,  
+    propaga también a `AppPrefs.saveFolderId` / `saveEngine` para compartir configuración con rutas antiguas.
 
 ---
 
 ## WorkManager / MidnightExportWorker
 
-- `MidnightExportWorker` se encarga de procesar el “backlog hasta el día anterior”.
-  - Calcula fechas usando `ZoneId.of("Asia/Tokyo")` y maneja registros de un día en el intervalo `[0:00, 24:00)` en milisegundos.
+- `MidnightExportWorker` es responsable de procesar el "backlog hasta el día anterior".
+  - Calcula fechas usando `ZoneId.of("Asia/Tokyo")` y trata los registros de un día en el intervalo `[0:00, 24:00)` en milisegundos.
   - En la primera ejecución, inicializa los últimos 365 días de `ExportedDay` mediante `StorageService.ensureExportedDay`.
-  - Para cada día, obtiene registros de `LocationSample` con `StorageService.getLocationsBetween` y los convierte a GeoJSON + ZIP vía `GeoJsonExporter.exportToDownloads`.
+  - Para cada día, obtiene muestras `LocationSample` con `StorageService.getLocationsBetween` y las convierte a GeoJSON + ZIP mediante `GeoJsonExporter.exportToDownloads`.
 
 - Política de subida y borrado:
-  - Cuando la generación del ZIP local tiene éxito, llama a `markExportedLocal` (aunque el día esté vacío).
+  - Una vez que la generación del ZIP local tiene éxito, llama a `markExportedLocal` (aunque el día esté vacío).
   - Para subir a Drive, comprueba la configuración actual (`AppPrefs.snapshot`) y solo sube cuando hay motor y folder ID configurados.
   - En caso de éxito, llama a `markUploaded`. En errores HTTP o fallos de autenticación, llama a `markExportError` y guarda un mensaje en `lastError`.
   - El archivo ZIP se elimina siempre (éxito o fallo) para evitar llenar el almacenamiento local.
-  - Solo cuando la subida tiene éxito y hay registros para ese día, se llama a `StorageService.deleteLocations` para borrar los registros de ese día.
+  - Solo cuando la subida tiene éxito y hay registros para ese día se llama a `StorageService.deleteLocations` para borrar los registros de ese día.
 
 ---
 
@@ -253,7 +254,7 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 - La capa de UI usa Jetpack Compose y sigue estos patrones:
   - Composables a nivel de pantalla: `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen`, etc.
   - Los `ViewModel`s se crean mediante `viewModel()` o `AndroidViewModel` y usan `viewModelScope` para trabajo asíncrono.
-  - El estado se expone como StateFlow / `uiState` y se pasa a Compose.
+  - El estado se expone mediante `StateFlow` / `uiState` y se pasa a Compose.
 
 - `App` / `MainActivity` / `AppRoot`:
   - En la clase de aplicación `App`, llama a  
@@ -261,7 +262,7 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
     en `onCreate()` para registrar el proveedor de tokens de Drive para uso en segundo plano.
   - También en `App.onCreate()`, llama a `MidnightExportScheduler.scheduleNext(this)`  
     para programar el worker de exportación diaria.
-  - En `MainActivity`, solicita permisos con `ActivityResultContracts.RequestMultiplePermissions` y arranca `GeoLocationService` una vez concedidos.
+  - En `MainActivity`, solicita permisos mediante `ActivityResultContracts.RequestMultiplePermissions` y arranca `GeoLocationService` una vez concedidos.
   - La navegación usa una estructura `NavHost` de dos niveles:
     - El `NavHost` directamente bajo la Activity tiene destinos `"home"` y `"drive_settings"`.  
       El menú de Drive en la AppBar navega a la pantalla de ajustes de Drive.
@@ -274,23 +275,23 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
 
 ## Tests, seguridad y otros
 
-- Los tests unitarios viven en `src/test/java`; los tests de instrumentación / UI Compose en `src/androidTest/java`.
+- Los tests unitarios viven en `src/test/java`; los tests de instrumentación / Compose UI en `src/androidTest/java`.
   - Para pruebas de integración con Drive, simula (`mock`) `GoogleDriveTokenProvider` y el cliente HTTP.
 
 - Archivos confidenciales (`local.properties`, `secrets.properties`, `google-services.json`, etc.) no deben versionarse.  
-  Géstionalos con plantillas + archivos locales.
+  Géstionalos mediante plantillas y archivos locales.
 
-- Si cambias el comportamiento de autenticación de Google o integración con Drive, asegúrate de que los scopes OAuth y redirect URIs en los README (EN/JA/ES)  
-  coincidan con la configuración de Cloud Console.
+- Si cambias el comportamiento de autenticación de Google o la integración con Drive, asegúrate de que los scopes OAuth y las redirect URIs en los README (EN/JA/ES)  
+  coinciden con la configuración en Cloud Console.
 
 - Usa **IDs de cliente separados** para AppAuth y Credential Manager:
   - Credential Manager – `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` (cliente web / servidor).
   - AppAuth – `APPAUTH_CLIENT_ID` (app instalada + esquema URI personalizado).
-  - Mezclarlos puede causar errores `invalid_request` (por ejemplo, “Custom URI scheme is not enabled / not allowed”).
+  - Mezclarlos puede causar errores `invalid_request` (por ejemplo, "Custom URI scheme is not enabled / not allowed").
 
 ---
 
-## Superficie de API pública (librerías)
+## Superficie de API pública (librería)
 
 - `:storageservice`:
   - `StorageService`, `LocationSample`, `ExportedDay`, `SettingsRepository`
@@ -307,5 +308,5 @@ Antes de cambiar código, léelo una vez y sigue estas pautas en tus implementac
   - `DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`
 
 Los tipos que no aparecen aquí deberían permanecer `internal` o no públicos siempre que sea posible,  
-para que la superficie binaria pública se mantenga pequeña y estable para los consumidores de las librerías.
+para mantener pequeña y estable la superficie de API binaria visible para los consumidores de la librería.
 

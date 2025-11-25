@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 This document summarizes the common policies, coding conventions, and responsibility boundaries between modules when working on the GeoLocationProvider repository.  
-Please read it once before changing code and implement in line with these guidelines.
+Please read it once before changing code and follow these guidelines when implementing changes.
 
 ---
 
@@ -28,6 +28,7 @@ Please read it once before changing code and implement in line with these guidel
 
 - Local, machine-specific settings (such as the Android SDK path) are stored in the root `local.properties`.  
   Android Studio usually generates this file automatically; if not, create it manually.
+
 - Secrets and auth-related configuration are stored in `secrets.properties`, which must **not** be committed.  
   The template for this file is `local.default.properties`: copy it to `secrets.properties` and replace the values with real credentials.
 
@@ -126,7 +127,7 @@ Please read it once before changing code and implement in line with these guidel
   - Settings: subscribes to `SettingsRepository.intervalSecFlow` / `drIntervalSecFlow` to dynamically update intervals.
 
 - Dead Reckoning API (module `:deadreckoning`):
-  - Public interfaces: `DeadReckoning`, `GpsFix`, `PredictedPoint` (`...deadreckoning.api` package).
+  - Public interfaces: `DeadReckoning`, `GpsFix`, `PredictedPoint` (in the `...deadreckoning.api` package).
   - Configuration: `DeadReckoningConfig` – parameter object that aggregates:
     - `staticAccelVarThreshold`
     - `staticGyroVarThreshold`
@@ -161,7 +162,7 @@ Please read it once before changing code and implement in line with these guidel
 
 - Policies for `GoogleDriveTokenProvider` implementations:
   - Returned token strings must **not** include the `"Bearer "` prefix (it is added by the Authorization header builder).
-  - For “normal” failures (network errors, not signed-in, missing consent, etc.), do **not** throw exceptions.  
+  - For normal failures (network errors, not signed-in, missing consent, etc.), do **not** throw exceptions.  
     Instead: log the failure and return `null`.
   - If a UI flow is required, the provider itself must not launch UI.  
     It should return `null` and delegate the decision to the app layer (Activity / Compose).
@@ -196,7 +197,7 @@ Please read it once before changing code and implement in line with these guidel
 #### AppAuthSignInActivity
 
 - `AppAuthSignInActivity` is a transparent Activity that starts the AppAuth sign-in flow and receives the result.
-  - It opens the browser / Custom Tab via `buildAuthorizationIntent()` and passes the callback Intent to `handleAuthorizationResponse()`.
+  - It opens the browser / Custom Tab via `buildAuthorizationIntent()` and passes the callback `Intent` to `handleAuthorizationResponse()`.
 
 - In the manifest:
   - `android:exported="true"`
@@ -207,7 +208,7 @@ Please read it once before changing code and implement in line with these guidel
 ### DriveTokenProviderRegistry / Background
 
 - For background uploads (e.g., `MidnightExportWorker`):
-  - Never start UI flows; if `GoogleDriveTokenProvider.getAccessToken()` returns `null`, treat it as “not authorized”.
+  - Never start UI flows; if `GoogleDriveTokenProvider.getAccessToken()` returns `null`, treat it as "not authorized".
   - The worker should delete the ZIP file but not the Room records, and store an error message in `ExportedDay.lastError`.
 
 - Register background providers via `DriveTokenProviderRegistry.registerBackgroundProvider(...)`.  
@@ -234,7 +235,7 @@ Please read it once before changing code and implement in line with these guidel
 
 ## WorkManager / MidnightExportWorker
 
-- `MidnightExportWorker` is responsible for processing “backlog up to the previous day”.
+- `MidnightExportWorker` is responsible for processing "backlog up to the previous day".
   - It calculates dates using `ZoneId.of("Asia/Tokyo")` and handles one-day records in the `[0:00, 24:00)` interval (milliseconds).
   - On first run, it seeds the past 365 days of `ExportedDay` records via `StorageService.ensureExportedDay`.
   - For each day, it obtains `LocationSample` records with `StorageService.getLocationsBetween` and converts them to GeoJSON + ZIP via `GeoJsonExporter.exportToDownloads`.
@@ -253,7 +254,7 @@ Please read it once before changing code and implement in line with these guidel
 - The UI layer uses Jetpack Compose and follows these patterns:
   - Screen-level Composables: `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen`, etc.
   - `ViewModel`s are created via `viewModel()` or `AndroidViewModel`, and use `viewModelScope` for async work.
-  - State is exposed via StateFlow / `uiState` and passed to Compose.
+  - State is exposed via `StateFlow` / `uiState` and passed to Compose.
 
 - `App` / `MainActivity` / `AppRoot`:
   - In the `App` application class, call  
@@ -286,7 +287,7 @@ Please read it once before changing code and implement in line with these guidel
 - Use **separate** client IDs for AppAuth and Credential Manager:
   - Credential Manager – `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` (web / server client).
   - AppAuth – `APPAUTH_CLIENT_ID` (installed app + custom URI scheme).
-  - Mixing them can cause `invalid_request` errors (e.g., “Custom URI scheme is not enabled / not allowed”).
+  - Mixing them can cause `invalid_request` errors (e.g., "Custom URI scheme is not enabled / not allowed").
 
 ---
 
