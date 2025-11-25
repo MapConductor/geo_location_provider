@@ -224,7 +224,7 @@ fun PickupScreen() {
     }
 }
 
-/* ====== List (SelectedSlot, including gaps) ====== */
+// List (SelectedSlot, including gaps).
 @Composable
 private fun PickupListBySlots(slots: List<SelectedSlot>) {
     // Filter out empty slots for display

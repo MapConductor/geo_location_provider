@@ -42,7 +42,7 @@ class MidnightExportWorker(
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
-        // --- Initial seed: ensure up to 365 days of past records (before yesterday). --- //
+        // Initial seed: ensure up to 365 days of past records (before yesterday).
         var oldest = StorageService.oldestNotUploadedDay(applicationContext)
         if (oldest == null) {
             val backMaxDays = 365L
@@ -55,7 +55,7 @@ class MidnightExportWorker(
             oldest = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
-        // --- Backlog processing loop (days before "today" only). --- //
+        // Backlog processing loop (days before "today" only).
         while (oldest != null && oldest.epochDay < todayEpochDay) {
             val target = oldest
             val localDate = LocalDate.ofEpochDay(target.epochDay)
@@ -199,4 +199,3 @@ class MidnightExportWorker(
         }
     }
 }
-
