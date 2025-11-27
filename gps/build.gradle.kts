@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.mapconductor.plugin.provider.core"
+    namespace = "com.mapconductor.plugin.provider.gps"
     compileSdk = 36
 
     defaultConfig {
@@ -17,6 +17,10 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    buildFeatures {
+        buildConfig = false
+    }
 }
 
 kotlin {
@@ -26,14 +30,7 @@ kotlin {
 }
 
 dependencies {
-    // Async processing
-    implementation(libs.kotlinx.coroutines.android)
-
-    // AndroidX core utilities (NotificationCompat, etc.)
+    implementation(libs.play.services.location)
     implementation(libs.androidx.core.ktx)
-
-    // Dead Reckoning engine, GPS engine and storage
-    implementation(project(":deadreckoning"))
-    implementation(project(":gps"))
-    implementation(project(":storageservice"))
 }
+

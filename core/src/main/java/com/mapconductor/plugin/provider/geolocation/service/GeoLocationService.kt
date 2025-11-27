@@ -6,23 +6,18 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.location.Location
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoning
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningFactory
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.GpsFix
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedPoint
+import com.mapconductor.plugin.provider.geolocation.gps.FusedLocationGpsEngine
+import com.mapconductor.plugin.provider.geolocation.gps.GpsLocationEngine
+import com.mapconductor.plugin.provider.geolocation.gps.GpsObservation
 import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
-import com.mapconductor.plugin.provider.geolocation.util.GnssStatusSampler
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import androidx.core.app.NotificationCompat
@@ -65,9 +60,8 @@ class GeoLocationService : Service() {
     private val binder = LocalBinder()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
-    private lateinit var fusedClient: FusedLocationProviderClient
+    private lateinit var gpsEngine: GpsLocationEngine
     private lateinit var headingSensor: HeadingSensor
-    private lateinit var gnssSampler: GnssStatusSampler
     private var dr: DeadReckoning? = null
 
     @Volatile private var updateIntervalMs: Long = 30_000L
@@ -99,9 +93,14 @@ class GeoLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate")
-        fusedClient = LocationServices.getFusedLocationProviderClient(this)
+        gpsEngine = FusedLocationGpsEngine(applicationContext, mainLooper).also { engine ->
+            engine.setListener(object : GpsLocationEngine.Listener {
+                override fun onGpsObservation(observation: GpsObservation) {
+                    handleObservation(observation)
+                }
+            })
+        }
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
-        gnssSampler = GnssStatusSampler(applicationContext).also { it.start(mainLooper) }
         dr = DeadReckoningFactory.create(applicationContext).also { it.start() }
         ensureChannel()
         // GPS sampling interval is always synced from SettingsRepository.intervalSecFlow().
@@ -135,7 +134,7 @@ class GeoLocationService : Service() {
         Log.d(TAG, "onDestroy")
         super.onDestroy()
         stopDrTicker()
-        try { gnssSampler.stop() } catch (t: Throwable) { Log.w(TAG, "gnssSampler.stop()", t) }
+        try { gpsEngine.stop() } catch (t: Throwable) { Log.w(TAG, "gpsEngine.stop()", t) }
         try { headingSensor.stop() } catch (t: Throwable) { Log.w(TAG, "headingSensor.stop()", t) }
         try { dr?.stop() } catch (t: Throwable) { Log.w(TAG, "dr.stop()", t) }
         serviceScope.cancel()
@@ -169,7 +168,8 @@ class GeoLocationService : Service() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
         startForeground(NOTIFICATION_ID, buildNotification())
-        serviceScope.launch { restartLocationUpdates() }
+        gpsEngine.updateInterval(updateIntervalMs)
+        gpsEngine.start()
         startDrTicker() // Start DR ticker for real-time prediction.
     }
 
@@ -181,10 +181,8 @@ class GeoLocationService : Service() {
         stopForeground(STOP_FOREGROUND_DETACH)
 
         // Stop location updates.
-        try {
-            fusedClient.removeLocationUpdates(callback)
-        } catch (t: Throwable) {
-            Log.w(TAG, "removeLocationUpdates", t)
+        try { gpsEngine.stop() } catch (t: Throwable) {
+            Log.w(TAG, "gpsEngine.stop()", t)
         }
 
         // Stop DR ticker.
@@ -201,56 +199,26 @@ class GeoLocationService : Service() {
     // ------------------------
     private suspend fun restartLocationUpdates() {
         Log.d(TAG, "restartLocationUpdates: interval=${updateIntervalMs}ms")
-        try { fusedClient.removeLocationUpdates(callback) } catch (t: Throwable) {
-            Log.w(TAG, "removeLocationUpdates (restart)", t)
-        }
-        val req = LocationRequest.Builder(updateIntervalMs)
-            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-            .setMinUpdateIntervalMillis(updateIntervalMs)
-            .setMinUpdateDistanceMeters(0f)
-            .setWaitForAccurateLocation(false)
-            .build()
-        try {
-            fusedClient.requestLocationUpdates(req, callback, mainLooper)
-            Log.d(TAG, "requestLocationUpdates() issued")
-        } catch (t: Throwable) {
-            Log.e(TAG, "requestLocationUpdates() failed", t)
-        }
+        gpsEngine.updateInterval(updateIntervalMs)
     }
 
-    private val callback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val loc: Location = result.lastLocation ?: return
-            Log.d(
-                TAG,
-                "onLocationResult: lat=${loc.latitude}, lon=${loc.longitude}, acc=${loc.accuracy}, " +
-                        "speed=${loc.speed}, bear=${loc.bearing}"
-            )
-            handleLocation(loc)
-        }
-    }
-
-    private fun handleLocation(location: Location) {
+    private fun handleObservation(observation: GpsObservation) {
         // Even if the foreground notification is temporarily hidden by the user,
         // it should be shown again at the next GPS update.
         ensureNotificationVisible()
 
-        val now = System.currentTimeMillis()
+        val now = observation.timestampMillis
         val lastFix = lastFixMillis
 
         val headingDeg: Float = headingSensor.headingTrueDeg() ?: 0f
-        val speedMps: Float = max(0f, location.speed.takeIf { !it.isNaN() } ?: 0f)
+        val speedMps: Float = max(0f, observation.speedMps.takeIf { !it.isNaN() } ?: 0f)
 
         // --- Estimate course (direction of travel) ---
         val prevLat = lastCourseLat
         val prevLon = lastCourseLon
 
-        val rawBearing = location.bearing
-        val hasBearing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            location.hasBearing()
-        } else {
-            !rawBearing.isNaN()
-        }
+        val rawBearing = observation.bearingDeg ?: Float.NaN
+        val hasBearing = observation.hasBearing
 
         val courseDeg: Double = when {
             // 1) If the provider gives bearing, use it preferentially.
@@ -262,13 +230,17 @@ class GeoLocationService : Service() {
 
             // 2) If bearing is not available, estimate direction from the last position.
             prevLat != null && prevLon != null -> {
-                val prev = Location(location.provider ?: "gps").apply {
+                val prev = android.location.Location("gps").apply {
                     latitude = prevLat
                     longitude = prevLon
                 }
-                val distance = prev.distanceTo(location) // [m]
+                val current = android.location.Location("gps").apply {
+                    latitude = observation.lat
+                    longitude = observation.lon
+                }
+                val distance = prev.distanceTo(current) // [m]
                 if (distance >= 0.5f) {                  // Threshold is small (0.5 m) to pick up small movements.
-                    val b = prev.bearingTo(location)
+                    val b = prev.bearingTo(current)
                     if (!b.isNaN()) {
                         val normalized = ((b % 360f) + 360f) % 360f
                         lastCourseDeg = normalized.toDouble()
@@ -290,15 +262,12 @@ class GeoLocationService : Service() {
         }
 
         // Update last position for the next course calculation.
-        lastCourseLat = location.latitude
-        lastCourseLon = location.longitude
+        lastCourseLat = observation.lat
+        lastCourseLon = observation.lon
 
-        val gnss = try { gnssSampler.snapshot() } catch (t: Throwable) {
-            Log.w(TAG, "gnssSampler.snapshot()", t); null
-        }
-        val used: Int? = gnss?.used
-        val total: Int? = gnss?.total
-        val cn0: Double? = gnss?.cn0Mean?.toDouble()
+        val used: Int? = observation.gnssUsed
+        val total: Int? = observation.gnssTotal
+        val cn0: Double? = observation.cn0Mean
 
         // 1) Insert GPS sample.
         run {
@@ -306,9 +275,9 @@ class GeoLocationService : Service() {
             val sample = LocationSample(
                 id = 0,
                 timeMillis = now,
-                lat = location.latitude,
-                lon = location.longitude,
-                accuracy = location.accuracy,
+                lat = observation.lat,
+                lon = observation.lon,
+                accuracy = observation.accuracyM,
                 provider = "gps",
                 headingDeg = headingDeg.toDouble(),
                 courseDeg = courseDeg,
@@ -369,9 +338,9 @@ class GeoLocationService : Service() {
                 dr?.submitGpsFix(
                     GpsFix(
                         timestampMillis = now,
-                        lat = location.latitude,
-                        lon = location.longitude,
-                        accuracyM = location.accuracy,
+                        lat = observation.lat,
+                        lon = observation.lon,
+                        accuracyM = observation.accuracyM,
                         speedMps = speedMps.takeIf { it > 0f }
                     )
                 )
@@ -612,9 +581,8 @@ class GeoLocationService : Service() {
                 .setCategory(Notification.CATEGORY_SERVICE)
                 .build()
 
-            notification.flags = notification.flags or
-                Notification.FLAG_ONGOING_EVENT or
-                Notification.FLAG_NO_CLEAR
+            notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT
+            notification.flags = notification.flags or Notification.FLAG_NO_CLEAR
 
             notification
         } else {
@@ -626,9 +594,8 @@ class GeoLocationService : Service() {
                 .setCategory(Notification.CATEGORY_SERVICE)
 
             val notification = builder.build()
-            notification.flags = notification.flags or
-                Notification.FLAG_ONGOING_EVENT or
-                Notification.FLAG_NO_CLEAR
+            notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT
+            notification.flags = notification.flags or Notification.FLAG_NO_CLEAR
 
             notification
         }
