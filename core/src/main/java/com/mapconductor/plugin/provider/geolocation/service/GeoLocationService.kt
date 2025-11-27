@@ -170,7 +170,11 @@ class GeoLocationService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         gpsEngine.updateInterval(updateIntervalMs)
         gpsEngine.start()
-        startDrTicker() // Start DR ticker for real-time prediction.
+        if (drIntervalSec > 0) {
+            startDrTicker() // Start DR ticker for real-time prediction.
+        } else {
+            Log.d(TAG, "startLocation: DR disabled (intervalSec=$drIntervalSec)")
+        }
     }
 
     private fun stopLocation() {
@@ -332,25 +336,27 @@ class GeoLocationService : Service() {
         }
 
         // 2) Notify DR of the fix (update its reference only).
-        lastFixMillis = now
-        serviceScope.launch(Dispatchers.Default) {
-            try {
-                dr?.submitGpsFix(
-                    GpsFix(
-                        timestampMillis = now,
-                        lat = observation.lat,
-                        lon = observation.lon,
-                        accuracyM = observation.accuracyM,
-                        speedMps = speedMps.takeIf { it > 0f }
+        if (drIntervalSec > 0) {
+            lastFixMillis = now
+            serviceScope.launch(Dispatchers.Default) {
+                try {
+                    dr?.submitGpsFix(
+                        GpsFix(
+                            timestampMillis = now,
+                            lat = observation.lat,
+                            lon = observation.lon,
+                            accuracyM = observation.accuracyM,
+                            speedMps = speedMps.takeIf { it > 0f }
+                        )
                     )
-                )
-            } catch (t: Throwable) {
-                Log.w(TAG, "dr.submitGpsFix()", t)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "dr.submitGpsFix()", t)
+                }
             }
         }
 
         // 3) Backfill: divide the period between previous and current fix by DR interval and insert samples.
-        if (lastFix != null) {
+        if (drIntervalSec > 0 && lastFix != null) {
             val stepMs = (drIntervalSec * 1000L).coerceAtLeast(1000L)
             val targets = generateSequence(lastFix + stepMs) { it + stepMs }
                 .takeWhile { it < now - 100L }
@@ -427,6 +433,10 @@ class GeoLocationService : Service() {
     private fun startDrTicker() {
         stopDrTicker()
         val d = dr ?: return
+        if (drIntervalSec <= 0) {
+            Log.d(TAG, "startDrTicker: DR disabled (intervalSec=$drIntervalSec)")
+            return
+        }
         Log.d(TAG, "startDrTicker interval=${drIntervalSec}s")
         drTickerJob = serviceScope.launch(Dispatchers.IO) {
             while (isRunning.get()) {
@@ -532,11 +542,15 @@ class GeoLocationService : Service() {
     }
 
     private fun applyDrInterval(sec: Int) {
-        val clamped = max(1, sec)
+        val clamped = if (sec <= 0) 0 else max(1, sec)
         Log.d(TAG, "applyDrInterval: $drIntervalSec -> $clamped")
         drIntervalSec = clamped
         if (isRunning.get()) {
-            startDrTicker()
+            if (drIntervalSec > 0) {
+                startDrTicker()
+            } else {
+                stopDrTicker()
+            }
         }
     }
 

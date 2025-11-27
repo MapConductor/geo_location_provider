@@ -24,7 +24,7 @@ object SettingsRepository {
     private const val DEFAULT_INTERVAL_SEC = 30     // Default GPS interval in seconds
     private const val MIN_INTERVAL_SEC = 1          // Minimum 1 second
     private const val DEFAULT_DR_SEC = 5            // Default DR interval in seconds
-    private const val MIN_DR_SEC = 1                // Minimum 1 second
+    private const val MIN_DR_SEC = 1                // Minimum 1 second when enabled
     private const val FIRST_TIMEOUT_MS = 700L       // Safety timeout for sync getters
 
     private val KEY_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("interval_sec")
@@ -38,10 +38,16 @@ object SettingsRepository {
             (prefs[KEY_INTERVAL_SEC] ?: DEFAULT_INTERVAL_SEC).coerceAtLeast(MIN_INTERVAL_SEC)
         }
 
-    /** Flow of DR interval in seconds, including defaults and lower bound. */
+    /** Flow of DR interval in seconds.
+     *
+     * Contract:
+     * - 0 means "DR disabled".
+     * - When > 0, the value is clamped to [MIN_DR_SEC, +inf).
+     */
     fun drIntervalSecFlow(context: Context): Flow<Int> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
-            (prefs[KEY_DR_INTERVAL_SEC] ?: DEFAULT_DR_SEC).coerceAtLeast(MIN_DR_SEC)
+            val raw = prefs[KEY_DR_INTERVAL_SEC] ?: DEFAULT_DR_SEC
+            if (raw <= 0) 0 else raw.coerceAtLeast(MIN_DR_SEC)
         }
 
     // ---------- Write ----------
@@ -54,7 +60,7 @@ object SettingsRepository {
 
     suspend fun setDrIntervalSec(context: Context, sec: Int) {
         context.applicationContext.settingsDataStore.edit {
-            it[KEY_DR_INTERVAL_SEC] = sec.coerceAtLeast(MIN_DR_SEC)
+            it[KEY_DR_INTERVAL_SEC] = if (sec <= 0) 0 else sec.coerceAtLeast(MIN_DR_SEC)
         }
     }
 
@@ -70,14 +76,18 @@ object SettingsRepository {
         }
     }
 
-    /** Synchronously returns the current DR interval in seconds. */
+    /** Synchronously returns the current DR interval in seconds.
+     *
+     * Contract is the same as [drIntervalSecFlow]:
+     * - 0 means "DR disabled".
+     * - When > 0, the value is clamped to [MIN_DR_SEC, +inf).
+     */
     fun currentDrIntervalSec(context: Context): Int = runBlocking {
         try {
-            withTimeout(FIRST_TIMEOUT_MS) { drIntervalSecFlow(context).first() }
-                .coerceAtLeast(MIN_DR_SEC)
+            val v = withTimeout(FIRST_TIMEOUT_MS) { drIntervalSecFlow(context).first() }
+            if (v <= 0) 0 else v.coerceAtLeast(MIN_DR_SEC)
         } catch (_: Throwable) {
             DEFAULT_DR_SEC
         }
     }
 }
-

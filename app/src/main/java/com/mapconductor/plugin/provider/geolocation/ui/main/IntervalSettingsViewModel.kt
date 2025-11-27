@@ -34,7 +34,8 @@ class IntervalSettingsViewModel(
     // Minimums consistent with SettingsRepository
     private companion object {
         const val MIN_INTERVAL_SEC = 1
-        const val MIN_DR_INTERVAL_SEC = 1
+        const val MIN_DR_INTERVAL_SEC = 0           // 0 means "DR disabled"
+        const val MIN_ENABLED_DR_INTERVAL_SEC = 1   // Minimum when DR is enabled
     }
 
     private val _secondsText = MutableStateFlow("30")
@@ -52,7 +53,6 @@ class IntervalSettingsViewModel(
             val gpsSec = (SettingsRepository.currentIntervalMs(appContext) / 1000L).toInt()
                 .coerceAtLeast(MIN_INTERVAL_SEC)
             val drSec = SettingsRepository.currentDrIntervalSec(appContext)
-                .coerceAtLeast(MIN_DR_INTERVAL_SEC)
 
             _secondsText.value = gpsSec.toString()
             _drIntervalText.value = drSec.toString()
@@ -100,11 +100,23 @@ class IntervalSettingsViewModel(
             }
 
             val gpsInterval = clampedSec
-            val upper = floor(gpsInterval / 2.0).toInt()        // max bound
-            val lower = MIN_DR_INTERVAL_SEC                     // min = 1
+            val upper = floor(gpsInterval / 2.0).toInt()        // max bound when enabled
+
+            // Special case: 0 means "DR disabled".
+            if (drInterval == 0) {
+                SettingsRepository.setDrIntervalSec(appContext, 0)
+                applyDrIntervalToService(0)
+                launchToast(
+                    "Settings saved.\n" +
+                        "GPS interval: ${gpsInterval} sec / DR: disabled (GPS only)"
+                )
+                return@launch
+            }
+
+            val lower = MIN_ENABLED_DR_INTERVAL_SEC             // enabled min = 1
             if (upper < lower) {
                 rollbackDrIntervalWithToast(
-                    "With the current GPS interval DR cannot be set. Set GPS interval to at least 2 seconds."
+                    "With the current GPS interval DR cannot be enabled. Set GPS interval to at least 2 seconds."
                 )
                 return@launch
             }
@@ -157,4 +169,3 @@ class IntervalSettingsViewModel(
         appContext.startService(intent)
     }
 }
-

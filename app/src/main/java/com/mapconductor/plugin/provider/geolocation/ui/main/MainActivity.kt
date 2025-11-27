@@ -31,13 +31,21 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.mapconductor.core.features.GeoPointImpl
+import com.mapconductor.core.map.MapCameraPositionImpl
+import com.mapconductor.core.marker.DefaultIcon
+import com.mapconductor.core.marker.Marker
+import com.mapconductor.googlemaps.GoogleMapsView
+import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
+import com.mapconductor.plugin.provider.geolocation.ui.map.MapScreen
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 
 private const val ROUTE_HOME = "home"
 private const val ROUTE_PICKUP = "pickup"
+private const val ROUTE_MAP = "map"
 
 class MainActivity : ComponentActivity() {
 
@@ -167,9 +175,16 @@ private fun AppRoot(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (currentRoute == ROUTE_PICKUP) "Pickup" else "GeoLocation") },
+                title = {
+                    val title = when (currentRoute) {
+                        ROUTE_PICKUP -> "Pickup"
+                        ROUTE_MAP -> "Map"
+                        else -> "GeoLocation"
+                    }
+                    Text(title)
+                },
                 navigationIcon = {
-                    if (currentRoute == ROUTE_PICKUP) {
+                    if (currentRoute == ROUTE_PICKUP || currentRoute == ROUTE_MAP) {
                         IconButton(onClick = { navController.popBackStack() }) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -180,8 +195,12 @@ private fun AppRoot(
                 },
                 actions = {
                     // On HOME: show Pickup / Drive / Start/Stop.
-                    // On Pickup screen: only show Back button.
-                    if (currentRoute != ROUTE_PICKUP) {
+                    // On Pickup / Map screens: only show Back button.
+                    if (currentRoute != ROUTE_PICKUP && currentRoute != ROUTE_MAP) {
+                        TextButton(onClick = {
+                            navController.navigate(ROUTE_MAP) { launchSingleTop = true }
+                        }) { Text("Map") }
+
                         TextButton(onClick = {
                             navController.navigate(ROUTE_PICKUP) { launchSingleTop = true }
                         }) { Text("Pickup") }
@@ -200,8 +219,10 @@ private fun AppRoot(
                 composable(ROUTE_PICKUP) {
                     PickupScreen()
                 }
+                composable(ROUTE_MAP) {
+                    MapScreen()
+                }
             }
         }
     }
 }
-
