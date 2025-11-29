@@ -85,6 +85,14 @@ class GeoLocationService : Service() {
     @Volatile private var lastCourseLat: Double? = null
     @Volatile private var lastCourseLon: Double? = null
 
+    // Last accepted sample (GPS or DR) used for simple sanity check.
+    @Volatile private var lastAcceptedLat: Double? = null
+    @Volatile private var lastAcceptedLon: Double? = null
+    @Volatile private var lastAcceptedTimeMillis: Long? = null
+
+    // Maximum physically plausible speed (meters per second) for DR samples.
+    private val maxDrSpeedMps = 340.0
+
     fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
 
@@ -269,9 +277,9 @@ class GeoLocationService : Service() {
         lastCourseLat = observation.lat
         lastCourseLon = observation.lon
 
-        val used: Int? = observation.gnssUsed
-        val total: Int? = observation.gnssTotal
-        val cn0: Double? = observation.cn0Mean
+          val used: Int? = observation.gnssUsed
+          val total: Int? = observation.gnssTotal
+          val cn0: Double? = observation.cn0Mean
 
         // 1) Insert GPS sample.
         run {
@@ -310,26 +318,27 @@ class GeoLocationService : Service() {
                     lastInsertMillis = now
                 }
             }
-            if (!skip) {
-                serviceScope.launch(Dispatchers.IO) {
-                    Log.d(
-                        "DB/TRACE",
-                        "before-insert provider=gps t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
-                    )
-                    try {
-                        StorageService.insertLocation(applicationContext, sample)
-                        Log.d(
-                            "DB/TRACE",
-                            "after-insert ok provider=gps t=${sample.timeMillis}"
-                        )
-                    } catch (t: Throwable) {
-                        Log.e(
-                            "DB/TRACE",
-                            "insert failed provider=gps t=${sample.timeMillis}",
-                            t
-                        )
-                    }
-                }
+              if (!skip) {
+                  serviceScope.launch(Dispatchers.IO) {
+                      Log.d(
+                          "DB/TRACE",
+                          "before-insert provider=gps t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                      )
+                      try {
+                          StorageService.insertLocation(applicationContext, sample)
+                          Log.d(
+                              "DB/TRACE",
+                              "after-insert ok provider=gps t=${sample.timeMillis}"
+                          )
+                          updateLastAccepted(sample.lat, sample.lon, sample.timeMillis)
+                      } catch (t: Throwable) {
+                          Log.e(
+                              "DB/TRACE",
+                              "insert failed provider=gps t=${sample.timeMillis}",
+                              t
+                          )
+                      }
+                  }
             } else {
                 Log.d("DB/TRACE", "gps insert skipped (dup guard)")
             }
@@ -388,22 +397,35 @@ class GeoLocationService : Service() {
                                     headingForDr
                                 }
 
-                                val sample = LocationSample(
-                                    id = 0,
-                                    timeMillis = t,              // Backfill sample time in the past.
-                                    lat = p.lat,
-                                    lon = p.lon,
-                                    accuracy = (p.accuracyM ?: 0f),
-                                    provider = "dead_reckoning",
-                                    headingDeg = headingForDr,
-                                    courseDeg = courseForDr,
-                                    speedMps = (p.speedMps ?: Float.NaN).toDouble(),
-                                    gnssUsed = -1,
-                                    gnssTotal = -1,
-                                    cn0 = 0.0,
-                                    batteryPercent = bat.percent,
-                                    isCharging = bat.isCharging
-                                )
+                                val original =
+                                    LocationSample(
+                                        id = 0,
+                                        timeMillis = t,              // Backfill sample time in the past.
+                                        lat = p.lat,
+                                        lon = p.lon,
+                                        accuracy = (p.accuracyM ?: 0f),
+                                        provider = "dead_reckoning",
+                                        headingDeg = headingForDr,
+                                        courseDeg = courseForDr,
+                                        speedMps = (p.speedMps ?: Float.NaN).toDouble(),
+                                        gnssUsed = -1,
+                                        gnssTotal = -1,
+                                        cn0 = 0.0,
+                                        batteryPercent = bat.percent,
+                                        isCharging = bat.isCharging
+                                    )
+                                val (adjLat, adjLon) =
+                                    adjustDrSample(
+                                        lat = original.lat,
+                                        lon = original.lon,
+                                        timeMillis = original.timeMillis,
+                                    )
+                                val sample =
+                                    if (adjLat != original.lat || adjLon != original.lon) {
+                                        original.copy(lat = adjLat, lon = adjLon)
+                                    } else {
+                                        original
+                                    }
                                 Log.d(
                                     "DB/TRACE",
                                     "before-insert provider=dead_reckoning(backfill) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
@@ -413,6 +435,7 @@ class GeoLocationService : Service() {
                                     "DB/TRACE",
                                     "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
                                 )
+                                updateLastAccepted(sample.lat, sample.lon, sample.timeMillis)
                             } catch (e: Throwable) {
                                 Log.e(
                                     "DB/TRACE",
@@ -502,16 +525,29 @@ class GeoLocationService : Service() {
                                 }
                             }
                             if (!skip) {
+                                val (adjLat, adjLon) =
+                                    adjustDrSample(
+                                        lat = sample.lat,
+                                        lon = sample.lon,
+                                        timeMillis = sample.timeMillis,
+                                    )
+                                val finalSample =
+                                    if (adjLat != sample.lat || adjLon != sample.lon) {
+                                        sample.copy(lat = adjLat, lon = adjLon)
+                                    } else {
+                                        sample
+                                    }
                                 Log.d(
                                     "DB/TRACE",
-                                    "before-insert provider=dead_reckoning(ticker) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                                    "before-insert provider=dead_reckoning(ticker) t=${finalSample.timeMillis} lat=${finalSample.lat} lon=${finalSample.lon}"
                                 )
                                 try {
-                                    StorageService.insertLocation(applicationContext, sample)
+                                    StorageService.insertLocation(applicationContext, finalSample)
                                     Log.d(
                                         "DB/TRACE",
-                                        "after-insert ok provider=dead_reckoning(ticker) t=${sample.timeMillis}"
+                                        "after-insert ok provider=dead_reckoning(ticker) t=${finalSample.timeMillis}"
                                     )
+                                    updateLastAccepted(finalSample.lat, finalSample.lon, finalSample.timeMillis)
                                 } catch (e: Throwable) {
                                     Log.e(
                                         "DB/TRACE",
@@ -635,5 +671,53 @@ class GeoLocationService : Service() {
         mix(used.toLong()); mix(total.toLong()); mix(d(cn0))
         mix(bat.toLong()); mix(if (chg) 1L else 0L)
         return h
+    }
+
+    private fun updateLastAccepted(lat: Double, lon: Double, timeMillis: Long) {
+        lastAcceptedLat = lat
+        lastAcceptedLon = lon
+        lastAcceptedTimeMillis = timeMillis
+    }
+
+    private fun adjustDrSample(lat: Double, lon: Double, timeMillis: Long): Pair<Double, Double> {
+        val prevLat = lastAcceptedLat
+        val prevLon = lastAcceptedLon
+        val prevTime = lastAcceptedTimeMillis
+        if (prevLat == null || prevLon == null || prevTime == null) return lat to lon
+
+        val dtMs = timeMillis - prevTime
+        if (dtMs <= 0L) return lat to lon
+
+        val dtSec = dtMs.toDouble() / 1000.0
+        val maxDist = maxDrSpeedMps * dtSec
+        val dist = haversineMeters(prevLat, prevLon, lat, lon)
+        if (dist > maxDist) {
+            Log.w(
+                "DR/FILTER",
+                "unrealistic DR jump: dist=${dist}m dt=${dtMs}ms (limit=${maxDist}m)"
+            )
+            // Recalculate as: clamp to previous accepted position.
+            return prevLat to prevLon
+        }
+        return lat to lon
+    }
+
+    private fun haversineMeters(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double
+    ): Double {
+        val r = 6371000.0
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val rLat1 = Math.toRadians(lat1)
+        val rLat2 = Math.toRadians(lat2)
+        val a =
+            Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0) +
+                Math.cos(rLat1) * Math.cos(rLat2) *
+                Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0)
+        val c = 2.0 * Math.asin(Math.sqrt(a))
+        return r * c
     }
 }

@@ -18,6 +18,7 @@ internal class DeadReckoningEngine(
 
     private val state = DrState()
     private val unc = DrUncertainty()
+    private var hasGpsFix = false
 
     // Gravity estimation filter.
     private var gEst = floatArrayOf(0f, 0f, 9.81f)
@@ -74,19 +75,20 @@ internal class DeadReckoningEngine(
 
     fun submitGpsFix(lat: Double, lon: Double, accM: Float?, speedMps: Float?) {
         val r = max(accM ?: 10f, 5f)
-        val K = unc.sigma2Pos / (unc.sigma2Pos + r * r)
 
-        // Correct position.
-        state.lat = state.lat + K * (lat - state.lat)
-        state.lon = state.lon + K * (lon - state.lon)
+        // Always re-anchor position to the latest GPS fix so that
+        // DR integrates from the most recent GPS and its subsequent history.
+        state.lat = lat
+        state.lon = lon
 
-        // Correct speed.
+        // Blend speed toward GPS speed when available.
         if (speedMps != null) {
             state.speedMps = state.speedMps + kV * (speedMps - state.speedMps)
         }
 
-        // Update uncertainty.
-        unc.sigma2Pos = (1 - K) * unc.sigma2Pos
+        // Reset position uncertainty based on the current GPS accuracy.
+        unc.sigma2Pos = r * r
+        hasGpsFix = true
     }
 
     fun snapshot(): Pair<DrState, DrUncertainty> = state.copy() to unc.copy()
@@ -142,4 +144,3 @@ internal class DeadReckoningEngine(
         }
     }
 }
-
