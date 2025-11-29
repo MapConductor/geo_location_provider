@@ -129,20 +129,20 @@ fun MapScreen() {
                     },
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    val total = state.displayedTotalCount
                     state.markers.forEachIndexed { index, sample ->
                         key(sample.id) {
                             val point = GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                             val prov = Formatters.providerText(sample.provider)
-                            val label = if (total > 0) {
-                                (total - 1 - index).toString()
+                            val label = if (state.displayedTotalCount > 0) {
+                                (state.displayedTotalCount - 1 - index).toString()
                             } else {
                                 "0"
                             }
+                            val scale = if (prov == "GPS") 1.0f else 0.5f
                             val icon = when (prov) {
-                                "GPS" -> DefaultIcon(fillColor = Color.Blue, scale = 0.5f, label = label)
-                                "DeadReckoning" -> DefaultIcon(fillColor = Color.Red, scale = 0.5f, label = label)
-                                else -> DefaultIcon(fillColor = Color.Blue, scale = 0.5f, label = label)
+                                "GPS" -> DefaultIcon(fillColor = Color.Blue, scale = scale, label = label)
+                                "DeadReckoning" -> DefaultIcon(fillColor = Color.Red, scale = scale, label = label)
+                                else -> DefaultIcon(fillColor = Color.Blue, scale = scale, label = label)
                             }
                             Marker(
                                 position = point,
