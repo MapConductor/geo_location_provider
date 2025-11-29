@@ -133,10 +133,10 @@ fun MapScreen() {
                         key(sample.id) {
                             val point = GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                             val prov = Formatters.providerText(sample.provider)
-                            val label = if (state.displayedTotalCount > 0) {
-                                (state.displayedTotalCount - 1 - index).toString()
-                            } else {
-                                "0"
+                            val label = when (prov) {
+                                "GPS" -> "G"
+                                "DeadReckoning" -> "D"
+                                else -> prov
                             }
                             val scale = if (prov == "GPS") 1.0f else 0.5f
                             val icon = when (prov) {
