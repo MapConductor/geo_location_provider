@@ -190,7 +190,6 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             dr = drEnabled.value,
             limit = limit
         )
-        mapSession.value = mapSession.value + 1
 
         if (message != null) {
             viewModelScope.launch {
