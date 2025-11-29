@@ -54,6 +54,12 @@ internal class DeadReckoningImpl(
     }
 
     override suspend fun predict(fromMillis: Long, toMillis: Long): List<PredictedPoint> {
+        // Before the first GPS fix, the internal state doesn't have a
+        // meaningful absolute position. In that phase, just return an
+        // empty list and let callers wait for a valid GPS anchor.
+        if (!engine.hasGpsFix()) {
+            return emptyList()
+        }
         // Return a snapshot as a simple representative point for [fromMillis, toMillis].
         // Actual sampling cadence is controlled by the caller that schedules this method.
         val (st, un) = engine.snapshot()
@@ -69,5 +75,6 @@ internal class DeadReckoningImpl(
             )
         )
     }
-}
 
+    override fun isLikelyStatic(): Boolean = engine.isLikelyStatic()
+}

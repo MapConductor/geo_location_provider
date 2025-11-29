@@ -18,7 +18,20 @@ data class DeadReckoningConfig(
     val processNoisePos: Float = 4f,
     /** Blend factor between GPS speed and internal speed estimate. */
     val velocityGain: Float = 0.1f,
+    /**
+     * Maximum physically plausible horizontal speed for IMU integration (m/s).
+     *
+     * - Typical values: 50f–340f (commercial aircraftまでを含めるなら 340f 程度).
+     * - 0 以下を指定すると、この速度フィルタは無効になります。
+     */
+    val maxStepSpeedMps: Float = 340f,
+    /**
+     * Enable verbose debug logging inside the DR engine.
+     *
+     * When true, the engine logs events such as rejected IMU steps due to
+     * maxStepSpeedMps. For normal production use this should stay false.
+     */
+    val debugLogging: Boolean = false,
     /** Moving window size used for static detection. */
     val windowSize: Int = 64
 )
-

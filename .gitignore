@@ -25,3 +25,4 @@ build/
 libs/*
 /app/schemas/com.mapconductor.plugin.provider.geolocation.core.data.room.AppDatabase
 codex.log
+/mapconductor-core-src

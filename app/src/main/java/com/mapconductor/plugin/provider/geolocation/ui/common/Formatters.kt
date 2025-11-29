@@ -34,6 +34,19 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
+/**
+ * Coarse classification of provider strings used across the UI.
+ *
+ * Map やログ表示などで「GPS か DeadReckoning か」を一貫して判定するための
+ * 共通の窓口として利用します。判定ロジック自体は providerKind() に集約します。
+ */
+enum class ProviderKind {
+    Gps,
+    DeadReckoning,
+    Network,
+    Other
+}
+
 object Formatters {
     private val ICON_SIZE: Dp = 16.dp
     private val SPACER_SIZE: Dp = 4.dp
@@ -44,21 +57,36 @@ object Formatters {
         ms?.let { timeFmt.format(Instant.ofEpochMilli(it).atZone(zoneJst)) } ?: "-"
 
     /**
+     * Classify provider string into coarse categories.
+     *
+     * The logic behind this classifier is shared between the map screen,
+     * history list, and any other UI that needs to distinguish GPS and
+     * DeadReckoning providers.
+     */
+    fun providerKind(raw: String?): ProviderKind {
+        val v = raw?.trim()?.lowercase(Locale.ROOT) ?: return ProviderKind.Other
+        return when {
+            v.contains("dead") || v == "dr" -> ProviderKind.DeadReckoning
+            v == "gps" || v == "fused" || v.contains("gnss") || v.contains("satellite") -> ProviderKind.Gps
+            v.contains("network") -> ProviderKind.Network
+            else -> ProviderKind.Other
+        }
+    }
+
+    /**
      * Provider string -> friendly text.
      * - Dead reckoning identifiers ("dead", "deadreckoning", "dr") -> "DeadReckoning"
      * - GPS/fused/network values are normalized to "GPS" / "Network"
      * - Null/blank -> "-"
      * - Otherwise returns the raw string.
      */
-    fun providerText(raw: String?): String {
-        val v = raw?.trim()?.lowercase(Locale.ROOT) ?: return "-"
-        return when {
-            v.contains("dead") || v == "dr" -> "DeadReckoning"
-            v == "gps" || v == "fused" || v.contains("gnss") || v.contains("satellite") -> "GPS"
-            v.contains("network") -> "Network"
-            else -> raw
+    fun providerText(raw: String?): String =
+        when (providerKind(raw)) {
+            ProviderKind.DeadReckoning -> "DeadReckoning"
+            ProviderKind.Gps -> "GPS"
+            ProviderKind.Network -> "Network"
+            ProviderKind.Other -> raw?.takeIf { it.isNotBlank() } ?: "-"
         }
-    }
 
     fun batteryText(pct: Int?, charging: Boolean?): String =
         if (pct == null) "-" else buildString {
@@ -254,4 +282,3 @@ object Formatters {
         )
     }
 }
-

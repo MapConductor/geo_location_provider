@@ -55,7 +55,7 @@ High-level dependency directions:
 
 - **Dead Reckoning (`:deadreckoning`)**  
   A public API (`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`) and an internal engine (`DeadReckoningEngine`, `DeadReckoningImpl`, etc.).  
-  `GeoLocationService` creates DR instances via `DeadReckoningFactory.create(applicationContext)` and controls them with `start()` / `stop()`.
+  `GeoLocationService` creates DR instances via `DeadReckoningFactory.create(applicationContext)` and controls them with `start()` / `stop()`. GPS fixes are treated as hard anchors: each fix resets the internal DR position to the GPS lat/lon and blends speed by `velocityGain`. The engine applies a per-step physical speed guard (`maxStepSpeedMps`) to drop IMU spikes, and exposes `isLikelyStatic()` for simple ZUPT-style static detection. Before the first GPS fix, `predict()` may return an empty list because the absolute position is not initialized yet.
 
 - **Midnight export (`MidnightExportWorker` / `MidnightExportScheduler`)**  
   WorkManager-based pipeline that:
@@ -76,7 +76,7 @@ High-level dependency directions:
   The app has a two-level `NavHost`:
   - Activity-level: `"home"` and `"drive_settings"` (Drive settings from the AppBar menu)
   - App-level: `"home"` and `"pickup"` (Home vs Pickup in the main AppBar)  
-  Permissions are handled via `ActivityResultContracts.RequestMultiplePermissions`, and the Start/Stop toggle is encapsulated in `ServiceToggleAction`.
+  Permissions are handled via `ActivityResultContracts.RequestMultiplePermissions`, and the Start/Stop toggle is encapsulated in `ServiceToggleAction`. The Map screen (under the `Map` tab in `GeoLocationProviderScreen`) uses MapConductor with a Google Maps backend and visualizes recent `LocationSample` rows as polylines: DeadReckoning as a red, thinner polyline drawn in front, and GPS as a blue, thicker polyline drawn behind it. Checkboxes for `GPS` and `DeadReckoning`, a `Count (1-1000)` field, and an `Apply` / `Cancel` button control which providers are shown and how many points are considered; the debug overlay in the top-right shows `GPS`, `DR`, and `ALL` counts as `shown / DB total`.
 
 ---
 

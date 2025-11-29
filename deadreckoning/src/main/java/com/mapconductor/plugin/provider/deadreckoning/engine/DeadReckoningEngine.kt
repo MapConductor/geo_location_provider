@@ -1,5 +1,6 @@
 package com.mapconductor.plugin.provider.deadreckoning.engine
 
+import android.util.Log
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningConfig
 import kotlin.math.*
 
@@ -38,6 +39,15 @@ internal class DeadReckoningEngine(
     private val aWin = CircularWindow(config.windowSize)
     private val wWin = CircularWindow(config.windowSize)
 
+    // Maximum physically plausible speed for a single integration step.
+    private val maxStepSpeedMps: Float =
+        if (config.maxStepSpeedMps <= 0f) 0f else config.maxStepSpeedMps
+
+    // Optional debug logging switch.
+    private val debugLogging: Boolean = config.debugLogging
+
+    fun hasGpsFix(): Boolean = hasGpsFix
+
     fun isLikelyStatic(): Boolean {
         val aVar = aWin.variance()
         val wVar = wWin.variance()
@@ -59,13 +69,35 @@ internal class DeadReckoningEngine(
             val lin = floatArrayOf(acc[0] - gEst[0], acc[1] - gEst[1], acc[2] - gEst[2])
 
             val aH = horizontalProjection(lin, state.headingRad) // nav frame (x:east, y:north)
-            state.speedMps = max(0f, state.speedMps + (hypot(aH[0], aH[1]) * dtSec))
+            val aMag = hypot(aH[0], aH[1])
+
+            // Predict speed and displacement for this step.
+            val newSpeed = max(0f, state.speedMps + (aMag * dtSec))
+            val dx = newSpeed * dtSec * cos(state.headingRad)
+            val dy = newSpeed * dtSec * sin(state.headingRad)
+
+            // Simple physical sanity check: reject steps that would imply
+            // unrealistically high speed. This protects against sporadic
+            // IMU spikes without involving the service layer.
+            val dist = hypot(dx, dy)
+            val stepSpeedMps: Float =
+                if (dtSec > 0f) (dist / dtSec.toDouble()).toFloat() else 0f
+            if (maxStepSpeedMps > 0f && stepSpeedMps > maxStepSpeedMps) {
+                if (debugLogging) {
+                    Log.d(
+                        "DR/SANITY",
+                        "reject step speed=${stepSpeedMps}m/s limit=${maxStepSpeedMps}m/s dist=${dist}m dt=${dtSec}s"
+                    )
+                }
+                // Ignore this step; keep previous state but still update statistics.
+                return
+            }
+
+            state.speedMps = newSpeed
 
             // When considered static, gradually decay speed.
             if (isLikelyStatic()) state.speedMps *= 0.85f
 
-            val dx = state.speedMps * dtSec * cos(state.headingRad)
-            val dy = state.speedMps * dtSec * sin(state.headingRad)
             applyDisplacementMeters(dx.toDouble(), dy.toDouble())
 
             // Increase position uncertainty over time.

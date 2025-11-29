@@ -142,6 +142,8 @@ Please read it once before changing code and follow these guidelines when implem
     - `staticGyroVarThreshold`
     - `processNoisePos`
     - `velocityGain`
+    - `maxStepSpeedMps` (per-step physical speed guard; <= 0 disables it)
+    - `debugLogging` (optional DR engine debug logs)
     - `windowSize`
     - etc.
   - Factory: `DeadReckoningFactory.create(context, config = DeadReckoningConfig())`
@@ -151,6 +153,10 @@ Please read it once before changing code and follow these guidelines when implem
 - In `GeoLocationService`:
   - Create the DR instance via `DeadReckoningFactory.create(applicationContext)` and wire it to `start()` / `stop()`.
   - Insertion policy for DR samples and coordination with GNSS samples (locking, etc.) must remain outside of the `DeadReckoning` API.
+  - GPS fixes are treated as hard anchors: each fix resets the internal DR position to the GPS lat/lon and blends speed with `velocityGain`.
+  - The DR engine itself drops IMU steps whose implied per-step speed exceeds `maxStepSpeedMps` so that “physically impossible” jumps are filtered inside `:deadreckoning`.
+  - `predict()` may return an empty list before the first GPS fix (callers must tolerate "no absolute position yet").
+  - For desk / static use cases, `GeoLocationService` uses `DeadReckoning.isLikelyStatic()` and the latest GPS position to clamp DR drift within a small radius around the anchor (about 2 meters).
 
 ### Settings Handling (SettingsRepository)
 
@@ -265,6 +271,16 @@ Please read it once before changing code and follow these guidelines when implem
   - `ViewModel`s are created via `viewModel()` or `AndroidViewModel`, and use `viewModelScope` for async work.
   - State is exposed via `StateFlow` / `uiState` and passed to Compose.
 
+- Map screen (`MapScreen` / `GoogleMapsExample`):
+  - Uses MapConductor (`GoogleMapsView`) for rendering.
+  - Top row has checkboxes for `GPS` / `DeadReckoning`, a numeric `Count (1-1000)` field, and an `Apply` / `Cancel` button.
+  - On first entry, no polylines are shown. When `Apply` is pressed, controls are locked and up to `Count` newest samples are drawn:
+    - DeadReckoning: red polyline, drawn **after** GPS (in front), thinner stroke.
+    - GPS: blue polyline, drawn **before** DR (behind), thicker stroke.
+  - Samples are connected strictly in time order (by `timeMillis`), not by distance. New samples are appended and older ones dropped so that the total count does not exceed `Count`.
+  - When `Cancel` is pressed, polylines are cleared and controls are unlocked, but the current camera position / zoom are kept as-is.
+  - A debug overlay in the top-right shows `GPS`, `DR`, and `ALL` counts as `shown / DB total` for quick sanity checks.
+
 - `App` / `MainActivity` / `AppRoot`:
   - In the `App` application class, call  
     `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))`  
@@ -318,4 +334,3 @@ Please read it once before changing code and follow these guidelines when implem
 
 Types not listed here should stay `internal` or otherwise non-public whenever possible  
 so that the binary public surface remains small and stable for library consumers.
-

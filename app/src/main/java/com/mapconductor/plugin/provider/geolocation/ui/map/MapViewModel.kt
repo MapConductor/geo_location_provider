@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import com.mapconductor.plugin.provider.geolocation.ui.common.ProviderKind
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -76,11 +77,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             val filterApplied = filter != null
 
             val normalized = samples.map { sample ->
-                sample to Formatters.providerText(sample.provider)
+                sample to Formatters.providerKind(sample.provider)
             }
 
-            val dbGpsCount = normalized.count { (_, prov) -> prov == "GPS" }
-            val dbDrCount = normalized.count { (_, prov) -> prov == "DeadReckoning" }
+            val dbGpsCount = normalized.count { (_, kind) -> kind == ProviderKind.Gps }
+            val dbDrCount = normalized.count { (_, kind) -> kind == ProviderKind.DeadReckoning }
             val dbTotalCount = samples.size
 
             val markers: List<LocationSample>
@@ -91,9 +92,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 latest = null
             } else {
                 val filtered = normalized
-                    .filter { (_, prov) ->
-                        val isGps = prov == "GPS"
-                        val isDr = prov == "DeadReckoning"
+                    .filter { (_, kind) ->
+                        val isGps = kind == ProviderKind.Gps
+                        val isDr = kind == ProviderKind.DeadReckoning
                         when {
                             filter.gps && !filter.dr -> isGps
                             !filter.gps && filter.dr -> isDr
@@ -109,10 +110,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val displayedGpsCount = markers.count {
-                Formatters.providerText(it.provider) == "GPS"
+                Formatters.providerKind(it.provider) == ProviderKind.Gps
             }
             val displayedDrCount = markers.count {
-                Formatters.providerText(it.provider) == "DeadReckoning"
+                Formatters.providerKind(it.provider) == ProviderKind.DeadReckoning
             }
             val displayedTotalCount = markers.size
 

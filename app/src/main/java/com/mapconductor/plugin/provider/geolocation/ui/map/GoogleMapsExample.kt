@@ -27,11 +27,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.core.features.GeoPointImpl
 import com.mapconductor.core.map.MapCameraPositionImpl
-import com.mapconductor.core.marker.DefaultIcon
-import com.mapconductor.core.marker.Marker
+import com.mapconductor.core.polyline.Polyline
 import com.mapconductor.googlemaps.GoogleMapsView
 import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
+import com.mapconductor.plugin.provider.geolocation.ui.common.ProviderKind
 
 /**
  * Map screen that shows markers for LocationSample rows.
@@ -129,27 +129,43 @@ fun MapScreen() {
                     },
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    state.markers.forEachIndexed { index, sample ->
-                        key(sample.id) {
-                            val point = GeoPointImpl.fromLatLong(sample.lat, sample.lon)
-                            val prov = Formatters.providerText(sample.provider)
-                            val label = when (prov) {
-                                "GPS" -> "G"
-                                "DeadReckoning" -> "D"
-                                else -> prov
-                            }
-                            val scale = if (prov == "GPS") 1.0f else 0.5f
-                            val icon = when (prov) {
-                                "GPS" -> DefaultIcon(fillColor = Color.Blue, scale = scale, label = label)
-                                "DeadReckoning" -> DefaultIcon(fillColor = Color.Red, scale = scale, label = label)
-                                else -> DefaultIcon(fillColor = Color.Blue, scale = scale, label = label)
-                            }
-                            Marker(
-                                position = point,
-                                id = sample.id.toString(),
-                                icon = icon
-                            )
+                    // Build per-provider polylines, connecting points in time order.
+                    val gpsPoints = state.markers
+                        .filter { sample ->
+                            Formatters.providerKind(sample.provider) == ProviderKind.Gps
                         }
+                        .sortedBy { it.timeMillis }
+                        .map { sample ->
+                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                        }
+
+                    val drPoints = state.markers
+                        .filter { sample ->
+                            Formatters.providerKind(sample.provider) == ProviderKind.DeadReckoning
+                        }
+                        .sortedBy { it.timeMillis }
+                        .map { sample ->
+                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                        }
+
+                    // Draw GPS polyline first (behind).
+                    if (gpsPoints.size >= 2) {
+                        Polyline(
+                            points = gpsPoints,
+                            id = "gps-polyline",
+                            strokeColor = Color.Blue,
+                            strokeWidth = 4.5.dp
+                        )
+                    }
+
+                    // Draw DR polyline second (in front).
+                    if (drPoints.size >= 2) {
+                        Polyline(
+                            points = drPoints,
+                            id = "dr-polyline",
+                            strokeColor = Color.Red,
+                            strokeWidth = 1.5.dp
+                        )
                     }
                 }
 

@@ -85,13 +85,9 @@ class GeoLocationService : Service() {
     @Volatile private var lastCourseLat: Double? = null
     @Volatile private var lastCourseLon: Double? = null
 
-    // Last accepted sample (GPS or DR) used for simple sanity check.
-    @Volatile private var lastAcceptedLat: Double? = null
-    @Volatile private var lastAcceptedLon: Double? = null
-    @Volatile private var lastAcceptedTimeMillis: Long? = null
-
-    // Maximum physically plausible speed (meters per second) for DR samples.
-    private val maxDrSpeedMps = 340.0
+    // Last GPS fix position used as an anchor for simple DR static clamping.
+    @Volatile private var lastGpsLat: Double? = null
+    @Volatile private var lastGpsLon: Double? = null
 
     fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
@@ -199,6 +195,11 @@ class GeoLocationService : Service() {
 
         // Stop DR ticker.
         stopDrTicker()
+        // Reset simple DR anchor state so that the next start does not
+        // accidentally reuse stale GPS information.
+        lastFixMillis = null
+        lastGpsLat = null
+        lastGpsLon = null
 
         // Important:
         // Start/Stop button checks whether it can bind to the service.
@@ -273,9 +274,12 @@ class GeoLocationService : Service() {
             else -> Double.NaN
         }
 
-        // Update last position for the next course calculation.
+        // Update last position for the next course calculation and keep
+        // the latest GPS fix as an anchor for DR static handling.
         lastCourseLat = observation.lat
         lastCourseLon = observation.lon
+        lastGpsLat = observation.lat
+        lastGpsLon = observation.lon
 
           val used: Int? = observation.gnssUsed
           val total: Int? = observation.gnssTotal
@@ -330,7 +334,6 @@ class GeoLocationService : Service() {
                               "DB/TRACE",
                               "after-insert ok provider=gps t=${sample.timeMillis}"
                           )
-                          updateLastAccepted(sample.lat, sample.lon, sample.timeMillis)
                       } catch (t: Throwable) {
                           Log.e(
                               "DB/TRACE",
@@ -435,7 +438,6 @@ class GeoLocationService : Service() {
                                     "DB/TRACE",
                                     "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
                                 )
-                                updateLastAccepted(sample.lat, sample.lon, sample.timeMillis)
                             } catch (e: Throwable) {
                                 Log.e(
                                     "DB/TRACE",
@@ -547,7 +549,6 @@ class GeoLocationService : Service() {
                                         "DB/TRACE",
                                         "after-insert ok provider=dead_reckoning(ticker) t=${finalSample.timeMillis}"
                                     )
-                                    updateLastAccepted(finalSample.lat, finalSample.lon, finalSample.timeMillis)
                                 } catch (e: Throwable) {
                                     Log.e(
                                         "DB/TRACE",
@@ -673,33 +674,26 @@ class GeoLocationService : Service() {
         return h
     }
 
-    private fun updateLastAccepted(lat: Double, lon: Double, timeMillis: Long) {
-        lastAcceptedLat = lat
-        lastAcceptedLon = lon
-        lastAcceptedTimeMillis = timeMillis
-    }
-
     private fun adjustDrSample(lat: Double, lon: Double, timeMillis: Long): Pair<Double, Double> {
-        val prevLat = lastAcceptedLat
-        val prevLon = lastAcceptedLon
-        val prevTime = lastAcceptedTimeMillis
-        if (prevLat == null || prevLon == null || prevTime == null) return lat to lon
+        val d = dr ?: return lat to lon
+        // Without any GPS anchor there is nothing meaningful to clamp to.
+        val anchorLat = lastGpsLat ?: return lat to lon
+        val anchorLon = lastGpsLon ?: return lat to lon
 
-        val dtMs = timeMillis - prevTime
-        if (dtMs <= 0L) return lat to lon
+        // Only apply additional clamping when DR believes the device is almost static.
+        if (!d.isLikelyStatic()) return lat to lon
 
-        val dtSec = dtMs.toDouble() / 1000.0
-        val maxDist = maxDrSpeedMps * dtSec
-        val dist = haversineMeters(prevLat, prevLon, lat, lon)
-        if (dist > maxDist) {
-            Log.w(
-                "DR/FILTER",
-                "unrealistic DR jump: dist=${dist}m dt=${dtMs}ms (limit=${maxDist}m)"
-            )
-            // Recalculate as: clamp to previous accepted position.
-            return prevLat to prevLon
+        // If DR walks away from the last GPS by more than a small radius while
+        // the device is static, snap it back to the anchor. This is a light
+        // ZUPT-style correction on top of the engine's own speed sanity checks.
+        val dist = haversineMeters(anchorLat, anchorLon, lat, lon)
+        val clampRadiusM = 2.0
+        return if (dist > clampRadiusM) {
+            Log.d("DR/ZUPT", "static clamp dist=${dist}m -> anchor GPS")
+            anchorLat to anchorLon
+        } else {
+            lat to lon
         }
-        return lat to lon
     }
 
     private fun haversineMeters(
