@@ -142,6 +142,8 @@ Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cam
     - `staticGyroVarThreshold`
     - `processNoisePos`
     - `velocityGain`
+    - `maxStepSpeedMps` (límite físico de velocidad por paso; <= 0 lo desactiva)
+    - `debugLogging` (logs de depuración opcionales del motor DR)
     - `windowSize`
     - etc.
   - Factoría: `DeadReckoningFactory.create(context, config = DeadReckoningConfig())`  
@@ -151,6 +153,10 @@ Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cam
 - En `GeoLocationService`:
   - Crea la instancia de DR mediante `DeadReckoningFactory.create(applicationContext)` y la conecta a `start()` / `stop()`.
   - Las políticas de inserción de muestras de DR y la coordinación con muestras GNSS (bloqueos, etc.) deben permanecer fuera de la API de `DeadReckoning`.
+  - Los fixes de GPS se tratan como anclas fuertes: cada fix restablece la posición interna de DR a la lat/lon de GPS y mezcla la velocidad con `velocityGain`.
+  - El motor de DR descarta pasos de IMU cuya velocidad implícita por paso supere `maxStepSpeedMps`, de modo que los saltos "físicamente imposibles" se filtran dentro de `:deadreckoning`.
+  - `predict()` puede devolver una lista vacía antes del primer fix de GPS (los llamadores deben tolerar el estado "sin posición absoluta todavía").
+  - Para casos de uso estáticos (por ejemplo, el dispositivo sobre la mesa), `GeoLocationService` usa `DeadReckoning.isLikelyStatic()` y la última posición de GPS para limitar la deriva de DR dentro de un radio pequeño alrededor del ancla (aprox. 2 metros).
 
 ### Gestión de ajustes (SettingsRepository)
 
@@ -264,6 +270,16 @@ Antes de cambiar código, léelo una vez y sigue estas pautas al implementar cam
   - Composables a nivel de pantalla: `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen`, etc.
   - Los `ViewModel`s se crean mediante `viewModel()` o `AndroidViewModel` y usan `viewModelScope` para trabajo asíncrono.
   - El estado se expone mediante `StateFlow` / `uiState` y se pasa a Compose.
+
+- Pantalla de mapa (`MapScreen` / `GoogleMapsExample`):
+  - Usa MapConductor (`GoogleMapsView`) para el renderizado.
+  - La fila superior contiene checkboxes para `GPS` y `DeadReckoning`, un campo numérico `Count (1-1000)` y un botón `Apply` / `Cancel`.
+  - En la primera entrada no se muestran polilíneas. Al pulsar `Apply`, los controles se bloquean y se dibujan hasta `Count` muestras más recientes:
+    - DeadReckoning: polilínea roja, trazado más fino, dibujada **después** de GPS (delante).
+    - GPS: polilínea azul, trazado más grueso, dibujada **antes** de DR (detrás).
+  - Los puntos se conectan estrictamente en orden temporal (`timeMillis`), no por distancia. Las muestras nuevas se añaden y las más antiguas se descartan para que el total no supere `Count`.
+  - Al pulsar `Cancel`, las polilíneas se eliminan y los controles se desbloquean, pero la posición / zoom de la cámara se mantiene.
+  - Una superposición de depuración en la esquina superior derecha muestra los contadores `GPS`, `DR` y `ALL` como `mostrados / total en BD`.
 
 - `App` / `MainActivity` / `AppRoot`:
   - En la clase de aplicación `App`, llama a  

@@ -1,250 +1,116 @@
-# Repository Guidelines (日本語版)
+# Repository Guidelines (日本語版・サマリ)
 
-GeoLocationProvider リポジトリで作業する際の **共通方針・コーディング規約・モジュール間の責務分担** をまとめたドキュメントです。  
-コードを変更する前に一度読んでいただき、ここに書かれた方針に沿って実装してください。
+このドキュメントは、GeoLocationProvider リポジトリで作業する際の **方針・レイヤ構造・責務の分担** を簡潔にまとめたものです。  
+詳細な仕様は英語版 `AGENTS.md` を正とし、本書はそのダイジェストとして扱ってください。
 
 ---
 
-## プロジェクト構成とモジュール
+## モジュール構成と依存関係
 
-- ルート Gradle プロジェクト `GeoLocationProvider` は次のモジュールで構成されています。
-  - `:app` – Compose ベースのサンプル UI アプリ（履歴、Pickup、Drive 設定、手動バックアップなど）。
-  - `:core` – 位置取得サービス (`GeoLocationService`) とセンサー関連ロジック。永続化は `:storageservice` に委譲。
-  - `:storageservice` – Room `AppDatabase` / DAO と `StorageService` ファサード。位置ログとエクスポート状態を一括管理。
-  - `:dataselector` – Pickup 向けの選択ロジック。`LocationSample` を条件でフィルタし、代表サンプル行 (`SelectedSlot`) を構築。
+- ルート Gradle プロジェクト `GeoLocationProvider` は、主に次のモジュールから構成されます。
+  - `:app` – Jetpack Compose ベースのサンプル UI（履歴・Pickup・Drive 設定・手動エクスポート・Map 画面など）。
+  - `:core` – 位置取得サービス `GeoLocationService` とセンサー処理。永続化は `:storageservice` に委譲し、DR は `:deadreckoning` を利用。
+  - `:storageservice` – Room `AppDatabase` / DAO と `StorageService` ファサード。位置ログとエクスポート状態の唯一の入口。
+  - `:dataselector` – Pickup 用の選択ロジック。`LocationSample` を条件でフィルタし、代表サンプル行 `SelectedSlot` を構築。
   - `:datamanager` – GeoJSON エクスポート、ZIP 圧縮、`MidnightExportWorker` / `MidnightExportScheduler`、Google Drive 連携。
-  - `:deadreckoning` – Dead Reckoning エンジンと API。`GeoLocationService` から利用。
-  - `:auth-appauth` – AppAuth ベースの `GoogleDriveTokenProvider` 実装を提供するライブラリモジュール。
-  - `:auth-credentialmanager` – Credential Manager + Identity ベースの `GoogleDriveTokenProvider` 実装を提供するライブラリモジュール。
+  - `:deadreckoning` – Dead Reckoning エンジンと公開 API（`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`）。
+  - `:auth-appauth` / `:auth-credentialmanager` – `GoogleDriveTokenProvider` の実装を提供する認証モジュール。
 
-- 依存関係のおおまかな向き:
-  - `:app` → `:core`, `:dataselector`, `:datamanager`, `:storageservice`, 認証系モジュール
+- 依存関係の向き（概要）
+  - `:app` → `:core`, `:dataselector`, `:datamanager`, `:storageservice`, auth モジュール
   - `:core` → `:storageservice`, `:deadreckoning`
   - `:datamanager` → `:storageservice`, Drive 連携クラス
   - `:dataselector` → `LocationSampleSource` 抽象のみ（実装は `:app` 側で `StorageService` をラップ）
 
-- 本番コードは各モジュールの `src/main/java`, `src/main/kotlin`, `src/main/res` に配置します。  
-  ビルド成果物はモジュール配下の `build/` 以下に生成されます。
+---
 
-- 開発マシン固有の設定（Android SDK のパスなど）はルートの `local.properties` に記述します。  
-  通常は Android Studio が自動生成しますが、存在しない場合は手動で作成してください。
+## Dead Reckoning モジュールと GeoLocationService
 
-- 認証や機密情報は `secrets.properties` に保存し、このファイルは **Git にコミットしない** でください。  
-  テンプレートとして `local.default.properties` が用意されているので、コピーして実際の値に置き換えます。
+### DeadReckoningConfig
+
+`DeadReckoningConfig` は DR エンジンの挙動を制御する設定オブジェクトです。主なパラメータ:
+
+- `staticAccelVarThreshold` – 静止判定に使う加速度分散のしきい値。
+- `staticGyroVarThreshold` – 静止判定に使うジャイロ分散のしきい値。
+- `processNoisePos` – 位置のプロセスノイズ（ドリフトの増え方）。
+- `velocityGain` – GPS 速度と内部速度推定のブレンド係数。
+- `maxStepSpeedMps` – 1 ステップあたりの物理的な最大速度 [m/s]。  
+  これを超えるステップは IMU スパイクとみなされ、エンジン側で破棄されます。0 以下を指定すると無効。
+- `debugLogging` – DR エンジン内部のデバッグログを有効にするフラグ（通常は false）。
+- `windowSize` – 静止判定用の移動窓のサイズ。
+
+### DeadReckoning エンジンの役割
+
+- IMU（加速度 / ジャイロ / 磁気）入力から、
+  - heading（方位）、
+  - 水平速度、
+  - 緯度・経度
+  を逐次推定します。
+- 静止判定（ZUPT 風の判定）
+  - 直近の加速度ノルム・ジャイロノルムの分散がしきい値以下のとき `isLikelyStatic() == true`。
+  - 静止とみなした場合は速度を漸減させ（例: `speedMps *= 0.85f`）、ランダムウォークを抑制します。
+- 物理速度ガード
+  - 1 センサステップごとに移動距離とステップ速度を計算し、`stepSpeedMps > maxStepSpeedMps` の場合はそのステップを **破棄** します（状態は更新しない）。
+  - `debugLogging == true` のときのみ `DR/SANITY` ログを出力します。
+- GPS フィックス
+  - `submitGpsFix()` 呼び出しごとに、内部状態の `lat/lon` を **GPS の値で再アンカー** します。
+  - 速度は `velocityGain` に従って GPS 速度へ平滑に寄せます。
+  - 位置の不確かさ `sigma2Pos` は、GPS 精度から再初期化されます。
+- 予測 `predict(fromMillis, toMillis)`
+  - 内部状態のスナップショットを返す API であり、このメソッド自体は追加の積分は行いません（積分は `onSensor()` 側）。
+  - **初回 GPS フィックス前** は絶対位置が未定のため、空リストを返す場合があります。
+
+### GeoLocationService 側の責務
+
+- DR インスタンスの生成とライフサイクル管理
+  - `DeadReckoningFactory.create(applicationContext)` でインスタンスを生成し、サービスの `onCreate` で `start()`、`onDestroy` で `stop()`。
+- GPS 更新時
+  - DB に `provider="gps"` の `LocationSample` を挿入。
+  - 同じタイムスタンプで `GpsFix` を組み立て、`dr.submitGpsFix()` に渡して DR 側のアンカーを更新。
+  - 最新 GPS 位置を「DR クランプ用アンカー」として保持（Map 表示などにも利用）。
+- DR サンプル生成時
+  - `DeadReckoning.predict()` から `PredictedPoint` を受け取り、`provider="dead_reckoning"` の `LocationSample` として DB に挿入。
+  - `dr.isLikelyStatic() == true` の場合、最新 GPS との距離が一定以上（約 2m）に離れていれば、アンカー位置にクランプすることでデスク上などでのドリフトを抑制。
+- これらのロジックは `:deadreckoning` の API 外側にあり、DR の公開インターフェース自体はシンプルに保ちます。
 
 ---
 
-## ビルド・テスト・開発用コマンド
+## Map 画面（Polyline 表示）のガイド
 
-- 代表的な Gradle コマンド（ルートディレクトリで実行）:
-  - `./gradlew :app:assembleDebug` – サンプルアプリの Debug APK をビルド。
-  - `./gradlew :core:assemble` / `./gradlew :storageservice:assemble` – ライブラリモジュールをビルド。
-  - `./gradlew lint` – Android / Kotlin の静的解析を実行。
-  - `./gradlew test` / `./gradlew :app:connectedAndroidTest` – ユニットテスト / UI・計測テストを実行。
-
-- 日常開発では Android Studio からのビルド・実行を基本とし、Gradle CLI は CI や一括検証で使用します。
-
----
-
-## コーディングスタイルと命名規約
-
-- 主な技術スタック: Kotlin, Jetpack Compose, Gradle Kotlin DSL  
-  インデントは 4 スペース、ソースコードの文字コードは UTF-8 を前提とします。
-
-- パッケージ構成の目安:
-  - アプリ / サービス層: `com.mapconductor.plugin.provider.geolocation.*`
-  - ストレージ層: `com.mapconductor.plugin.provider.storageservice.*`
-  - Dead Reckoning: `com.mapconductor.plugin.provider.geolocation.deadreckoning.*`
-
-- 命名規約:
-  - クラス / オブジェクト / インターフェース – PascalCase
-  - 変数 / プロパティ / 関数 – camelCase
-  - 定数 – UPPER_SNAKE_CASE
-  - 画面レベルの Composable – `*Screen`
-  - ViewModel – `*ViewModel`
-  - Worker / Scheduler – `*Worker` / `*Scheduler`
-
-- 関数は 1 つの責務に絞り、読みやすさを最優先する名前を付けてください。
-- 未使用の import や死んだコードを見つけた場合は、可能な範囲で削除します。
-- KDoc / コメントでは、次の観点を明示することを推奨します。
-  - 役割・責務
-  - 設計方針
-  - 想定する利用方法
-  - 契約（呼び出し側が期待できること / できないこと）
-
-### コメントとエンコーディングの方針
-
-- 本番コード（Kotlin / Java / XML / Gradle スクリプトなど）は、**ASCII のみ**で記述します。  
-  コード・コメント・文字列リテラルにはマルチバイト文字を使用しないでください。
-- 日本語 / スペイン語などの多言語テキストは、`README_JA.md` / `README_ES.md` をはじめとする `*.md` ドキュメントにのみ含めることを許容します。
-- 公開 API や主要クラスには KDoc（`/** ... */`）を用い、内部実装の補足にはシンプルな `// ...` 行コメントを使う方針とします。
-- セクション区切りのコメントは、`// ---- Section ----` や `// ------------------------` のような簡潔なスタイルに統一し、装飾的な枠線は避けます。
-- モジュールをまたいで機能を移動・リファクタリングする際は、**コメントの粒度と書きぶりが大きくブレないように**そろえることを意識してください。
+- `MapScreen` / `GoogleMapsExample` は MapConductor（`GoogleMapsView` + Google Maps backend）を利用してマップを表示します。
+- UI 上部には、左から
+  - `[ ] GPS` チェックボックス
+  - `[ ] DeadReckoning` チェックボックス
+  - `Count (1-1000)` テキストフィールド
+  - `Apply` / `Cancel` ボタン
+  が横並びで配置され、垂直方向にセンタリングされています。
+- 初回表示時
+  - チェックボックスはすべて未チェックで、マップ上にはポリラインが表示されません。
+- `Apply` ボタン押下時の挙動
+  - `GPS` / `DeadReckoning` チェックボックスと `Count` フィールドをロック（編集不可）にし、ボタンラベルを `Cancel` に変更。
+  - DB の最新 `LocationSample` から、チェックされたプロバイダのみを対象に、`Count` を上限とする件数を取得（GPS + DR の合計が Count を超えないように制限）。
+  - 取得したサンプルを `timeMillis` 昇順（古い順）に並べ、
+    - DeadReckoning: 赤色・細めのポリラインとして **後から描画**（前面）。
+    - GPS: 青色・太めのポリラインとして **先に描画**（背面）。
+  - 新しいサンプルが保存された場合、表示中の状態を保ったまま末尾に追加し、総数が `Count` を超えた場合は古いものから削除。
+- `Cancel` ボタン押下時の挙動
+  - マップ上のポリラインをすべて削除。
+  - チェックボックスと `Count` フィールドをアンロックし、ボタンラベルを `Apply` に戻す。
+  - このとき、マップのカメラ位置・ズームは変更しません（ユーザーが調整した視点は維持されます）。
+- デバッグオーバーレイ
+  - 画面右上に半透明のパネルを表示し、
+    - `GPS : 表示件数 / DB 件数`
+    - `DR  : 表示件数 / DB 件数`
+    - `ALL : 表示総数 / DB 総数`
+    を表示して簡易的な整合性チェックができるようにしています。
 
 ---
 
-## レイヤリングと責務分担
+## 注意事項（共通）
 
-### StorageService / Room アクセス
-
-- Room の `AppDatabase` / DAO へのアクセスは、基本的に `StorageService` 経由で行います。
-  - 例外は `:storageservice` モジュール内部のみ（DAO 実装と `AppDatabase` 本体）。
-  - `:app`, `:core`, `:datamanager`, `:dataselector` から DAO 型を直接 import しないでください。
-
-- `StorageService` の主な契約:
-  - `latestFlow(ctx, limit)` – 最新 `limit` 件の `LocationSample` を新しい順の Flow で返す。
-  - `getAllLocations(ctx)` – すべての位置ログを `timeMillis` 昇順で返す（小規模データ向け）。
-  - `getLocationsBetween(ctx, from, to, softLimit)` – `[from, to)` の半開区間で `timeMillis` 昇順のデータを返す。大規模データではこの API を使用。
-  - `insertLocation(ctx, sample)` – 1 件挿入し、前後の件数を `DB/TRACE` タグでログに出す。
-  - `deleteLocations(ctx, items)` – 空リストなら何もしない。例外はそのまま呼び出し側へ伝播。
-  - `ensureExportedDay` / `oldestNotUploadedDay` / `markExportedLocal` / `markUploaded` / `markExportError` – 日単位のエクスポート状態を管理。
-
-- DB アクセスは `Dispatchers.IO` 上で行う前提です。  
-  呼び出し側でさらに Dispatcher を切り替える必要はありませんが、UI スレッドをブロックしないよう注意してください。
-
-### dataselector / Pickup
-
-- `:dataselector` モジュールは `LocationSampleSource` 抽象のみに依存し、Room や `StorageService` そのものは知りません。
-  - `LocationSampleSource.findBetween(fromInclusive, toExclusive)` は `[from, to)` の半開区間で昇順取得する契約です。
-
-- `SelectorRepository` のポリシー（簡略版）:
-  - `intervalSec == null`: グリッド無しの「そのまま抽出」。簡易な間引きとソートのみ。
-  - `intervalSec != null`: グリッド吸着モード。  
-    - `T = intervalSec * 1000L` とし、各グリッドごとに `±T/2` の窓から 1 サンプルだけ選ぶ（複数ある場合はより過去側を優先）。  
-    - `SortOrder.NewestFirst`: 終了時刻 (`to`) を基準に `buildTargetsFromEnd` でグリッドを生成し、最終的に `slots.asReversed()` で新しい順に並べ替える。  
-    - `SortOrder.OldestFirst`: 開始時刻 (`from`) を基準に `buildTargetsFromStart` でグリッドを生成し、昇順のまま返す。
-
-- `SelectorPrefs` は Pickup 条件を DataStore で永続化します（`SelectorCondition` と同じ単位 / 意味）。
-- UI (`:app`) からは `SelectorUseCases.buildSelectedSlots(context)` を通して dataselector を利用し、Pickup 画面は DB/DAO 型を知らなくて済むようにします。
-
-### GeoLocationService / Dead Reckoning
-
-- 実際の位置取得は `:core` の `GeoLocationService` が行い、フォアグラウンドサービスとして動作します。
-  - GNSS: `FusedLocationProviderClient` + `LocationRequest`
-  - IMU / DR: `HeadingSensor`, `GnssStatusSampler`, `DeadReckoning`
-  - 設定: `SettingsRepository.intervalSecFlow` / `drIntervalSecFlow` を購読してサンプリング間隔を動的に更新
-
-- Dead Reckoning API (`:deadreckoning`):
-  - 公開 API: `DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`
-  - `DeadReckoningConfig` は静止判定しきい値・位置ノイズモデルなど DR エンジンのパラメータをまとめた設定オブジェクト。
-  - `DeadReckoningFactory.create(context, config)` で実装詳細に依存せず `DeadReckoning` を生成。
-  - 実装 (`DeadReckoningImpl`) とエンジン (`DeadReckoningEngine`, `SensorAdapter`, `DrState`, `DrUncertainty`) は internal とし、将来差し替え可能な設計。
-
-- `GeoLocationService` 側のポリシー:
-  - `DeadReckoningFactory.create(applicationContext)` で DR インスタンスを生成し、`start()` / `stop()` に連動。
-  - DR サンプルの挿入タイミングや GNSS サンプルとの協調ロジックは、`DeadReckoning` API の外側で扱う（サービス側の責務）。
-
-### SettingsRepository による設定管理
-
-- `storageservice.prefs.SettingsRepository` がサンプリング間隔などを管理します。
-  - `intervalSecFlow(context)` / `drIntervalSecFlow(context)` – 秒単位で Flow を返す（デフォルトと最小値を含む）。
-  - `currentIntervalMs(context)` / `currentDrIntervalSec(context)` – 旧実装との互換用の同期 API（新コードでは Flow を優先）。
-
----
-
-## 認証と Drive 連携
-
-### GoogleDriveTokenProvider と実装
-
-- Drive 連携のための認証インターフェースが `GoogleDriveTokenProvider` です。
-  - 新規コードでは `:auth-credentialmanager` の `CredentialManagerTokenProvider` または `:auth-appauth` の `AppAuthTokenProvider` を使うことを推奨。
-  - 旧来の `GoogleAuthRepository`（GoogleAuthUtil ベース）は後方互換用に残していますが、新規コードでは使用しません。
-
-- ポリシー:
-  - 戻り値のトークンは `"Bearer "` を含めず、生のアクセストークン文字列のみを返す。
-  - 正常な失敗（ネットワークエラー・未サインイン・同意不足など）は例外ではなく `null` で表現する（ログ出力は可）。
-  - UI フローが必要な場合でも、プロバイダ側から直接 UI を起動せず、`null` を返してアプリ側に判断を委ねる。
-
-### Credential Manager 認証
-
-- `CredentialManagerTokenProvider` は Credential Manager + Identity ベースの `GoogleDriveTokenProvider` 実装です。
-  - `BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID` を `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` として受け取り、Google Identity の Web / サーバ用クライアント ID として扱います。
-  - AppAuth のクライアント ID とは別のものを使う必要があります。
-
-### AppAuth 認証
-
-- `AppAuthTokenProvider` は `:auth-appauth` モジュール内の `GoogleDriveTokenProvider` 実装です。
-  - `clientId = BuildConfig.APPAUTH_CLIENT_ID`
-  - `redirectUri = "com.mapconductor.plugin.provider.geolocation:/oauth2redirect"`
-  - `APPAUTH_CLIENT_ID` は `secrets.properties` の `APPAUTH_CLIENT_ID` から `secrets-gradle-plugin` 経由で生成されます。
-
-### DriveTokenProviderRegistry / バックグラウンド
-
-- バックグラウンド処理（`MidnightExportWorker` など）では UI を起動せず、`DriveTokenProviderRegistry` に登録されたプロバイダを経由してトークンを取得します。
-  - `DriveTokenProviderRegistry.registerBackgroundProvider(...)` で Application 起動時に登録する（`App.onCreate()` で `CredentialManagerAuth.get(this)` を登録するのがサンプル構成）。
-  - `getBackgroundProvider()` が `null` を返した場合は「未認証」とみなし、ワーカー側で ZIP の削除・エラー記録のみを行います（レコード削除はしない）。
-
----
-
-## WorkManager / MidnightExportWorker
-
-- `MidnightExportWorker` は「前日までのバックログ」を処理します。
-  - タイムゾーン `Asia/Tokyo` で日付を計算し、1 日分を `[0:00, 24:00)` のミリ秒レンジとして扱います。
-  - 初回実行時に過去 365 日分の `ExportedDay` を `StorageService.ensureExportedDay` でシード。
-  - 各日について `StorageService.getLocationsBetween` で `LocationSample` を取得し、`GeoJsonExporter.exportToDownloads` で GeoJSON + ZIP に変換。
-
-- アップロードと削除ポリシー:
-  - ローカル ZIP が正常に出力できた時点で `markExportedLocal` を呼ぶ（その日が空でも成功扱い）。
-  - Drive アップロードは `AppPrefs.snapshot` の設定を確認し、エンジンとフォルダ ID が揃っている場合のみ行う。
-  - 成功したら `markUploaded`、HTTP エラーや認証エラー時は `markExportError` で `lastError` を保存。
-  - ZIP ファイルは成功 / 失敗にかかわらず必ず削除してストレージ肥大化を防ぐ。
-  - アップロードが成功し、その日にレコードが存在する場合のみ `StorageService.deleteLocations` で当日のレコードを削除。
-
----
-
-## UI / Compose ガイドライン (`:app`)
-
-- UI 層は Jetpack Compose を使用し、次のパターンに従います。
-  - 画面レベルの Composable: `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen` など
-  - ViewModel は `viewModel()` / `AndroidViewModel` で生成し、`viewModelScope` で非同期処理を行う
-  - 状態は `StateFlow` / `uiState` として公開し、Compose に渡す
-
-- `App` / `MainActivity` / `AppRoot`:
-  - `App.onCreate()` で  
-    `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))` を呼び、バックグラウンド用 Drive トークンプロバイダを登録。
-  - 同じく `App.onCreate()` で `MidnightExportScheduler.scheduleNext(this)` を呼び、日次エクスポート Worker をスケジュール。
-  - `MainActivity` では `ActivityResultContracts.RequestMultiplePermissions` で権限をリクエストし、許可後に `GeoLocationService` を起動。
-  - ナビゲーションは 2 段階の `NavHost` 構成:
-    - Activity 直下の `NavHost`: `"home"`, `"drive_settings"`。AppBar の Drive メニューから Drive 設定画面へ遷移。
-    - `AppRoot` 内の `NavHost`: `"home"`, `"pickup"`。AppBar の Pickup ボタンで Home / Pickup を切り替え。
-  - AppBar は Drive 設定画面・Pickup 画面へのナビゲーションを提供し、サービスの Start/Stop トグルは `ServiceToggleAction` にカプセル化。
-
----
-
-## テスト・セキュリティ・その他
-
-- ユニットテストは `src/test/java`、計測 / Compose UI テストは `src/androidTest/java` に配置。
-  - Drive 連携のテストでは `GoogleDriveTokenProvider` と HTTP クライアントをモックしてテストします。
-
-- `local.properties`, `secrets.properties`, `google-services.json` などの機密ファイルは Git にコミットしないでください。  
-  テンプレート + ローカルファイルで運用します。
-
-- Google 認証や Drive 連携の挙動を変更した場合は、README（EN/JA/ES）に記載された OAuth スコープやリダイレクト URI が  
-  Cloud Console の設定と一致していることを確認してください。
-
-- AppAuth と Credential Manager では **別々のクライアント ID** を使用します。
-  - Credential Manager – `CREDENTIAL_MANAGER_SERVER_CLIENT_ID`（Web / サーバクライアント）
-  - AppAuth – `APPAUTH_CLIENT_ID`（インストールアプリ + カスタム URI スキーム）
-  - これらを混在させると `invalid_request`（例: "Custom URI scheme is not enabled / not allowed"）などのエラー原因になります。
-
----
-
-## 公開 API サーフェス（ライブラリ）
-
-- `:storageservice`:
-  - `StorageService`, `LocationSample`, `ExportedDay`, `SettingsRepository`
-- `:dataselector`:
-  - `SelectorCondition`, `SortOrder`, `SelectedSlot`
-  - `LocationSampleSource`, `SelectorRepository`, `BuildSelectedSlots`, `SelectorPrefs`
-- `:datamanager`:
-  - 認証 / トークン: `GoogleDriveTokenProvider`, `DriveTokenProviderRegistry`
-  - Drive 設定: `DrivePrefsRepository`
-  - Drive API: `DriveApiClient`, `DriveFolderId`, `UploadResult`
-  - アップロード / エクスポート: `Uploader`, `UploaderFactory`, `GeoJsonExporter`
-  - Worker: `MidnightExportWorker`, `MidnightExportScheduler`
-- `:deadreckoning`:
-  - `DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`
-
-ここに列挙されていない型は、可能な限り `internal` などで非公開のままにし、  
-ライブラリとしての公開バイナリ API を小さく安定したものに保ってください。
+- 実装や設計を変更する際は、英語版 `AGENTS.md` とこの日本語サマリの両方を更新し、
+  - レイヤ境界（`:deadreckoning` / `:core` / `:app`）を越える責務が混ざらないか、
+  - Map 表示仕様（Polyline / Apply/Cancel / Count / debug overlay）との整合性
+  を意識してください。
+- 本ファイルはドキュメント専用のため、日本語（マルチバイト文字）の使用を許可しますが、**コード・コメント・文字列リテラル** は ASCII のみとしてください（`AGENTS.md` の方針に従うこと）。
 

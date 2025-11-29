@@ -56,7 +56,7 @@ Dirección aproximada de dependencias:
 
 - **Dead Reckoning (`:deadreckoning`)**  
   Proporciona un API público (`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`) y un motor interno (`DeadReckoningEngine`, `DeadReckoningImpl`, etc.).  
-  `GeoLocationService` crea instancias de DR mediante `DeadReckoningFactory.create(applicationContext)` y las controla con `start()` / `stop()`.
+  `GeoLocationService` crea instancias de DR mediante `DeadReckoningFactory.create(applicationContext)` y las controla con `start()` / `stop()`. Los fixes de GPS se tratan como anclas fuertes: cada fix restablece la posición interna de DR a la lat/lon de GPS y mezcla la velocidad con `velocityGain`. El motor aplica un límite físico de velocidad por paso (`maxStepSpeedMps`) para descartar picos de IMU y expone `isLikelyStatic()` para una detección simple de estado estático (estilo ZUPT). Antes del primer fix de GPS, `predict()` puede devolver una lista vacía porque la posición absoluta aún no está inicializada.
 
 - **Exportación diaria (`MidnightExportWorker` / `MidnightExportScheduler`)**  
   Pipeline basado en WorkManager que:
@@ -78,7 +78,7 @@ Dirección aproximada de dependencias:
   La aplicación usa una estructura `NavHost` de dos niveles:
   - A nivel de Activity: destinos `"home"` y `"drive_settings"` (desde el menú de Drive en la AppBar).
   - A nivel de app: destinos `"home"` y `"pickup"` (botón Pickup de la AppBar).  
-  Los permisos se gestionan mediante `ActivityResultContracts.RequestMultiplePermissions`, y el interruptor Start/Stop está encapsulado en `ServiceToggleAction`.
+  Los permisos se gestionan mediante `ActivityResultContracts.RequestMultiplePermissions`, y el interruptor Start/Stop está encapsulado en `ServiceToggleAction`. La pantalla de mapa (pestaña `Map` en `GeoLocationProviderScreen`) usa MapConductor con backend de Google Maps y visualiza las filas recientes de `LocationSample` como polilíneas: DeadReckoning como polilínea roja y más fina dibujada delante, y GPS como polilínea azul y más gruesa dibujada detrás. Los checkboxes para `GPS` y `DeadReckoning`, el campo `Count (1-1000)` y el botón `Apply` / `Cancel` controlan qué proveedores se muestran y cuántos puntos se tienen en cuenta; la superposición de depuración en la esquina superior derecha muestra los contadores `GPS`, `DR` y `ALL` como `mostrados / total en BD`.
 
 ---
 

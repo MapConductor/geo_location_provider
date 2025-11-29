@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.core.circle.Circle
 import com.mapconductor.core.features.GeoPointImpl
 import com.mapconductor.core.map.MapCameraPositionImpl
 import com.mapconductor.core.polyline.Polyline
@@ -165,6 +166,22 @@ fun MapScreen() {
                             id = "dr-polyline",
                             strokeColor = Color.Red,
                             strokeWidth = 1.5.dp
+                        )
+                    }
+
+                    // Draw accuracy circle for the latest GPS sample, if available.
+                    val latestGpsSample = state.markers.firstOrNull { sample ->
+                        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+                    }
+                    if (latestGpsSample != null && latestGpsSample.accuracy > 0f) {
+                        val center = GeoPointImpl.fromLatLong(latestGpsSample.lat, latestGpsSample.lon)
+                        Circle(
+                            center = center,
+                            radius = latestGpsSample.accuracy.toDouble(),
+                            id = "gps-accuracy-circle",
+                            strokeColor = Color.Blue,
+                            strokeWidth = 2.dp,
+                            fillColor = Color.Blue.copy(alpha = 0.2f)
                         )
                     }
                 }
