@@ -171,7 +171,6 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (currentFilter != null) {
             // Cancel: clear filter and return to editable state.
             appliedFilter.value = null
-            mapSession.value = mapSession.value + 1
             return
         }
 
