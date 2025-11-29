@@ -180,7 +180,7 @@ fun MapScreen() {
                             radius = latestGpsSample.accuracy.toDouble(),
                             id = "gps-accuracy-circle",
                             strokeColor = Color.Blue,
-                            strokeWidth = 2.dp,
+                            strokeWidth = 0.5.dp,
                             fillColor = Color.Blue.copy(alpha = 0.2f)
                         )
                     }
