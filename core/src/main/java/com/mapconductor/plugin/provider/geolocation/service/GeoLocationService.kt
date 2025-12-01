@@ -86,10 +86,6 @@ class GeoLocationService : Service() {
     @Volatile private var lastCourseLat: Double? = null
     @Volatile private var lastCourseLon: Double? = null
 
-    // Last GPS fix position used as an anchor for simple DR static clamping.
-    @Volatile private var lastGpsLat: Double? = null
-    @Volatile private var lastGpsLon: Double? = null
-
     fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
 
@@ -206,8 +202,6 @@ class GeoLocationService : Service() {
         // Reset simple DR anchor state so that the next start does not
         // accidentally reuse stale GPS information.
         lastFixMillis = null
-        lastGpsLat = null
-        lastGpsLon = null
 
         // Important:
         // Start/Stop button checks whether it can bind to the service.
@@ -282,12 +276,9 @@ class GeoLocationService : Service() {
             else -> Double.NaN
         }
 
-        // Update last position for the next course calculation and keep
-        // the latest GPS fix as an anchor for DR static handling.
+        // Update last position for the next course calculation.
         lastCourseLat = observation.lat
         lastCourseLon = observation.lon
-        lastGpsLat = observation.lat
-        lastGpsLon = observation.lon
 
           val used: Int? = observation.gnssUsed
           val total: Int? = observation.gnssTotal
@@ -683,28 +674,8 @@ class GeoLocationService : Service() {
     }
 
     private fun adjustDrSample(lat: Double, lon: Double, speedMps: Double): Pair<Double, Double> {
-        // For tuning: temporarily disable additional GPS-based clamping so that
-        // DR predictions reflect the engine output without being snapped back
-        // to the last GPS fix at the service layer.
+        // Hook for optional service-layer adjustments (for example additional
+        // clamping near anchors). Currently returns the engine output as-is.
         return lat to lon
-    }
-
-    private fun haversineMeters(
-        lat1: Double,
-        lon1: Double,
-        lat2: Double,
-        lon2: Double
-    ): Double {
-        val r = 6371000.0
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
-        val rLat1 = Math.toRadians(lat1)
-        val rLat2 = Math.toRadians(lat2)
-        val a =
-            Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0) +
-                Math.cos(rLat1) * Math.cos(rLat2) *
-                Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0)
-        val c = 2.0 * Math.asin(Math.sqrt(a))
-        return r * c
     }
 }

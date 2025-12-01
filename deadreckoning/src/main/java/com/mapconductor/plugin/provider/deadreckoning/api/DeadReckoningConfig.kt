@@ -21,8 +21,8 @@ data class DeadReckoningConfig(
     /**
      * Maximum physically plausible horizontal speed for IMU integration (m/s).
      *
-     * - Typical values: 50f–340f (commercial aircraftまでを含めるなら 340f 程度).
-     * - 0 以下を指定すると、この速度フィルタは無効になります。
+     * - Typical values: around 50f when very high speeds (for example aircraft) must be tolerated.
+     * - When set to 0 or a negative value, this per-step speed guard is disabled and all steps are accepted.
      */
     val maxStepSpeedMps: Float = 340f,
     /**
@@ -35,3 +35,4 @@ data class DeadReckoningConfig(
     /** Moving window size used for static detection. */
     val windowSize: Int = 64
 )
+
