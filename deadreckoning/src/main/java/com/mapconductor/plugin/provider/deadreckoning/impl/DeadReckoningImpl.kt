@@ -37,7 +37,7 @@ internal class DeadReckoningImpl(
                 if (prev != null && s.acc != null) {
                     val dt = ((s.timestampNanos - prev).toDouble() / 1_000_000_000.0).toFloat()
                     val dtClamped = max(0.002f, kotlin.math.min(dt, 0.05f)) // Guard for about 20Hz to 500Hz.
-                    engine.onSensor(s.acc, s.gyro, s.mag, dtClamped)
+                    engine.onSensor(s.acc, s.gyro, s.mag, s.rotVec, dtClamped)
                 }
             }
         }
@@ -50,7 +50,7 @@ internal class DeadReckoningImpl(
     }
 
     override suspend fun submitGpsFix(fix: GpsFix) {
-        engine.submitGpsFix(fix.lat, fix.lon, fix.accuracyM, fix.speedMps)
+        engine.submitGpsFix(fix.timestampMillis, fix.lat, fix.lon, fix.accuracyM, fix.speedMps)
     }
 
     override suspend fun predict(fromMillis: Long, toMillis: Long): List<PredictedPoint> {

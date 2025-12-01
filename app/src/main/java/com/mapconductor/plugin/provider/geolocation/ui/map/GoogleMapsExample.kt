@@ -95,7 +95,7 @@ fun MapScreen() {
             OutlinedTextField(
                 value = state.limitText,
                 onValueChange = { vm.onLimitChanged(it) },
-                label = { Text("Count (1-1000)") },
+                label = { Text("Count (1-5000)") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 enabled = !state.filterApplied,

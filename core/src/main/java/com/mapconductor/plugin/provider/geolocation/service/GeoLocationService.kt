@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoning
+import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningConfig
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningFactory
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.GpsFix
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedPoint
@@ -105,7 +106,14 @@ class GeoLocationService : Service() {
             })
         }
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
-        dr = DeadReckoningFactory.create(applicationContext).also { it.start() }
+        // Configure DeadReckoning with slightly stricter static detection so that
+        // walking is less likely to be treated as static and clamped to GPS.
+        val drConfig = DeadReckoningConfig(
+            staticAccelVarThreshold = 0.01f,
+            staticGyroVarThreshold = 0.003f * 0.003f,
+            windowSize = 32
+        )
+        dr = DeadReckoningFactory.create(applicationContext, drConfig).also { it.start() }
         ensureChannel()
         // GPS sampling interval is always synced from SettingsRepository.intervalSecFlow().
         serviceScope.launch {
@@ -416,13 +424,13 @@ class GeoLocationService : Service() {
                                         cn0 = 0.0,
                                         batteryPercent = bat.percent,
                                         isCharging = bat.isCharging
-                                    )
-                                val (adjLat, adjLon) =
-                                    adjustDrSample(
-                                        lat = original.lat,
-                                        lon = original.lon,
-                                        timeMillis = original.timeMillis,
-                                    )
+                                      )
+                                  val (adjLat, adjLon) =
+                                      adjustDrSample(
+                                          lat = original.lat,
+                                          lon = original.lon,
+                                          speedMps = original.speedMps,
+                                      )
                                 val sample =
                                     if (adjLat != original.lat || adjLon != original.lon) {
                                         original.copy(lat = adjLat, lon = adjLon)
@@ -438,7 +446,7 @@ class GeoLocationService : Service() {
                                     "DB/TRACE",
                                     "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
                                 )
-                            } catch (e: Throwable) {
+                              } catch (e: Throwable) {
                                 Log.e(
                                     "DB/TRACE",
                                     "insert failed provider=dead_reckoning(backfill)",
@@ -531,7 +539,7 @@ class GeoLocationService : Service() {
                                     adjustDrSample(
                                         lat = sample.lat,
                                         lon = sample.lon,
-                                        timeMillis = sample.timeMillis,
+                                        speedMps = sample.speedMps,
                                     )
                                 val finalSample =
                                     if (adjLat != sample.lat || adjLon != sample.lon) {
@@ -674,26 +682,11 @@ class GeoLocationService : Service() {
         return h
     }
 
-    private fun adjustDrSample(lat: Double, lon: Double, timeMillis: Long): Pair<Double, Double> {
-        val d = dr ?: return lat to lon
-        // Without any GPS anchor there is nothing meaningful to clamp to.
-        val anchorLat = lastGpsLat ?: return lat to lon
-        val anchorLon = lastGpsLon ?: return lat to lon
-
-        // Only apply additional clamping when DR believes the device is almost static.
-        if (!d.isLikelyStatic()) return lat to lon
-
-        // If DR walks away from the last GPS by more than a small radius while
-        // the device is static, snap it back to the anchor. This is a light
-        // ZUPT-style correction on top of the engine's own speed sanity checks.
-        val dist = haversineMeters(anchorLat, anchorLon, lat, lon)
-        val clampRadiusM = 2.0
-        return if (dist > clampRadiusM) {
-            Log.d("DR/ZUPT", "static clamp dist=${dist}m -> anchor GPS")
-            anchorLat to anchorLon
-        } else {
-            lat to lon
-        }
+    private fun adjustDrSample(lat: Double, lon: Double, speedMps: Double): Pair<Double, Double> {
+        // For tuning: temporarily disable additional GPS-based clamping so that
+        // DR predictions reflect the engine output without being snapped back
+        // to the last GPS fix at the service layer.
+        return lat to lon
     }
 
     private fun haversineMeters(

@@ -27,7 +27,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val DEFAULT_LIMIT = 100
-        private const val SOURCE_LIMIT = 1000
+        private const val SOURCE_LIMIT = 5000
     }
 
     private val gpsEnabled = MutableStateFlow(false)

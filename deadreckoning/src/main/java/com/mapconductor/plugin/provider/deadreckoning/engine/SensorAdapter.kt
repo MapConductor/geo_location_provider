@@ -19,7 +19,8 @@ internal class SensorAdapter(
         val timestampNanos: Long,
         val acc: FloatArray?,   // m/s^2
         val gyro: FloatArray?,  // rad/s
-        val mag: FloatArray?    // microtesla
+        val mag: FloatArray?,   // microtesla
+        val rotVec: FloatArray? // unit quaternion-like rotation vector
     )
 
     fun isImuCapable(): Boolean {
@@ -39,22 +40,28 @@ internal class SensorAdapter(
         val acc = manager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         val gyro = manager?.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
         val mag  = manager?.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+        val rot  = manager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
 
         val listener = object : SensorEventListener {
             var lastAcc: FloatArray? = null
             var lastGyro: FloatArray? = null
             var lastMag: FloatArray? = null
+            var lastRot: FloatArray? = null
 
             override fun onSensorChanged(event: SensorEvent) {
                 when (event.sensor.type) {
                     Sensor.TYPE_ACCELEROMETER -> lastAcc = event.values.clone()
                     Sensor.TYPE_GYROSCOPE -> lastGyro = event.values.clone()
                     Sensor.TYPE_MAGNETIC_FIELD -> lastMag = event.values.clone()
+                    Sensor.TYPE_ROTATION_VECTOR -> lastRot = event.values.clone()
                 }
                 trySend(
                     Sample(
                         timestampNanos = event.timestamp,
-                        acc = lastAcc, gyro = lastGyro, mag = lastMag
+                        acc = lastAcc,
+                        gyro = lastGyro,
+                        mag = lastMag,
+                        rotVec = lastRot
                     )
                 )
             }
@@ -65,10 +72,10 @@ internal class SensorAdapter(
         acc?.also { manager?.registerListener(listener, it, rate) }
         gyro?.also { manager?.registerListener(listener, it, rate) }
         mag?.also  { manager?.registerListener(listener, it, rate) }
+        rot?.also  { manager?.registerListener(listener, it, rate) }
 
         awaitClose {
             manager?.unregisterListener(listener)
         }
     }
 }
-
