@@ -205,6 +205,32 @@ fun MapScreen() {
                         text = "ALL : ${state.displayedTotalCount} / ${state.dbTotalCount}",
                         color = Color.White
                     )
+                    val staticLabel = if (state.debugIsStatic) "YES" else "NO"
+                    Text(
+                        text = "Static: $staticLabel",
+                        color = Color.White
+                    )
+                    val drDist = state.debugDrToGpsDistanceM
+                    if (drDist != null) {
+                        Text(
+                            text = "DR-GPS: ${"%.1f".format(drDist)} m",
+                            color = Color.White
+                        )
+                    }
+                    val acc = state.debugLatestGpsAccuracyM
+                    if (acc != null && acc > 0f) {
+                        Text(
+                            text = "GPS acc: ${"%.1f".format(acc)} m",
+                            color = Color.White
+                        )
+                    }
+                    val gpsScale = state.debugGpsInfluenceScale
+                    if (gpsScale != null) {
+                        Text(
+                            text = "GPS weight: ${"%.2f".format(gpsScale)}",
+                            color = Color.White
+                        )
+                    }
                 }
             }
         }
