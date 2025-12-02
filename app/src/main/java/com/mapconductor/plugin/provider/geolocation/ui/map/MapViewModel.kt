@@ -144,36 +144,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     null
                 }
 
-            // Simple static heuristic based on recent GPS movement: if the latest
-            // GPS window (up to 30 seconds) stays within a small radius and has
-            // very low speed, treat it as likely static.
-            val debugIsStatic: Boolean = run {
-                if (latestGps == null) {
-                    false
-                } else {
-                    val windowStart = latestGps.timeMillis - 30_000L
-                    val recentGps = normalized
-                        .asSequence()
-                        .map { it.first }
-                        .filter { Formatters.providerKind(it.provider) == ProviderKind.Gps }
-                        .filter { it.timeMillis >= windowStart }
-                        .toList()
-                    if (recentGps.size < 3) {
-                        false
-                    } else {
-                        val first = recentGps.last()
-                        val last = recentGps.first()
-                        val dist = distanceMeters(
-                            first.lat,
-                            first.lon,
-                            last.lat,
-                            last.lon
-                        )
-                        val maxSpeed = recentGps.maxOf { it.speedMps }
-                        dist <= 5.0 && maxSpeed <= 0.5
-                    }
-                }
-            }
+            // Read engine-side static flag from DrDebugState so that the
+            // overlay reflects the internal DeadReckoning isLikelyStatic()
+            // state rather than a separate GPS-only heuristic.
+            val debugIsStatic: Boolean =
+                com.mapconductor.plugin.provider.geolocation.debug.DrDebugState
+                    .snapshot
+                    .value
+                    .isStatic
 
             val latestGpsAccuracy = latestGps?.accuracy
             val latestGpsSpeedMps = latestGps?.speedMps

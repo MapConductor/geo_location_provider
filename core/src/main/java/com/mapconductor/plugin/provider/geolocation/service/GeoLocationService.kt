@@ -20,6 +20,7 @@ import com.mapconductor.plugin.provider.geolocation.gps.GpsLocationEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsObservation
 import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
+import com.mapconductor.plugin.provider.geolocation.debug.DrDebugState
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import androidx.core.app.NotificationCompat
 import com.mapconductor.plugin.provider.storageservice.StorageService
@@ -482,6 +483,18 @@ class GeoLocationService : Service() {
                         }
                         val p = pts.lastOrNull()
                         if (p != null) {
+                            // Update DR debug state so that the app-side
+                            // overlay can display the current isLikelyStatic()
+                            // flag from the engine.
+                            val staticFlag =
+                                try {
+                                    d.isLikelyStatic()
+                                } catch (t: Throwable) {
+                                    Log.w(TAG, "dr.isLikelyStatic()", t)
+                                    false
+                                }
+                            DrDebugState.update(isStatic = staticFlag, lastUpdateMillis = now)
+
                             val bat = BatteryStatusReader.read(applicationContext)
 
                             // Decide heading / course for DR (real-time).
