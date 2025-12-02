@@ -103,14 +103,15 @@ class GeoLocationService : Service() {
             })
         }
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
-        // Configure DeadReckoning with slightly stricter static detection so that
-        // walking is less likely to be treated as static and clamped to GPS,
-        // and use a stronger velocityGain so DR speed follows GPS more closely.
+        // Configure DeadReckoning with relaxed static detection so that
+        // desk / slow-move scenarios are more likely to be treated as
+        // static, and use a stronger velocityGain so DR speed follows
+        // GPS more closely.
         val drConfig = DeadReckoningConfig(
-            staticAccelVarThreshold = 0.01f,
-            staticGyroVarThreshold = 0.003f * 0.003f,
+            staticAccelVarThreshold = 0.03f,
+            staticGyroVarThreshold = 0.005f * 0.005f,
             velocityGain = 0.4f,
-            windowSize = 32
+            windowSize = 64
         )
         dr = DeadReckoningFactory.create(applicationContext, drConfig).also { it.start() }
         ensureChannel()
