@@ -160,7 +160,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             val gpsInfluenceScale: Double? =
                 latestGpsAccuracy?.takeIf { it > 0f && !it.isNaN() }?.let { acc ->
                     val s = 10.0 / acc.toDouble()
-                    s.coerceIn(0.3, 1.0)
+                    s.coerceIn(0.1, 1.0)
                 }
 
             UiState(

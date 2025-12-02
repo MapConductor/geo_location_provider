@@ -689,8 +689,69 @@ class GeoLocationService : Service() {
     }
 
     private fun adjustDrSample(lat: Double, lon: Double, speedMps: Double): Pair<Double, Double> {
-        // Hook for optional service-layer adjustments (for example additional
-        // clamping near anchors). Currently returns the engine output as-is.
-        return lat to lon
+        // When DeadReckoning reports that the device is likely static, clamp
+        // DR output within a small radius around the latest GPS position so
+        // that desk / static scenarios do not accumulate visible drift.
+        val drEngine = dr
+        val anchorLat = lastCourseLat
+        val anchorLon = lastCourseLon
+        if (drEngine == null || anchorLat == null || anchorLon == null) {
+            return lat to lon
+        }
+
+        val isStatic: Boolean =
+            try {
+                drEngine.isLikelyStatic()
+            } catch (t: Throwable) {
+                Log.w(TAG, "adjustDrSample: dr.isLikelyStatic() failed", t)
+                false
+            }
+
+        if (!isStatic) {
+            return lat to lon
+        }
+
+        // Compute distance from latest GPS anchor to current DR position.
+        val base = android.location.Location("gps").apply {
+            latitude = anchorLat
+            longitude = anchorLon
+        }
+        val drLoc = android.location.Location("dr").apply {
+            latitude = lat
+            longitude = lon
+        }
+        val dist = base.distanceTo(drLoc) // [m]
+
+        // If already within the clamp radius, keep DR as-is.
+        val clampRadiusM = 2.0f
+        if (dist <= clampRadiusM || dist.isNaN()) {
+            return lat to lon
+        }
+
+        // Project DR back onto the circle around the anchor with radius
+        // clampRadiusM along the line from anchor to DR.
+        val bearingDeg = base.bearingTo(drLoc)
+        val r = 6371000.0
+        val angDist = clampRadiusM / r
+        val brng = Math.toRadians(bearingDeg.toDouble())
+        val lat1 = Math.toRadians(anchorLat)
+        val lon1 = Math.toRadians(anchorLon)
+
+        val sinLat1 = Math.sin(lat1)
+        val cosLat1 = Math.cos(lat1)
+        val sinAng = Math.sin(angDist)
+        val cosAng = Math.cos(angDist)
+
+        val lat2 = Math.asin(
+            sinLat1 * cosAng + cosLat1 * sinAng * Math.cos(brng)
+        )
+        val lon2 = lon1 + Math.atan2(
+            Math.sin(brng) * sinAng * cosLat1,
+            cosAng - sinLat1 * Math.sin(lat2)
+        )
+
+        val adjLat = Math.toDegrees(lat2)
+        val adjLon = Math.toDegrees(lon2)
+        return adjLat to adjLon
     }
 }

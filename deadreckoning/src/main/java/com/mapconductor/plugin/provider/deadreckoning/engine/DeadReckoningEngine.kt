@@ -293,7 +293,7 @@ internal class DeadReckoningEngine(
             val accuracyScale =
                 if (accM != null && !accM.isNaN() && accM > 0f) {
                     val s = 10.0 / accM.toDouble()
-                    s.coerceIn(0.3, 1.0)
+                    s.coerceIn(0.1, 1.0)
                 } else {
                     1.0
                 }
