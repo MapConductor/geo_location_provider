@@ -70,9 +70,11 @@ internal class DeadReckoningEngine(
     private val walkingParams = MotionParams(
         forwardDeadzoneMps2 = 0.05f,
         forwardMaxMps2 = 3.0f,
-        speedFrictionMps2 = 0.1f,
-        maxSpeedMps = 4.0f, // Slightly above typical walking / jogging.
-        posGain = 0.1,
+        // Make friction and GPS position blending slightly stronger so that
+        // DR keeps up with walking speed without trailing far behind GPS.
+        speedFrictionMps2 = 0.06f,
+        maxSpeedMps = 4.5f, // Slightly above typical walking / jogging.
+        posGain = 0.2,
         velocityGain = config.velocityGain
     )
 
@@ -267,17 +269,16 @@ internal class DeadReckoningEngine(
 
         // Position correction policy:
         // - On the first GPS fix, hard-anchor the internal position.
-        // - On subsequent fixes, blend gradually toward GPS so that DR can
-        //   move away from the latest fix while still being gently corrected.
+        // - On subsequent fixes, blend toward GPS based on distance and
+        //   reported accuracy so that DR follows GPS but is not dragged
+        //   excessively by noisy fixes.
         if (!hasGpsFix) {
             // No previous anchor: use GPS as-is.
             state.lat = lat
             state.lon = lon
         } else {
             // Distance-based blend so that small corrections stay smooth while
-            // large jumps converge more quickly. Extremely large jumps may be
-            // treated almost like a reset to avoid long-lived pull toward old
-            // anchors in vehicle use cases.
+            // large jumps converge more quickly.
             val dist = distanceMeters(state.lat, state.lon, lat, lon)
             val base = motionParams.posGain
             val distGain =
@@ -286,11 +287,13 @@ internal class DeadReckoningEngine(
                     dist <= 150.0 -> max(base, 0.5)
                     else -> 1.0
                 }
-            // When reported accuracy is very poor, avoid snapping fully to the
-            // new fix even if the distance is large.
+            // When reported accuracy is poor, scale down the influence of
+            // this GPS fix. Use a simple 10m / accuracy rule with a lower
+            // bound so that extremely low gains are avoided.
             val accuracyScale =
-                if (accM != null && accM > 50f) {
-                    0.5
+                if (accM != null && !accM.isNaN() && accM > 0f) {
+                    val s = 10.0 / accM.toDouble()
+                    s.coerceIn(0.3, 1.0)
                 } else {
                     1.0
                 }
