@@ -38,6 +38,10 @@ internal class DeadReckoningEngine(
     private val unc = DrUncertainty()
     private var hasGpsFix = false
     private var mode: MotionMode = MotionMode.Walking
+    private var isStaticInternal: Boolean = false
+    private var gpsOutlierStreak: Int = 0
+    private var staticStreak: Int = 0
+    private var motionStreak: Int = 0
 
     // Gravity estimation filter.
     private var gEst = floatArrayOf(0f, 0f, 9.81f)
@@ -117,7 +121,60 @@ internal class DeadReckoningEngine(
     fun isLikelyStatic(): Boolean {
         val aVar = aWin.variance()
         val wVar = wWin.variance()
-        return aVar != null && wVar != null && aVar < aVarTh && wVar < wVarTh
+        if (aVar == null || wVar == null) {
+            return isStaticInternal
+        }
+
+        val speed = state.speedMps
+
+        // Base threshold for entering static based on accelerometer variance.
+        val enterAccel = aVarTh
+
+        // Stricter condition: very low acceleration variance.
+        val strictEnter = aVar < enterAccel
+
+        // When speed is almost zero, allow a much wider acceleration variance
+        // so that hand-held operations at almost the same position still count
+        // as static, even if gyro variance is large due to tilting.
+        val relaxedEnter =
+            speed < 0.3f && aVar < enterAccel * 8.0f
+
+        // Leave static only when speed and acceleration variance clearly
+        // indicate motion. Gyro variance is intentionally ignored here so
+        // that pure rotation at one place does not break the static state.
+        val strongMotion = speed > 1.5f
+        val exitAccel = enterAccel * 12.0f
+
+        val staticCandidate = strictEnter || relaxedEnter
+        val motionCandidate = strongMotion || aVar > exitAccel
+
+        if (staticCandidate) {
+            staticStreak++
+        } else {
+            staticStreak = 0
+        }
+
+        if (motionCandidate) {
+            motionStreak++
+        } else {
+            motionStreak = 0
+        }
+
+        // Simple time hysteresis in sample domain. With a typical IMU
+        // rate this corresponds to roughly 0.5-1.0 seconds of sustained
+        // static / motion conditions before flipping the flag.
+        val enterSamples = 24
+        val exitSamples = 24
+
+        if (!isStaticInternal && staticStreak >= enterSamples) {
+            isStaticInternal = true
+            motionStreak = 0
+        } else if (isStaticInternal && motionStreak >= exitSamples) {
+            isStaticInternal = false
+            staticStreak = 0
+        }
+
+        return isStaticInternal
     }
 
     fun onSensor(
@@ -258,10 +315,59 @@ internal class DeadReckoningEngine(
         // Update motion mode state from GPS speed.
         updateMotionMode(now, speedMps)
 
+        val rawAccuracyM: Float? =
+            accM?.takeIf { it > 0f && !it.isNaN() }
+
+        // Distance between current DR position and this GPS fix, when we
+        // already have an internal anchor.
+        val distToCurrent: Double? =
+            if (hasGpsFix) {
+                distanceMeters(state.lat, state.lon, lat, lon)
+            } else {
+                null
+            }
+
+        // Simple gating for clearly inconsistent GPS fixes so that DR is
+        // not dragged by very noisy points (for example, large jumps under
+        // poor accuracy). However, DR itself can drift over time, so this
+        // gating must never suppress GPS corrections indefinitely. A small
+        // streak counter and an emergency distance guard ensure that GPS
+        // eventually re-anchors DR even after a series of rejected fixes.
+        var isOutlier = false
+        if (distToCurrent != null && rawAccuracyM != null) {
+            val candidate = isGpsFixOutlier(
+                distM = distToCurrent,
+                accM = rawAccuracyM,
+                mode = mode
+            )
+            if (candidate) {
+                gpsOutlierStreak += 1
+                val emergencyReset =
+                    distToCurrent > 3_000.0 || gpsOutlierStreak >= 3
+                if (!emergencyReset) {
+                    isOutlier = true
+                } else {
+                    if (debugLogging) {
+                        Log.d(
+                            "DR/GPS",
+                            "force-accept after streak=$gpsOutlierStreak dist=${"%.1f".format(distToCurrent)}m acc=$rawAccuracyM"
+                        )
+                    }
+                    gpsOutlierStreak = 0
+                }
+            } else {
+                gpsOutlierStreak = 0
+            }
+        } else {
+            gpsOutlierStreak = 0
+        }
+
         // If we already have a GPS anchor and the device is moving,
         // use the course between the previous and current fix to gently
         // steer the internal heading toward the true travel direction.
-        if (hasGpsFix && speedMps != null && speedMps > 0.5f) {
+        // Skip this step for outlier fixes so that heading is not twisted
+        // toward obviously wrong positions.
+        if (!isOutlier && hasGpsFix && speedMps != null && speedMps > 0.5f) {
             val courseRad = bearingRad(state.lat, state.lon, lat, lon)
             val blend = 0.2f
             state.headingRad = wrapAngle(lerpAngle(state.headingRad, courseRad, blend))
@@ -276,10 +382,10 @@ internal class DeadReckoningEngine(
             // No previous anchor: use GPS as-is.
             state.lat = lat
             state.lon = lon
-        } else {
+        } else if (!isOutlier) {
             // Distance-based blend so that small corrections stay smooth while
             // large jumps converge more quickly.
-            val dist = distanceMeters(state.lat, state.lon, lat, lon)
+            val dist = distToCurrent ?: 0.0
             val base = motionParams.posGain
             val distGain =
                 when {
@@ -291,8 +397,8 @@ internal class DeadReckoningEngine(
             // this GPS fix. Use a simple 10m / accuracy rule with a lower
             // bound so that extremely low gains are avoided.
             val accuracyScale =
-                if (accM != null && !accM.isNaN() && accM > 0f) {
-                    val s = 10.0 / accM.toDouble()
+                if (rawAccuracyM != null) {
+                    val s = 10.0 / rawAccuracyM.toDouble()
                     s.coerceIn(0.1, 1.0)
                 } else {
                     1.0
@@ -300,6 +406,11 @@ internal class DeadReckoningEngine(
             val posGain = (distGain * accuracyScale).coerceIn(0.0, 1.0)
             state.lat += posGain * (lat - state.lat)
             state.lon += posGain * (lon - state.lon)
+        } else if (debugLogging) {
+            Log.d(
+                "DR/GPS",
+                "suppress outlier fix dist=${"%.1f".format(distToCurrent)}m acc=${rawAccuracyM} streak=$gpsOutlierStreak"
+            )
         }
 
         // Blend speed toward GPS speed when available.
@@ -348,6 +459,20 @@ internal class DeadReckoningEngine(
                 sin(dLon / 2.0) * sin(dLon / 2.0)
         val c = 2.0 * asin(sqrt(a))
         return r * c
+    }
+
+    private fun isGpsFixOutlier(distM: Double, accM: Float?, mode: MotionMode): Boolean {
+        val accuracy = accM?.takeIf { it > 0f && !it.isNaN() } ?: return false
+        // Require a reasonably large separation before treating a fix as an
+        // outlier so that normal DR drift does not suppress GPS corrections.
+        if (distM <= 300.0) return false
+        val ratio = distM / accuracy.toDouble()
+        val threshold =
+            when (mode) {
+                MotionMode.Walking -> 8.0
+                MotionMode.Vehicle -> 6.0
+            }
+        return ratio > threshold
     }
 
     private fun updateMotionMode(nowMillis: Long, speedMps: Float?) {

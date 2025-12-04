@@ -104,14 +104,14 @@ class GeoLocationService : Service() {
         }
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
         // Configure DeadReckoning with relaxed static detection so that
-        // desk / slow-move scenarios are more likely to be treated as
-        // static, and use a stronger velocityGain so DR speed follows
-        // GPS more closely.
+        // desk / slow-move scenarios (hand-held use at almost the same
+        // position) are treated as static, and use a stronger velocityGain
+        // so DR speed follows GPS more closely.
         val drConfig = DeadReckoningConfig(
-            staticAccelVarThreshold = 0.03f,
-            staticGyroVarThreshold = 0.005f * 0.005f,
+            staticAccelVarThreshold = 0.10f,
+            staticGyroVarThreshold = 0.01f * 0.01f,
             velocityGain = 0.4f,
-            windowSize = 64
+            windowSize = 96
         )
         dr = DeadReckoningFactory.create(applicationContext, drConfig).also { it.start() }
         ensureChannel()
@@ -441,7 +441,7 @@ class GeoLocationService : Service() {
                                     "DB/TRACE",
                                     "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
                                 )
-                              } catch (e: Throwable) {
+                            } catch (e: Throwable) {
                                 Log.e(
                                     "DB/TRACE",
                                     "insert failed provider=dead_reckoning(backfill)",
