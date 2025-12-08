@@ -32,6 +32,10 @@ internal class DeadReckoningImpl(
 ) : DeadReckoning {
 
     companion object {
+        // Switch between the original "alpha" static detector
+        // and the enhanced hybrid implementation.
+        private const val USE_ALPHA_STATIC_DETECTOR = false
+
         // Speed thresholds for hysteresis.
         private const val ENTER_STATIC_SPEED_MPS = 0.8f
         private const val EXIT_STATIC_SPEED_MPS = 1.0f
@@ -44,6 +48,12 @@ internal class DeadReckoningImpl(
         // Duration of the horizontal acceleration window [ms].
         private const val ACC_WINDOW_MILLIS = 1000L
 
+        // Duration thresholds for static hysteresis [ms].
+        // Slightly conservative: enter static after a longer period,
+        // exit static after a shorter period so that moving is favored.
+        private const val STATIC_ENTER_DURATION_MS = 5_000L
+        private const val STATIC_EXIT_DURATION_MS = 500L
+
         // Approximate earth radius in meters.
         private const val EARTH_RADIUS_M = 6371000.0
 
@@ -52,6 +62,9 @@ internal class DeadReckoningImpl(
 
         // Maximum allowed integration gap between accelerometer samples [s].
         private const val MAX_INTEGRATION_GAP_SEC = 5.0
+
+        // High-speed regime where static detection is suppressed [m/s].
+        private const val HIGH_SPEED_SUPPRESS_STATIC_MPS = 5.0
     }
 
     @Volatile
@@ -74,6 +87,10 @@ internal class DeadReckoningImpl(
 
     @Volatile
     private var isStaticFlag: Boolean = false
+    @Volatile
+    private var staticEnterStartMillis: Long? = null
+    @Volatile
+    private var staticExitStartMillis: Long? = null
 
     // 1D DR state along the latest GPS direction.
     private val drLock = Any()
@@ -368,10 +385,15 @@ internal class DeadReckoningImpl(
     }
 
     private fun updateStaticState(fix: GpsFix) {
-        // Static / moving classification is based on GPS speed only so
-        // that hand motions on a mostly stationary user do not flip the
-        // state. Accelerometer is still used in onAccelerometerSample()
-        // to adjust DR speed while in the moving state.
+        if (USE_ALPHA_STATIC_DETECTOR) {
+            updateStaticStateAlpha(fix)
+        } else {
+            updateStaticStateEnhanced(fix)
+        }
+    }
+
+    // Original "alpha" implementation: GPS speed only with simple hysteresis.
+    private fun updateStaticStateAlpha(fix: GpsFix) {
         val speed = fix.speedMps?.takeIf { !it.isNaN() && it >= 0f } ?: 0f
 
         val staticCandidate = speed <= ENTER_STATIC_SPEED_MPS
@@ -382,6 +404,93 @@ internal class DeadReckoningImpl(
         } else if (isStaticFlag && movingCandidate) {
             isStaticFlag = false
         }
+
+        staticEnterStartMillis = null
+        staticExitStartMillis = null
+    }
+
+    private fun updateStaticStateEnhanced(fix: GpsFix) {
+        val nowMillis = fix.timestampMillis
+
+        val effectiveSpeed = computeEffectiveSpeedMpsForStatic(fix)
+        val meanAccel: Float? = synchronized(accelLock) {
+            accelWindow.meanAbs()
+        }
+
+        // High-speed regime: force moving and skip static detection entirely.
+        if (effectiveSpeed >= HIGH_SPEED_SUPPRESS_STATIC_MPS) {
+            isStaticFlag = false
+            staticEnterStartMillis = null
+            staticExitStartMillis = null
+            return
+        }
+
+        val speedLow = effectiveSpeed <= ENTER_STATIC_SPEED_MPS.toDouble()
+        val speedHigh = effectiveSpeed >= EXIT_STATIC_SPEED_MPS.toDouble()
+
+        val accelLow = meanAccel?.let { it <= ACC_STATIC_THRESHOLD } ?: false
+        val accelHigh = meanAccel?.let { it >= ACC_MOVING_THRESHOLD } ?: false
+
+        // When accelerometer window is not ready, fall back to speed-only.
+        val accelOkForStatic = (meanAccel == null) || accelLow
+
+        val staticCandidate = speedLow && accelOkForStatic
+        val movingCandidate = speedHigh || accelHigh
+
+        if (staticCandidate) {
+            val start = staticEnterStartMillis ?: nowMillis
+            staticEnterStartMillis = start
+            val elapsed = nowMillis - start
+            if (!isStaticFlag && elapsed >= STATIC_ENTER_DURATION_MS) {
+                isStaticFlag = true
+                staticExitStartMillis = null
+            }
+        } else {
+            staticEnterStartMillis = null
+        }
+
+        if (movingCandidate) {
+            val start = staticExitStartMillis ?: nowMillis
+            staticExitStartMillis = start
+            val elapsed = nowMillis - start
+            if (isStaticFlag && elapsed >= STATIC_EXIT_DURATION_MS) {
+                isStaticFlag = false
+                staticEnterStartMillis = null
+            }
+        } else {
+            staticExitStartMillis = null
+        }
+    }
+
+    private fun computeEffectiveSpeedMpsForStatic(fix: GpsFix): Double {
+        val gpsSpeed = fix.speedMps
+            ?.takeIf { !it.isNaN() && it >= 0f }
+            ?.toDouble()
+
+        val prevLat = prevHoldLat
+        val prevLon = prevHoldLon
+        val prevTime = prevHoldTimeMillis
+        val lastLat = lastHoldLat
+        val lastLon = lastHoldLon
+        val lastTime = lastHoldTimeMillis
+
+        var holdSpeed: Double? = null
+        if (prevLat != null && prevLon != null && prevTime != null &&
+            lastLat != null && lastLon != null && lastTime != null &&
+            lastTime > prevTime
+        ) {
+            val distanceMeters = distanceMeters(prevLat, prevLon, lastLat, lastLon)
+            val dtSec = (lastTime - prevTime).toDouble() / 1000.0
+            if (dtSec > 0.0) {
+                val v = distanceMeters / dtSec
+                if (v.isFinite() && v > 0.0) {
+                    holdSpeed = v
+                }
+            }
+        }
+
+        val candidate = listOfNotNull(gpsSpeed, holdSpeed).maxOrNull() ?: 0.0
+        return if (candidate.isFinite() && candidate > 0.0) candidate else 0.0
     }
 
     private fun computeMotionFactor(horizontalAccel: Double): Double {
