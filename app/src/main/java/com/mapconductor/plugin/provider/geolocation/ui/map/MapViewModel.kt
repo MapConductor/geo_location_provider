@@ -35,6 +35,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val limitText = MutableStateFlow(DEFAULT_LIMIT.toString())
     private val appliedFilter = MutableStateFlow<Filter?>(null)
     private val mapSession = MutableStateFlow(0)
+    private var lastFollowedDrTimeMillis: Long? = null
     private val eventsFlow = MutableSharedFlow<Event>()
 
     private val sourceFlow = StorageService.latestFlow(
@@ -163,6 +164,23 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     s.coerceIn(0.1, 1.0)
                 }
 
+            // When a DR-only filter is applied, follow the latest DR point by
+            // bumping the map session whenever a new DR sample arrives.
+            if (filterApplied && filter != null && filter.dr && !filter.gps) {
+                val latestDrTime = latestDr?.timeMillis
+                if (latestDrTime != null) {
+                    val prev = lastFollowedDrTimeMillis
+                    if (prev == null) {
+                        lastFollowedDrTimeMillis = latestDrTime
+                    } else if (latestDrTime != prev) {
+                        lastFollowedDrTimeMillis = latestDrTime
+                        mapSession.value = mapSession.value + 1
+                    }
+                }
+            } else {
+                lastFollowedDrTimeMillis = null
+            }
+
             UiState(
                 gpsChecked = gps,
                 drChecked = dr,
@@ -230,6 +248,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (currentFilter != null) {
             // Cancel: clear filter and return to editable state.
             appliedFilter.value = null
+            lastFollowedDrTimeMillis = null
             return
         }
 
@@ -249,6 +268,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             dr = drEnabled.value,
             limit = limit
         )
+        mapSession.value = mapSession.value + 1
 
         if (message != null) {
             viewModelScope.launch {

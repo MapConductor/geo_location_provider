@@ -21,7 +21,9 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -33,6 +35,10 @@ import com.mapconductor.googlemaps.GoogleMapsView
 import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import com.mapconductor.plugin.provider.geolocation.ui.common.ProviderKind
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.log2
+import kotlin.math.max
 
 /**
  * Map screen that shows markers for LocationSample rows.
@@ -59,13 +65,51 @@ fun MapScreen() {
         }
     }
 
-    val centerPoint = state.latest?.let { sample ->
+    val gpsLatestSample = state.markers.firstOrNull { sample ->
+        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+    }
+    val drLatestSample = state.markers.firstOrNull { sample ->
+        Formatters.providerKind(sample.provider) == ProviderKind.DeadReckoning
+    }
+
+    val centerSample =
+        when {
+            state.gpsChecked && gpsLatestSample != null -> gpsLatestSample
+            !state.gpsChecked && state.drChecked && drLatestSample != null -> drLatestSample
+            gpsLatestSample != null -> gpsLatestSample
+            drLatestSample != null -> drLatestSample
+            else -> state.latest
+        }
+
+    val centerPoint = centerSample?.let { sample ->
         GeoPointImpl.fromLatLong(sample.lat, sample.lon)
     } ?: GeoPointImpl.fromLatLong(35.6812, 139.7671)
 
+    val configuration = LocalConfiguration.current
+    val density = LocalDensity.current
+    val longEdgePx = with(density) {
+        val w = configuration.screenWidthDp.dp.toPx()
+        val h = configuration.screenHeightDp.dp.toPx()
+        max(w, h)
+    }
+
+    val targetMeters = 1000.0
+    val zoom: Double =
+        if (longEdgePx > 0f) {
+            val metersPerPixel = targetMeters / longEdgePx.toDouble()
+            val latRad = Math.toRadians(centerPoint.latitude)
+            val cosLat = cos(latRad).coerceAtLeast(0.01)
+            val earthCircumference = 2.0 * PI * 6371000.0
+            val twoToZoom =
+                (cosLat * earthCircumference) / (256.0 * metersPerPixel)
+            log2(twoToZoom).coerceIn(3.0, 21.0)
+        } else {
+            14.0
+        }
+
     val camera = MapCameraPositionImpl(
         position = centerPoint,
-        zoom = 14.0
+        zoom = zoom
     )
 
     Column(

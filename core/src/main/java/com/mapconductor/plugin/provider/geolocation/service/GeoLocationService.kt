@@ -87,6 +87,16 @@ class GeoLocationService : Service() {
     @Volatile private var lastCourseLat: Double? = null
     @Volatile private var lastCourseLon: Double? = null
 
+    // Smoothed GPS position used as DR anchor ("GPS hold value").
+    @Volatile private var lastGpsHoldLat: Double? = null
+    @Volatile private var lastGpsHoldLon: Double? = null
+
+    // Last raw GPS receive value ("GPS receive value") kept for hold computation.
+    @Volatile private var lastGpsRecvLat: Double? = null
+    @Volatile private var lastGpsRecvLon: Double? = null
+    @Volatile private var lastGpsRecvTimeMillis: Long? = null
+    @Volatile private var lastGpsRecvAccM: Float? = null
+
     fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
 
@@ -284,6 +294,79 @@ class GeoLocationService : Service() {
         lastCourseLat = observation.lat
         lastCourseLon = observation.lon
 
+        // ------------------------
+        //   GPS hold value for DR
+        // ------------------------
+        val recvLat = observation.lat
+        val recvLon = observation.lon
+        val recvAcc = observation.accuracyM
+
+        val prevHoldLat = lastGpsHoldLat
+        val prevHoldLon = lastGpsHoldLon
+        val prevRecvLat = lastGpsRecvLat
+        val prevRecvLon = lastGpsRecvLon
+        val prevRecvTime = lastGpsRecvTimeMillis
+        val prevRecvAcc = lastGpsRecvAccM
+
+        // Decide the base point for hold calculation.
+        val baseLat: Double?
+        val baseLon: Double?
+        if (prevHoldLat != null && prevHoldLon != null) {
+            // Normal case: use previous GPS hold value.
+            baseLat = prevHoldLat
+            baseLon = prevHoldLon
+        } else {
+            // Fallback: use previous GPS receive value when available and valid.
+            val canUsePrevRecv =
+                prevRecvLat != null &&
+                    prevRecvLon != null &&
+                    prevRecvTime != null &&
+                    prevRecvAcc != null &&
+                    !prevRecvAcc.isNaN() &&
+                    prevRecvAcc < 20f &&
+                    (now - prevRecvTime) < (updateIntervalMs * 4L)
+
+            if (canUsePrevRecv) {
+                baseLat = prevRecvLat
+                baseLon = prevRecvLon
+            } else {
+                baseLat = null
+                baseLon = null
+            }
+        }
+
+        val (holdLat, holdLon) = if (baseLat == null || baseLon == null) {
+            // No usable previous hold/receive value: reset filter and use the current receive value.
+            recvLat to recvLon
+        } else {
+            // Compute blend factor based on accuracy and speed so that
+            // high-speed motion stays responsive even under poor accuracy.
+            val effectiveSpeedMps = if (speedMps < 1.0f) 1.0 else speedMps.toDouble()
+            val weight: Double = recvAcc
+                .takeIf { it > 0f && !it.isNaN() }
+                ?.let { ((10.0 * effectiveSpeedMps) / it.toDouble()).coerceAtMost(1.0) }
+                ?: 1.0
+
+            if (weight >= 1.0) {
+                // When accuracy and speed imply a strong GPS signal, hold and receive are treated as identical.
+                recvLat to recvLon
+            } else if (weight <= 0.0) {
+                baseLat to baseLon
+            } else {
+                val lat = baseLat + weight * (recvLat - baseLat)
+                val lon = baseLon + weight * (recvLon - baseLon)
+                lat to lon
+            }
+        }
+
+        // Persist hold and receive values for the next update.
+        lastGpsHoldLat = holdLat
+        lastGpsHoldLon = holdLon
+        lastGpsRecvLat = recvLat
+        lastGpsRecvLon = recvLon
+        lastGpsRecvTimeMillis = now
+        lastGpsRecvAccM = recvAcc
+
           val used: Int? = observation.gnssUsed
           val total: Int? = observation.gnssTotal
           val cn0: Double? = observation.cn0Mean
@@ -358,8 +441,8 @@ class GeoLocationService : Service() {
                     dr?.submitGpsFix(
                         GpsFix(
                             timestampMillis = now,
-                            lat = observation.lat,
-                            lon = observation.lon,
+                            lat = holdLat,
+                            lon = holdLon,
                             accuracyM = observation.accuracyM,
                             speedMps = speedMps.takeIf { it > 0f }
                         )
@@ -370,89 +453,13 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 3) Backfill: divide the period between previous and current fix by DR interval and insert samples.
-        if (drIntervalSec > 0 && lastFix != null) {
-            val stepMs = (drIntervalSec * 1000L).coerceAtLeast(1000L)
-            val targets = generateSequence(lastFix + stepMs) { it + stepMs }
-                .takeWhile { it < now - 100L }
-                .toList()
-            if (targets.isNotEmpty()) {
-                val d = dr
-                if (d != null) {
-                    serviceScope.launch(Dispatchers.IO) {
-                        for (t in targets) {
-                            try {
-                                val pts: List<PredictedPoint> = try {
-                                    d.predict(fromMillis = lastFix, toMillis = t)
-                                } catch (e: Throwable) {
-                                    Log.w(
-                                        TAG,
-                                        "dr.predict(backfill) from=$lastFix to=$t",
-                                        e
-                                    )
-                                    emptyList()
-                                }
-                                val p = pts.lastOrNull() ?: continue
-                                val bat = BatteryStatusReader.read(applicationContext)
-
-                                // Decide heading / course values for DR backfill.
-                                val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
-                                val courseForDr = if (!lastCourseDeg.isNaN()) {
-                                    lastCourseDeg
-                                } else {
-                                    headingForDr
-                                }
-
-                                val original =
-                                    LocationSample(
-                                        id = 0,
-                                        timeMillis = t,              // Backfill sample time in the past.
-                                        lat = p.lat,
-                                        lon = p.lon,
-                                        accuracy = (p.accuracyM ?: 0f),
-                                        provider = "dead_reckoning",
-                                        headingDeg = headingForDr,
-                                        courseDeg = courseForDr,
-                                        speedMps = (p.speedMps ?: Float.NaN).toDouble(),
-                                        gnssUsed = -1,
-                                        gnssTotal = -1,
-                                        cn0 = 0.0,
-                                        batteryPercent = bat.percent,
-                                        isCharging = bat.isCharging
-                                      )
-                                  val (adjLat, adjLon) =
-                                      adjustDrSample(
-                                          lat = original.lat,
-                                          lon = original.lon,
-                                          speedMps = original.speedMps,
-                                      )
-                                val sample =
-                                    if (adjLat != original.lat || adjLon != original.lon) {
-                                        original.copy(lat = adjLat, lon = adjLon)
-                                    } else {
-                                        original
-                                    }
-                                Log.d(
-                                    "DB/TRACE",
-                                    "before-insert provider=dead_reckoning(backfill) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
-                                )
-                                StorageService.insertLocation(applicationContext, sample)
-                                Log.d(
-                                    "DB/TRACE",
-                                    "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
-                                )
-                            } catch (e: Throwable) {
-                                Log.e(
-                                    "DB/TRACE",
-                                    "insert failed provider=dead_reckoning(backfill)",
-                                    e
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // 3) Backfill: disabled for the current DeadReckoning implementation.
+        // The 1D engine is designed for forward prediction from the latest
+        // GPS anchor and is not suitable for reconstructing past positions
+        // after a new fix has been applied. Keeping the backfill logic here
+        // would insert dead_reckoning samples whose timestamps are in the
+        // past but whose coordinates are anchored to the most recent GPS
+        // hold value, which produces fan-shaped artifacts on the map.
     }
 
     // ------------------------
@@ -690,69 +697,9 @@ class GeoLocationService : Service() {
     }
 
     private fun adjustDrSample(lat: Double, lon: Double, speedMps: Double): Pair<Double, Double> {
-        // When DeadReckoning reports that the device is likely static, clamp
-        // DR output within a small radius around the latest GPS position so
-        // that desk / static scenarios do not accumulate visible drift.
-        val drEngine = dr
-        val anchorLat = lastCourseLat
-        val anchorLon = lastCourseLon
-        if (drEngine == null || anchorLat == null || anchorLon == null) {
-            return lat to lon
-        }
-
-        val isStatic: Boolean =
-            try {
-                drEngine.isLikelyStatic()
-            } catch (t: Throwable) {
-                Log.w(TAG, "adjustDrSample: dr.isLikelyStatic() failed", t)
-                false
-            }
-
-        if (!isStatic) {
-            return lat to lon
-        }
-
-        // Compute distance from latest GPS anchor to current DR position.
-        val base = android.location.Location("gps").apply {
-            latitude = anchorLat
-            longitude = anchorLon
-        }
-        val drLoc = android.location.Location("dr").apply {
-            latitude = lat
-            longitude = lon
-        }
-        val dist = base.distanceTo(drLoc) // [m]
-
-        // If already within the clamp radius, keep DR as-is.
-        val clampRadiusM = 2.0f
-        if (dist <= clampRadiusM || dist.isNaN()) {
-            return lat to lon
-        }
-
-        // Project DR back onto the circle around the anchor with radius
-        // clampRadiusM along the line from anchor to DR.
-        val bearingDeg = base.bearingTo(drLoc)
-        val r = 6371000.0
-        val angDist = clampRadiusM / r
-        val brng = Math.toRadians(bearingDeg.toDouble())
-        val lat1 = Math.toRadians(anchorLat)
-        val lon1 = Math.toRadians(anchorLon)
-
-        val sinLat1 = Math.sin(lat1)
-        val cosLat1 = Math.cos(lat1)
-        val sinAng = Math.sin(angDist)
-        val cosAng = Math.cos(angDist)
-
-        val lat2 = Math.asin(
-            sinLat1 * cosAng + cosLat1 * sinAng * Math.cos(brng)
-        )
-        val lon2 = lon1 + Math.atan2(
-            Math.sin(brng) * sinAng * cosLat1,
-            cosAng - sinLat1 * Math.sin(lat2)
-        )
-
-        val adjLat = Math.toDegrees(lat2)
-        val adjLon = Math.toDegrees(lon2)
-        return adjLat to adjLon
+        // DR output is used as-is. DeadReckoningImpl already handles static
+        // detection and position behavior, so no additional clamping is
+        // applied at the service layer.
+        return lat to lon
     }
 }
