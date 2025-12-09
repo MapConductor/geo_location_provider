@@ -54,6 +54,13 @@ internal class DeadReckoningImpl(
         private const val STATIC_ENTER_DURATION_MS = 5_000L
         private const val STATIC_EXIT_DURATION_MS = 500L
 
+        // Maximum number of GPS hold points kept in memory.
+        private const val MAX_HOLD_HISTORY = 5
+
+        // Time window for hold history [ms]. Only points with
+        // (now - timeMillis) <= HOLD_WINDOW_MILLIS are used.
+        private const val HOLD_WINDOW_MILLIS = 30_000L
+
         // Approximate earth radius in meters.
         private const val EARTH_RADIUS_M = 6371000.0
 
@@ -70,20 +77,15 @@ internal class DeadReckoningImpl(
     @Volatile
     private var lastFix: GpsFix? = null
 
-    // Previous and latest GPS hold values.
-    @Volatile
-    private var prevHoldLat: Double? = null
-    @Volatile
-    private var prevHoldLon: Double? = null
-    @Volatile
-    private var prevHoldTimeMillis: Long? = null
+    private data class HoldPoint(
+        val lat: Double,
+        val lon: Double,
+        val timeMillis: Long
+    )
 
-    @Volatile
-    private var lastHoldLat: Double? = null
-    @Volatile
-    private var lastHoldLon: Double? = null
-    @Volatile
-    private var lastHoldTimeMillis: Long? = null
+    // GPS hold history (up to MAX_HOLD_HISTORY points within HOLD_WINDOW_MILLIS).
+    private val holdLock = Any()
+    private val holdHistory: ArrayDeque<HoldPoint> = ArrayDeque()
 
     @Volatile
     private var isStaticFlag: Boolean = false
@@ -170,49 +172,51 @@ internal class DeadReckoningImpl(
     override suspend fun submitGpsFix(fix: GpsFix) {
         lastFix = fix
 
-        // Update GPS hold values.
+        // Update GPS hold history.
         val lat = fix.lat
         val lon = fix.lon
         val timeMillis = fix.timestampMillis
 
-        val prevLat = lastHoldLat
-        val prevLon = lastHoldLon
-        val prevTime = lastHoldTimeMillis
+        val previous: HoldPoint?
+        val latest: HoldPoint
+        synchronized(holdLock) {
+            // Add new point.
+            holdHistory.addLast(HoldPoint(lat = lat, lon = lon, timeMillis = timeMillis))
 
-        if (prevLat == null || prevLon == null || prevTime == null) {
-            // First hold value: only lastHold is available, prevHold stays null.
-            lastHoldLat = lat
-            lastHoldLon = lon
-            lastHoldTimeMillis = timeMillis
-            prevHoldLat = null
-            prevHoldLon = null
-            prevHoldTimeMillis = null
-        } else {
-            // Shift last hold to previous and store the new one as latest.
-            prevHoldLat = prevLat
-            prevHoldLon = prevLon
-            prevHoldTimeMillis = prevTime
+            // Drop points older than HOLD_WINDOW_MILLIS relative to this fix.
+            while (holdHistory.isNotEmpty()) {
+                val first = holdHistory.first()
+                if (timeMillis - first.timeMillis > HOLD_WINDOW_MILLIS) {
+                    holdHistory.removeFirst()
+                } else {
+                    break
+                }
+            }
 
-            lastHoldLat = lat
-            lastHoldLon = lon
-            lastHoldTimeMillis = timeMillis
+            // Enforce maximum history size.
+            while (holdHistory.size > MAX_HOLD_HISTORY) {
+                holdHistory.removeFirst()
+            }
+
+            latest = holdHistory.last()
+            previous = holdHistory.dropLast(1).lastOrNull()
         }
 
         // Re-anchor the 1D DR state along the latest GPS direction.
         synchronized(drLock) {
-            val hasPrev = prevLat != null && prevLon != null && prevTime != null && timeMillis > (prevTime ?: 0L)
-            val baselineSpeed = selectBaselineSpeedMps(fix, prevLat, prevLon, prevTime)
+            val hasPrev = previous != null && timeMillis > previous.timeMillis
+            val baselineSpeed = selectBaselineSpeedMps(fix, previous)
 
-            drAnchorLat = lat
-            drAnchorLon = lon
+            drAnchorLat = latest.lat
+            drAnchorLon = latest.lon
             drAnchorTimeMillis = timeMillis
             drBaselineSpeedMps = baselineSpeed
             drSpeedMps = baselineSpeed
             drOffsetMeters = 0.0
             drLastUpdateTimeMillis = timeMillis
 
-            if (hasPrev && prevLat != null && prevLon != null) {
-                val dir = computeDirectionUnit(prevLat, prevLon, lat, lon)
+            if (hasPrev && previous != null) {
+                val dir = computeDirectionUnit(previous.lat, previous.lon, latest.lat, latest.lon)
                 if (dir != null) {
                     drDirEastUnit = dir.first
                     drDirNorthUnit = dir.second
@@ -228,9 +232,10 @@ internal class DeadReckoningImpl(
 
         // Before the first GPS hold value is available, there is no absolute
         // position to return.
-        val holdLat = lastHoldLat
-        val holdLon = lastHoldLon
-        val holdTime = lastHoldTimeMillis
+        val latest: HoldPoint? = synchronized(holdLock) { holdHistory.lastOrNull() }
+        val holdLat = latest?.lat
+        val holdLon = latest?.lon
+        val holdTime = latest?.timeMillis
         if (holdLat == null || holdLon == null || holdTime == null) {
             return emptyList()
         }
@@ -467,24 +472,20 @@ internal class DeadReckoningImpl(
             ?.takeIf { !it.isNaN() && it >= 0f }
             ?.toDouble()
 
-        val prevLat = prevHoldLat
-        val prevLon = prevHoldLon
-        val prevTime = prevHoldTimeMillis
-        val lastLat = lastHoldLat
-        val lastLon = lastHoldLon
-        val lastTime = lastHoldTimeMillis
+        val history: List<HoldPoint> = synchronized(holdLock) { holdHistory.toList() }
 
         var holdSpeed: Double? = null
-        if (prevLat != null && prevLon != null && prevTime != null &&
-            lastLat != null && lastLon != null && lastTime != null &&
-            lastTime > prevTime
-        ) {
-            val distanceMeters = distanceMeters(prevLat, prevLon, lastLat, lastLon)
-            val dtSec = (lastTime - prevTime).toDouble() / 1000.0
-            if (dtSec > 0.0) {
-                val v = distanceMeters / dtSec
-                if (v.isFinite() && v > 0.0) {
-                    holdSpeed = v
+        if (history.size >= 2) {
+            val prev = history[history.size - 2]
+            val last = history[history.size - 1]
+            if (last.timeMillis > prev.timeMillis) {
+                val distanceMeters = distanceMeters(prev.lat, prev.lon, last.lat, last.lon)
+                val dtSec = (last.timeMillis - prev.timeMillis).toDouble() / 1000.0
+                if (dtSec > 0.0) {
+                    val v = distanceMeters / dtSec
+                    if (v.isFinite() && v > 0.0) {
+                        holdSpeed = v
+                    }
                 }
             }
         }
@@ -507,18 +508,16 @@ internal class DeadReckoningImpl(
 
     private fun selectBaselineSpeedMps(
         fix: GpsFix,
-        prevLat: Double?,
-        prevLon: Double?,
-        prevTimeMillis: Long?
+        previous: HoldPoint?
     ): Double {
         val gpsSpeed = fix.speedMps?.takeIf { !it.isNaN() && it > 0f }?.toDouble()
         if (gpsSpeed != null) {
             return gpsSpeed
         }
 
-        if (prevLat != null && prevLon != null && prevTimeMillis != null && fix.timestampMillis > prevTimeMillis) {
-            val distanceMeters = distanceMeters(prevLat, prevLon, fix.lat, fix.lon)
-            val dtSec = (fix.timestampMillis - prevTimeMillis).toDouble() / 1000.0
+        if (previous != null && fix.timestampMillis > previous.timeMillis) {
+            val distanceMeters = distanceMeters(previous.lat, previous.lon, fix.lat, fix.lon)
+            val dtSec = (fix.timestampMillis - previous.timeMillis).toDouble() / 1000.0
             if (dtSec > 0.0) {
                 val v = distanceMeters / dtSec
                 if (v.isFinite() && v > 0.0) {
