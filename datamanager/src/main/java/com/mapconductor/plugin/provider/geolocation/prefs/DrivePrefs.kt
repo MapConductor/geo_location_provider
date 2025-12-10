@@ -26,6 +26,7 @@ internal class DrivePrefs(private val appContext: Context) {
         val TOKEN_TS         = longPreferencesKey("token_updated_at")
         val FOLDER_RES_KEY   = stringPreferencesKey("folder_resource_key")
         val AUTH_METHOD      = stringPreferencesKey("auth_method")
+        val BACKUP_STATUS    = stringPreferencesKey("backup_status")
     }
 
     // ---- Read Flows ----
@@ -44,6 +45,9 @@ internal class DrivePrefs(private val appContext: Context) {
 
     val tokenUpdatedAtMillis: Flow<Long> =
         appContext.driveDataStore.data.map { it[K.TOKEN_TS] ?: 0L }
+
+    val backupStatus: Flow<String> =
+        appContext.driveDataStore.data.map { it[K.BACKUP_STATUS] ?: "" }
 
     // resourceKey is nullable (when not yet saved).
     val folderResourceKey: Flow<String?> =
@@ -80,5 +84,14 @@ internal class DrivePrefs(private val appContext: Context) {
             }
         }
     }
-}
 
+    suspend fun setBackupStatus(status: String) {
+        appContext.driveDataStore.edit { prefs ->
+            if (status.isBlank()) {
+                prefs.remove(K.BACKUP_STATUS)
+            } else {
+                prefs[K.BACKUP_STATUS] = status
+            }
+        }
+    }
+}

@@ -35,6 +35,9 @@ class DrivePrefsRepository(context: Context) {
     /** Last token refresh timestamp in milliseconds; 0L when never refreshed. */
     val tokenUpdatedAtMillisFlow: Flow<Long> = prefs.tokenUpdatedAtMillis
 
+    /** Latest backup progress/status message (empty string when not set). */
+    val backupStatusFlow: Flow<String> = prefs.backupStatus
+
     // --- Derived helper flows ---
 
     /** Alias for tokenUpdatedAtMillisFlow for ViewModel convenience. */
@@ -54,6 +57,8 @@ class DrivePrefsRepository(context: Context) {
 
     suspend fun setTokenUpdatedAt(millis: Long) = prefs.setTokenUpdatedAt(millis)
 
+    suspend fun setBackupStatus(status: String) = prefs.setBackupStatus(status)
+
     // --- Derived write helpers ---
 
     /** Convenience: mark token refreshed at given time (millis). */
@@ -63,4 +68,3 @@ class DrivePrefsRepository(context: Context) {
     suspend fun markTokenRefreshed() =
         prefs.setTokenUpdatedAt(System.currentTimeMillis())
 }
-

@@ -93,6 +93,14 @@ internal interface LocationSampleDao {
     @Query("SELECT COUNT(*) FROM location_samples")
     suspend fun countAll(): Long
 
+    /** Returns the minimum timeMillis across all rows, or null when table is empty. */
+    @Query("SELECT MIN(timeMillis) FROM location_samples")
+    suspend fun minTimeMillis(): Long?
+
+    /** Returns the maximum timeMillis across all rows, or null when table is empty. */
+    @Query("SELECT MAX(timeMillis) FROM location_samples")
+    suspend fun maxTimeMillis(): Long?
+
     /**
      * Deletes the given rows in a batch.
      *
@@ -101,4 +109,3 @@ internal interface LocationSampleDao {
     @Delete
     suspend fun deleteAll(items: List<LocationSample>)
 }
-

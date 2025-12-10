@@ -41,5 +41,22 @@ internal interface ExportedDayDao {
      */
     @Query("UPDATE exported_days SET lastError = :msg WHERE epochDay = :d")
     suspend fun markError(d: Long, msg: String)
-}
 
+    /** Returns the total number of exported_days rows. */
+    @Query("SELECT COUNT(*) FROM exported_days")
+    suspend fun countAll(): Long
+
+    /**
+     * Returns the next day with uploaded == 0 and epochDay > [after], or null if none exists.
+     *
+     * Intended for:
+     * - iterating over backlog days without getting stuck on the same day when
+     *   upload is skipped or fails.
+     */
+    @Query(
+        "SELECT * FROM exported_days " +
+            "WHERE uploaded = 0 AND epochDay > :after " +
+            "ORDER BY epochDay ASC LIMIT 1"
+    )
+    suspend fun nextNotUploadedAfter(after: Long): ExportedDay?
+}

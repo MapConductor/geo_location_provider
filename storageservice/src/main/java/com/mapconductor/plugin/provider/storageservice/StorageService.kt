@@ -126,6 +126,28 @@ object StorageService {
             dao.deleteAll(items)
         }
 
+    /**
+     * Returns the earliest timeMillis among all LocationSample rows, or null when empty.
+     *
+     * Intended for:
+     * - determining the first day that may need backup/export processing.
+     */
+    suspend fun firstSampleTimeMillis(ctx: Context): Long? =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).locationSampleDao().minTimeMillis()
+        }
+
+    /**
+     * Returns the latest timeMillis among all LocationSample rows, or null when empty.
+     *
+     * Intended for:
+     * - determining the last day that may need backup/export processing.
+     */
+    suspend fun lastSampleTimeMillis(ctx: Context): Long? =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).locationSampleDao().maxTimeMillis()
+        }
+
     // ------------------------------------------------------------------------
     // ExportedDay API
     // ------------------------------------------------------------------------
@@ -161,6 +183,38 @@ object StorageService {
     suspend fun oldestNotUploadedDay(ctx: Context): ExportedDay? =
         withContext(Dispatchers.IO) {
             AppDatabase.get(ctx).exportedDayDao().oldestNotUploaded()
+        }
+
+    /**
+     * Returns the total number of ExportedDay rows.
+     *
+     * Intended for:
+     * - diagnostic and UI usage such as Drive settings backup summary.
+     *
+     * Contract:
+     * - Returns 0 when the table is empty.
+     * - This is a suspending call and should be invoked from a coroutine context.
+     */
+    suspend fun exportedDayCount(ctx: Context): Long =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).exportedDayDao().countAll()
+        }
+
+    /**
+     * Returns the next ExportedDay with uploaded == false and epochDay strictly greater
+     * than [afterEpochDay], or null when there is no such day.
+     *
+     * Intended for:
+     * - backlog iteration in MidnightExportWorker so that one worker run processes
+     *   each day at most once even when upload is skipped or fails.
+     *
+     * Contract:
+     * - If there is no matching row, null is returned.
+     * - This is a suspending call and should be invoked from a coroutine context.
+     */
+    suspend fun nextNotUploadedDayAfter(ctx: Context, afterEpochDay: Long): ExportedDay? =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).exportedDayDao().nextNotUploadedAfter(afterEpochDay)
         }
 
     /**
@@ -205,4 +259,3 @@ object StorageService {
             AppDatabase.get(ctx).exportedDayDao().markError(epochDay, msg)
         }
 }
-

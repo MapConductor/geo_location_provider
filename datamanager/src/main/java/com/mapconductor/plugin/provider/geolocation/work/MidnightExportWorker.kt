@@ -10,13 +10,17 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
-import com.mapconductor.plugin.provider.storageservice.StorageService
-import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
+import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
+import com.mapconductor.plugin.provider.storageservice.StorageService
+import kotlinx.coroutines.flow.first
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -37,14 +41,68 @@ class MidnightExportWorker(
 
     private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
+    private val drivePrefs: DrivePrefsRepository = DrivePrefsRepository(appContext)
+
+    companion object {
+        private const val TAG = "MidnightExportWorker"
+        private const val UNIQUE_NAME = "midnight-export-worker"
+        private const val KEY_FORCE_FULL_SCAN = "force_full_scan"
+
+        /** Helper for triggering backlog processing immediately from UI. */
+        @JvmStatic
+        fun runNow(context: Context) {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+                .build()
+            val data = workDataOf(KEY_FORCE_FULL_SCAN to true)
+            val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
+                .setConstraints(constraints)
+                .setInputData(data)
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                UNIQUE_NAME,
+                ExistingWorkPolicy.REPLACE,
+                req
+            )
+        }
+    }
 
     override suspend fun doWork(): Result {
+        val forceFullScan = inputData.getBoolean(KEY_FORCE_FULL_SCAN, false)
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 
-        // Initial seed: ensure up to 365 days of past records (before yesterday).
-        var oldest = StorageService.oldestNotUploadedDay(applicationContext)
-        if (oldest == null) {
+        // Record a brief summary at worker start for debugging / UI status.
+        runCatching {
+            val exportedCount = StorageService.exportedDayCount(applicationContext)
+            val oldest = StorageService.oldestNotUploadedDay(applicationContext)
+            val msg = buildString {
+                append("Backup worker start: today=")
+                append(today)
+                append(", exported_days.count=")
+                append(exportedCount)
+                append(", oldestNotUploaded=")
+                append(oldest?.epochDay ?: "null")
+                append(", forceFullScan=")
+                append(forceFullScan)
+            }
+            drivePrefs.setBackupStatus(msg)
+        }
+
+        if (forceFullScan) {
+            runFullScan(today, todayEpochDay)
+        } else {
+            runBacklog(today, todayEpochDay)
+        }
+
+        // After processing, schedule next run at next midnight.
+        scheduleNext(applicationContext)
+        return Result.success()
+    }
+
+    private suspend fun runBacklog(today: LocalDate, todayEpochDay: Long) {
+        var first = StorageService.oldestNotUploadedDay(applicationContext)
+        if (first == null) {
             val backMaxDays = 365L
             for (off in backMaxDays downTo 1L) {
                 val d = today.minusDays(off).toEpochDay()
@@ -52,16 +110,39 @@ class MidnightExportWorker(
                     StorageService.ensureExportedDay(applicationContext, d)
                 }
             }
-            oldest = StorageService.oldestNotUploadedDay(applicationContext)
+            first = StorageService.oldestNotUploadedDay(applicationContext)
         }
 
-        // Backlog processing loop (days before "today" only).
-        while (oldest != null && oldest.epochDay < todayEpochDay) {
-            val target = oldest
-            val localDate = LocalDate.ofEpochDay(target.epochDay)
-            val startMillis = localDate.atStartOfDay(zone).toInstant().toEpochMilli()
-            val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-            val baseName = "glp-${dateFmt.format(localDate)}"
+        var current = first
+        while (current != null && current.epochDay < todayEpochDay) {
+            processOneDay(current.epochDay)
+            current = StorageService.nextNotUploadedDayAfter(applicationContext, current.epochDay)
+        }
+    }
+
+    private suspend fun runFullScan(today: LocalDate, todayEpochDay: Long) {
+        val minMillis = StorageService.firstSampleTimeMillis(applicationContext) ?: return
+        val maxMillis = StorageService.lastSampleTimeMillis(applicationContext) ?: return
+        val firstDate = Instant.ofEpochMilli(minMillis).atZone(zone).toLocalDate()
+        val lastDate = Instant.ofEpochMilli(maxMillis).atZone(zone).toLocalDate()
+
+        var day = firstDate.toEpochDay()
+        val lastEpochDay = minOf(lastDate.toEpochDay(), todayEpochDay - 1)
+        while (day <= lastEpochDay) {
+            processOneDay(day)
+            day++
+        }
+    }
+
+    private suspend fun processOneDay(epochDay: Long) {
+        val localDate = LocalDate.ofEpochDay(epochDay)
+        val startMillis = localDate.atStartOfDay(zone).toInstant().toEpochMilli()
+        val endMillis = localDate.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+        val baseName = "glp-${dateFmt.format(localDate)}"
+
+        try {
+            // Ensure ExportedDay row exists for this day.
+            StorageService.ensureExportedDay(applicationContext, epochDay)
 
             // Fetch one-day records from storageservice DB via StorageService.
             val records = StorageService.getLocationsBetween(
@@ -80,14 +161,17 @@ class MidnightExportWorker(
             )
 
             // Mark local export as succeeded (even for empty day).
-            StorageService.markExportedLocal(applicationContext, target.epochDay)
+            StorageService.markExportedLocal(applicationContext, epochDay)
 
             // Upload to Drive only when settings are configured.
-            val prefs = AppPrefs.snapshot(applicationContext)
-            val engineOk = (prefs.engine == UploadEngine.KOTLIN)
-            val folderOk = !prefs.folderId.isNullOrBlank()
+            val appPrefs = AppPrefs.snapshot(applicationContext)
+            val uiFolder = runCatching { drivePrefs.folderIdFlow.first() }.getOrNull().orEmpty()
+            val effectiveFolderId = uiFolder.ifBlank { appPrefs.folderId }
+
+            val engineOk = (appPrefs.engine == UploadEngine.KOTLIN)
+            val folderOk = effectiveFolderId.isNotBlank()
             val uploader = if (engineOk && folderOk) {
-                UploaderFactory.create(applicationContext, prefs.engine)
+                UploaderFactory.create(applicationContext, appPrefs.engine)
             } else null
 
             var uploadSucceeded = false
@@ -95,19 +179,19 @@ class MidnightExportWorker(
 
             if (exported == null) {
                 lastError = "No file exported"
-                StorageService.markExportError(applicationContext, target.epochDay, lastError)
+                StorageService.markExportError(applicationContext, epochDay, lastError)
             } else if (uploader == null) {
                 lastError = when {
-                    !engineOk -> "Upload not configured (engine=${prefs.engine})"
+                    !engineOk -> "Upload not configured (engine=${appPrefs.engine})"
                     !folderOk -> "Upload not configured (folderId missing)"
                     else -> "Uploader disabled"
                 }
-                StorageService.markExportError(applicationContext, target.epochDay, lastError)
+                StorageService.markExportError(applicationContext, epochDay, lastError)
             } else {
-                when (val up = uploader.upload(exported, prefs.folderId!!, "$baseName.zip")) {
+                when (val up = uploader.upload(exported, effectiveFolderId, "$baseName.zip")) {
                     is UploadResult.Success -> {
                         uploadSucceeded = true
-                        StorageService.markUploaded(applicationContext, target.epochDay, null)
+                        StorageService.markUploaded(applicationContext, epochDay, null)
                     }
                     is UploadResult.Failure -> {
                         lastError = buildString {
@@ -118,10 +202,32 @@ class MidnightExportWorker(
                                 append(up.body.take(300))
                             }
                         }.ifBlank { "Upload failure" }
-                        StorageService.markExportError(applicationContext, target.epochDay, lastError)
+                        StorageService.markExportError(applicationContext, epochDay, lastError)
                     }
                 }
             }
+
+            val progress = buildString {
+                append("Backup day ")
+                append(localDate)
+                append(" (")
+                append(baseName)
+                append(".zip): local=")
+                append(if (exported != null) "OK" else "FAIL")
+                append(", folder=")
+                append(if (folderOk) effectiveFolderId else "none")
+                append(", upload=")
+                append(
+                    when {
+                        exported == null -> "SKIP(no file)"
+                        uploader == null -> "SKIP(config)"
+                        uploadSucceeded  -> "OK"
+                        !lastError.isNullOrBlank() -> "FAIL(${lastError.take(120)})"
+                        else -> "FAIL"
+                    }
+                )
+            }
+            runCatching { drivePrefs.setBackupStatus(progress) }
 
             // Always delete ZIP to avoid filling local storage.
             exported?.let { safeDelete(it) }
@@ -131,18 +237,17 @@ class MidnightExportWorker(
                 try {
                     StorageService.deleteLocations(applicationContext, records)
                 } catch (e: Throwable) {
-                    // Failure is not fatal; they will be retried next run.
                     Log.w(TAG, "Failed to delete uploaded records, will retry next time", e)
                 }
             }
-
-            // Move on to the next not-uploaded day.
-            oldest = StorageService.oldestNotUploadedDay(applicationContext)
+        } catch (t: Throwable) {
+            val err = "Exception ${t.javaClass.simpleName}: ${t.message ?: "unknown"}"
+            runCatching {
+                StorageService.markExportError(applicationContext, epochDay, err)
+                val progress = "Backup day $localDate ($baseName.zip): EXCEPTION($err)"
+                drivePrefs.setBackupStatus(progress)
+            }
         }
-
-        // After processing, schedule next run at next midnight.
-        scheduleNext(applicationContext)
-        return Result.success()
     }
 
     // ---- Class-level helper methods (not local functions). ----
@@ -175,27 +280,6 @@ class MidnightExportWorker(
             applicationContext.contentResolver.delete(uri, null, null)
         } catch (_: Throwable) {
             // Ignore deletion errors (e.g., missing file or permission issues).
-        }
-    }
-
-    companion object {
-        private const val TAG = "MidnightExportWorker"
-        private const val UNIQUE_NAME = "midnight-export-worker"
-
-        /** Helper for triggering backlog processing immediately from UI. */
-        @JvmStatic
-        fun runNow(context: Context) {
-            val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
-                .build()
-            val req = OneTimeWorkRequestBuilder<MidnightExportWorker>()
-                .setConstraints(constraints)
-                .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                UNIQUE_NAME,
-                ExistingWorkPolicy.REPLACE,
-                req
-            )
         }
     }
 }

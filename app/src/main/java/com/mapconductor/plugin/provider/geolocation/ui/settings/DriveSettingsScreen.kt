@@ -35,15 +35,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.auth.AppAuthAuth
 import com.mapconductor.plugin.provider.geolocation.auth.AppAuthSignInActivity
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
+import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
-import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
+import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -172,8 +174,7 @@ fun DriveSettingsScreen(
             Text("Backup & preview", style = MaterialTheme.typography.titleMedium)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 OutlinedButton(onClick = {
-                    MidnightExportWorker.runNow(ctx.applicationContext)
-                    uiMsg = "Started backup for days before today."
+                    vm.runBacklogNow()
                 }) {
                     Text("Backup days before today")
                 }
@@ -310,7 +311,7 @@ private suspend fun runTodayPreviewIO(
     }
 
     val baseName = "glp-" + DateTimeFormatter.ofPattern("yyyyMMdd")
-        .format(LocalDate.ofEpochDay(todayEpochDay))
+        .format(LocalDate.ofEpochDay(todayEpochDay)) + "_prev"
 
     // Export to Downloads/GeoLocationProvider as ZIP
     val outUri = GeoJsonExporter.exportToDownloads(
@@ -333,11 +334,26 @@ private suspend fun runTodayPreviewIO(
         return@withContext "Drive authorization is missing. ZIP was deleted; Room data is kept."
     }
 
-    val snapshot = AppPrefs.snapshot(ctx)
-    val folderId = DriveFolderId.extractFromUrlOrId(snapshot.folderId)
+    // Resolve folder id from DrivePrefs (UI) first, then fall back to AppPrefs.
+    val drivePrefs = DrivePrefsRepository(ctx)
+    val uiFolderRaw = runCatching { drivePrefs.folderIdFlow.first() }.getOrNull().orEmpty()
+    val appSnapshot = AppPrefs.snapshot(ctx)
+    val rawFolder = uiFolderRaw.ifBlank { appSnapshot.folderId }
+
+    // Pre-resolve folder id via Drive API (handles shortcuts / resourceKey).
+    val folderResourceKey = runCatching { drivePrefs.folderResourceKeyFlow.first() }
+        .getOrNull()
+    val driveApi = DriveApiClient(ctx)
+    val resolvedFolderId = driveApi.resolveFolderIdForUploadOrNull(
+        token = token,
+        idOrUrl = rawFolder,
+        resourceKey = folderResourceKey
+    )
+    val folderId = resolvedFolderId ?: DriveFolderId.extractFromUrlOrId(rawFolder)
+    val engine = appSnapshot.engine
     val uploader = UploaderFactory.create(
         ctx,
-        snapshot.engine,
+        engine,
         tokenProvider = tokenProvider
     )
 
@@ -369,9 +385,8 @@ private suspend fun runTodayPreviewIO(
     runCatching { ctx.contentResolver.delete(outUri, null, null) }
 
     if (success) {
-        "Uploaded today's data as $baseName.zip. Local ZIP was deleted; Room data is kept."
+        "Uploaded today's data as $baseName.zip to folder $folderId. Local ZIP was deleted; Room data is kept."
     } else {
-        "Failed to upload today's data after 5 attempts. ZIP was deleted; Room data is kept."
+        "Failed to upload today's data after 5 attempts (folder=$folderId). ZIP was deleted; Room data is kept."
     }
 }
-

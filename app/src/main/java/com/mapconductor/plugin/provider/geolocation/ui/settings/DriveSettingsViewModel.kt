@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
+import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
@@ -13,7 +14,7 @@ import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
-import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.storageservice.StorageService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,6 +22,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 
 class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val prefs = DrivePrefsRepository(app)
@@ -44,6 +48,16 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.backupStatusFlow.collect { msg ->
+                if (msg.isNotBlank()) {
+                    _status.value = msg
+                }
+            }
+        }
+    }
 
     fun setStatus(message: String) {
         _status.value = message
@@ -218,7 +232,71 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun runBacklogNow() {
-        MidnightExportWorker.runNow(getApplication())
+        viewModelScope.launch(Dispatchers.IO) {
+            val app = getApplication<Application>()
+            val ctx: Context = app.applicationContext
+            val zone = ZoneId.of("Asia/Tokyo")
+            val today = LocalDate.now(zone)
+
+            val samples = StorageService.getAllLocations(ctx)
+            if (samples.isEmpty()) {
+                _status.value = buildString {
+                    append("Backup summary:\n")
+                    append("No LocationSample rows in DB; nothing to back up.\n")
+                    append("Backlog worker was triggered for days before today.")
+                }
+                MidnightExportWorker.runNow(app)
+                return@launch
+            }
+
+            val firstMillis = samples.first().timeMillis
+            val lastMillis = samples.last().timeMillis
+            val firstDate = Instant.ofEpochMilli(firstMillis).atZone(zone).toLocalDate()
+            val lastDate = Instant.ofEpochMilli(lastMillis).atZone(zone).toLocalDate()
+
+            val exportedCount = StorageService.exportedDayCount(ctx)
+            val oldestNotUploaded = StorageService.oldestNotUploadedDay(ctx)
+
+            val sb = StringBuilder()
+            sb.append("Backup summary (JST):\n")
+            sb.append("Data range: ").append(firstDate).append(" to ").append(lastDate).append('\n')
+
+            if (exportedCount <= 0L) {
+                sb.append("Previous backup: none yet.\n")
+            } else {
+                if (oldestNotUploaded == null) {
+                    val lastBackedDay = lastDate.coerceAtMost(today.minusDays(1))
+                    sb.append("Previous backup: completed through ")
+                        .append(lastBackedDay)
+                        .append(".\n")
+                } else {
+                    val pendingFrom = LocalDate.ofEpochDay(oldestNotUploaded.epochDay)
+                    val backedUntilInclusive = pendingFrom.minusDays(1)
+                    if (backedUntilInclusive < firstDate) {
+                        sb.append("Previous backup: not completed for any day yet.\n")
+                    } else {
+                        sb.append("Previous backup: completed through ")
+                            .append(backedUntilInclusive)
+                            .append(".\n")
+                    }
+
+                    val pendingTo = lastDate.coerceAtMost(today.minusDays(1))
+                    if (!pendingFrom.isAfter(pendingTo)) {
+                        sb.append("Pending days before today: ")
+                            .append(pendingFrom)
+                            .append(" to ")
+                            .append(pendingTo)
+                            .append(".\n")
+                    } else {
+                        sb.append("Pending days before today: none.\n")
+                    }
+                }
+            }
+
+            sb.append("Starting backlog worker for days before today.")
+            _status.value = sb.toString()
+
+            MidnightExportWorker.runNow(app)
+        }
     }
 }
-
