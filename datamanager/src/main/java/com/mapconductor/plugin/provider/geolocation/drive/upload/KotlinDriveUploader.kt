@@ -43,13 +43,17 @@ internal class KotlinDriveUploader(
             val mime = guessMime(cr, uri) ?: "application/octet-stream"
             val size = tryGetSize(cr, uri)
 
+            // Normalize folder id (URL or raw id) once.
+            val parentId: String? =
+                DriveFolderId.extractFromUrlOrId(folderId)?.takeIf { it.isNotBlank() }
+
             // Small payloads use multipart (simple upload); larger ones use resumable.
             val useResumable = size == null || size > 2L * 1024 * 1024 // >2MB threshold.
 
             return@withContext if (!useResumable) {
-                simpleUpload(token, cr, uri, name, mime, folderId)
+                simpleUpload(token, cr, uri, name, mime, parentId)
             } else {
-                resumableUpload(token, cr, uri, name, mime, folderId, size)
+                resumableUpload(token, cr, uri, name, mime, parentId, size)
             }
         }
 
@@ -61,14 +65,14 @@ internal class KotlinDriveUploader(
         uri: Uri,
         name: String,
         mime: String,
-        folder: String
+        folderId: String?
     ): UploadResult {
         val boundary = "boundary_${System.currentTimeMillis()}"
 
         val meta = JSONObject().apply {
             put("name", name)
             put("mimeType", mime)
-            DriveFolderId.extractFromUrlOrId(folder)?.let { put("parents", listOf(it.toString())) }
+            folderId?.let { put("parents", listOf(it)) }
         }.toString()
 
         val body = object : RequestBody() {
@@ -274,7 +278,7 @@ internal class KotlinDriveUploader(
         }.toString()
 
         val req = Request.Builder()
-            .url("$baseUploadUrl?uploadType=resumable")
+            .url("$baseUploadUrl?uploadType=resumable&supportsAllDrives=true")
             .addHeader("X-Upload-Content-Type", mime)
             .apply { if (totalSize != null) addHeader("X-Upload-Content-Length", totalSize.toString()) }
             .post(meta.toRequestBody("application/json; charset=UTF-8".toMediaType()))
@@ -331,4 +335,3 @@ internal class KotlinDriveUploader(
         cr.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
 }
-

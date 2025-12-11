@@ -69,6 +69,8 @@ fun DriveSettingsScreen(
     val account by vm.accountEmail.collectAsState()
     val lastRefresh by vm.tokenLastRefresh.collectAsState()
     val authMethod by vm.authMethod.collectAsState()
+    val cmLoggedIn by vm.cmLoggedIn.collectAsState()
+    val appAuthLoggedIn by vm.appAuthLoggedIn.collectAsState()
 
     val lastRefreshText = remember(lastRefresh) {
         if (lastRefresh > 0L) {
@@ -141,30 +143,112 @@ fun DriveSettingsScreen(
 
             HorizontalDivider(color = DividerDefaults.color)
 
-            // Auth-method specific UI (currently only Credential Manager sample)
+            // Auth-method specific UI
             Text("Auth actions", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = {
-                    val provider = CredentialManagerAuth.get(ctx)
-                    scope.launch(Dispatchers.IO) {
-                        val token = provider.getAccessToken()
-                        withContext(Dispatchers.Main) {
-                            if (token != null) {
-                                vm.setStatus("CM Token OK: ${token.take(12)}...")
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Row 1: Credential Manager actions
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER,
+                        onClick = {
+                            val provider = CredentialManagerAuth.get(ctx)
+                            if (!cmLoggedIn) {
+                                scope.launch {
+                                    val credential = provider.signIn(ctx)
+                                    if (credential != null) {
+                                        vm.setCmLoggedIn(true)
+                                        vm.setStatus("CM sign-in OK.")
+                                    } else {
+                                        vm.setStatus("CM sign-in canceled or failed.")
+                                    }
+                                }
                             } else {
-                                vm.setStatus("CM Token is null (sign-in required?)")
+                                scope.launch(Dispatchers.IO) {
+                                    provider.signOut()
+                                    withContext(Dispatchers.Main) {
+                                        vm.setCmLoggedIn(false)
+                                        vm.clearAuthInfo()
+                                        vm.setStatus("CM signed out.")
+                                    }
+                                }
                             }
                         }
+                    ) {
+                        Text(
+                            if (!cmLoggedIn) "CM: Start sign-in" else "CM: Sign out"
+                        )
                     }
-                }) {
-                    Text("CM: Get token")
+
+                    OutlinedButton(
+                        enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER && cmLoggedIn,
+                        onClick = {
+                            val provider = CredentialManagerAuth.get(ctx)
+                            scope.launch(Dispatchers.IO) {
+                                val token = provider.getAccessToken()
+                                withContext(Dispatchers.Main) {
+                                    if (token != null) {
+                                        vm.setCmLoggedIn(true)
+                                        vm.setStatus("CM Token OK: ${token.take(12)}...")
+                                    } else {
+                                        vm.setStatus("CM Token is null (sign-in required?)")
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text("CM: Get token")
+                    }
                 }
 
-                OutlinedButton(onClick = {
-                    val intent = android.content.Intent(ctx, AppAuthSignInActivity::class.java)
-                    ctx.startActivity(intent)
-                }) {
-                    Text("AppAuth: Start sign-in")
+                // Row 2: AppAuth actions
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        enabled = authMethod == DriveAuthMethod.APPAUTH,
+                        onClick = {
+                            if (!appAuthLoggedIn) {
+                                vm.setAppAuthLoggedIn(true)
+                                val intent = android.content.Intent(
+                                    ctx,
+                                    AppAuthSignInActivity::class.java
+                                )
+                                ctx.startActivity(intent)
+                            } else {
+                                val provider = AppAuthAuth.get(ctx)
+                                scope.launch(Dispatchers.IO) {
+                                    provider.signOut()
+                                    withContext(Dispatchers.Main) {
+                                        vm.setAppAuthLoggedIn(false)
+                                        vm.clearAuthInfo()
+                                        vm.setStatus("AppAuth signed out.")
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text(
+                            if (!appAuthLoggedIn) "AppAuth: Start sign-in" else "AppAuth: Sign out"
+                        )
+                    }
+
+                    OutlinedButton(
+                        enabled = authMethod == DriveAuthMethod.APPAUTH && appAuthLoggedIn,
+                        onClick = {
+                            val provider = AppAuthAuth.get(ctx)
+                            scope.launch(Dispatchers.IO) {
+                                val token = provider.getAccessToken()
+                                withContext(Dispatchers.Main) {
+                                    if (token != null) {
+                                        vm.setAppAuthLoggedIn(true)
+                                        vm.setStatus("AppAuth Token OK: ${token.take(12)}...")
+                                    } else {
+                                        vm.setStatus("AppAuth token is null (sign-in required?)")
+                                    }
+                                }
+                            }
+                        }
+                    ) {
+                        Text("AppAuth: Get token")
+                    }
                 }
             }
 

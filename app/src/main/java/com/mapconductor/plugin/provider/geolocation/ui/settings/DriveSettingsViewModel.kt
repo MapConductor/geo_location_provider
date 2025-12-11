@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
+import com.mapconductor.plugin.provider.geolocation.auth.AppAuthAuth
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
 import com.mapconductor.plugin.provider.geolocation.drive.ApiResult
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
@@ -49,6 +50,12 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val _status = MutableStateFlow("")
     val status: StateFlow<String> = _status
 
+    private val _cmLoggedIn = MutableStateFlow(false)
+    val cmLoggedIn: StateFlow<Boolean> = _cmLoggedIn
+
+    private val _appAuthLoggedIn = MutableStateFlow(false)
+    val appAuthLoggedIn: StateFlow<Boolean> = _appAuthLoggedIn
+
     init {
         viewModelScope.launch(Dispatchers.IO) {
             prefs.backupStatusFlow.collect { msg ->
@@ -57,14 +64,61 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val provider = AppAuthAuth.get(app)
+            val ok = provider.isAuthenticated()
+            _appAuthLoggedIn.value = ok
+        }
     }
 
     fun setStatus(message: String) {
         _status.value = message
     }
 
-    fun setAuthMethod(method: DriveAuthMethod) {
+    fun clearAuthInfo() {
         viewModelScope.launch {
+            prefs.setAccountEmail("")
+            prefs.setTokenUpdatedAt(0L)
+        }
+    }
+
+    fun setCmLoggedIn(value: Boolean) {
+        _cmLoggedIn.value = value
+    }
+
+    fun setAppAuthLoggedIn(value: Boolean) {
+        _appAuthLoggedIn.value = value
+    }
+
+    fun setAuthMethod(method: DriveAuthMethod) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = authMethod.value
+            if (current == method) return@launch
+
+            when (current) {
+                DriveAuthMethod.CREDENTIAL_MANAGER -> {
+                    if (cmLoggedIn.value) {
+                        runCatching {
+                            val provider = CredentialManagerAuth.get(getApplication())
+                            provider.signOut()
+                        }
+                        _cmLoggedIn.value = false
+                        clearAuthInfo()
+                    }
+                }
+                DriveAuthMethod.APPAUTH           -> {
+                    if (appAuthLoggedIn.value) {
+                        runCatching {
+                            val provider = AppAuthAuth.get(getApplication())
+                            provider.signOut()
+                        }
+                        _appAuthLoggedIn.value = false
+                        clearAuthInfo()
+                    }
+                }
+            }
+
             prefs.setAuthMethod(method.storageValue)
         }
     }
