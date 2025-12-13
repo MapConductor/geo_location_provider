@@ -1,133 +1,246 @@
 # GeoLocationProvider
 
-GeoLocationProvider is an Android SDK and sample application for **recording, storing, exporting, and uploading location data**.  
-It records background location to a Room database, exports it as GeoJSON+ZIP, and can upload the results to **Google Drive**.
+GeoLocationProvider is an Android SDK and sample application for
+**recording, storing, exporting, and uploading location data**.
+
+It records background location to a Room database, exports it as
+GeoJSON+ZIP, and can upload the results to **Google Drive** both via
+scheduled nightly backup and optional realtime upload.
 
 ---
 
 ## Features
 
-- Background location acquisition (configurable sampling interval)
-- Storage in a Room database (`LocationSample`, `ExportedDay`)
-- Export to GeoJSON format with ZIP compression
-- Automatic daily export at midnight (`MidnightExportWorker`)
-- Manual export for yesterday’s backup and today’s preview
-- Pickup feature (extract representative samples by period / count)
-- Google Drive upload with folder selection
+- Background location acquisition (configurable GPS / DR intervals).
+- Storage in a Room database (`LocationSample`, `ExportedDay`).
+- Export to GeoJSON format with optional ZIP compression.
+- Automatic daily export at midnight (`MidnightExportWorker`).
+- Manual export for “backup days before today” and “today preview”.
+- Pickup feature (extract representative samples by period / count).
+- Map visualization of GPS and Dead Reckoning tracks.
+- Google Drive upload with folder selection and auth diagnostics.
+- Realtime upload manager with interval and timezone settings.
 
 ---
 
-## Architecture
+## Architecture Overview
 
-### Module Structure
+### Modules
 
-This repository is organized as a multi-module Gradle project:
+The repository is a multi-module Gradle project:
 
-- **`:app`** – Jetpack Compose sample UI (history, Pickup, Drive settings, manual export).
-- **`:core`** – Location acquisition (`GeoLocationService`), sensor handling, and sampling interval application. Persists to `:storageservice` and uses `:deadreckoning`.
-- **`:storageservice`** – Room `AppDatabase` / DAOs and `StorageService` facade. Single entry point to the database for location logs and export status.
-- **`:dataselector`** – Pickup selection logic. Filters `LocationSample` by conditions and builds representative rows (`SelectedSlot`).
-- **`:datamanager`** – GeoJSON export, ZIP compression, `MidnightExportWorker` / `MidnightExportScheduler`, and Google Drive integration.
-- **`:deadreckoning`** – Dead Reckoning engine and public API (`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`).
-- **`:auth-appauth`** – AppAuth-based implementation of `GoogleDriveTokenProvider`.
-- **`:auth-credentialmanager`** – Credential Manager + Identity-based implementation of `GoogleDriveTokenProvider`.
+- `:app` – Jetpack Compose sample app (history, Pickup, Map, Drive
+  settings, Upload settings, manual backup).
+- `:core` – Foreground service (`GeoLocationService`), device sensor
+  handling, and shared config (`UploadEngine`). Persists via
+  `:storageservice`, uses `:gps` for GNSS and `:deadreckoning` for
+  IMU-based prediction.
+- `:gps` – Thin GPS abstraction:
+  - `GpsLocationEngine`, `GpsObservation`,
+    `FusedLocationGpsEngine` (wraps `FusedLocationProviderClient`
+    and `GnssStatus`).
+- `:storageservice` – Room `AppDatabase` / DAOs and
+  `StorageService`. Single entry point for location logs and
+  export status.
+- `:dataselector` – Pickup selection logic (grid snapping, thinning).
+- `:datamanager` – GeoJSON export, ZIP compression,
+  `MidnightExportWorker` / `MidnightExportScheduler`,
+  `RealtimeUploadManager`, Drive HTTP client and uploaders, Drive and
+  Upload prefs.
+- `:deadreckoning` – Dead Reckoning engine and public API
+  (`DeadReckoning`, `GpsFix`, `PredictedPoint`,
+  `DeadReckoningConfig`, `DeadReckoningFactory`).
+- `:auth-appauth` – AppAuth-based `GoogleDriveTokenProvider`.
+- `:auth-credentialmanager` – Credential Manager + Identity-based
+  `GoogleDriveTokenProvider`.
 
 High-level dependency directions:
 
-- `:app` → `:core`, `:dataselector`, `:datamanager`, `:storageservice`, auth modules  
-- `:core` → `:storageservice`, `:deadreckoning`  
-- `:datamanager` → `:storageservice`, Drive integration  
-- `:dataselector` → `LocationSampleSource` abstraction only (concrete implementation lives in `:app`, wrapping `StorageService`)
+- `:app` → `:core`, `:dataselector`, `:datamanager`,
+  `:storageservice`, `:deadreckoning`, `:gps`, auth modules.
+- `:core` → `:gps`, `:storageservice`, `:deadreckoning`.
+- `:dataselector` → `LocationSampleSource` abstraction only
+  (implemented in `:app` using `StorageService`).
+- `:datamanager` → `:core`, `:storageservice`, Drive integration.
 
 ### Key Components
 
-- **Entities: `LocationSample` / `ExportedDay`**  
-  `LocationSample` stores latitude, longitude, timestamp, speed, battery level, etc.  
-  `ExportedDay` tracks export status per day (local export, upload result, last error).
+**Entities and Storage**
 
-- **`StorageService`**  
-  Single facade around Room (`AppDatabase` / DAOs). All modules access the database through `StorageService` rather than DAOs directly.
+- `LocationSample` – One row per recorded point (lat/lon, accuracy,
+  provider, speed, heading/course, GNSS quality, battery state).
+- `ExportedDay` – Per-day export state (local export, upload result,
+  last error).
+- `StorageService` – Single facade around Room:
+  - Live tail via `latestFlow(ctx, limit)` (newest first).
+  - Range queries via `getLocationsBetween(ctx, from, to, softLimit)`.
+  - Convenience helpers for export status:
+    `ensureExportedDay`, `oldestNotUploadedDay`,
+    `nextNotUploadedDayAfter`, `exportedDayCount`,
+    `markExportedLocal`, `markUploaded`, `markExportError`.
+  - `lastSampleTimeMillis` is used to determine the last day that
+    needs backup.
 
-- **Pickup (`:dataselector`)**  
-  `SelectorCondition`, `SelectorRepository`, `BuildSelectedSlots` and `SelectorPrefs` implement the Pickup feature.  
-  They thin and snap samples to a time grid and represent gaps as `SelectedSlot(sample = null)`.  
-  `LocationSampleSource` abstracts where samples come from; the sample app implements it using `StorageService`.
+**GPS engine (`:gps`)**
 
-- **Dead Reckoning (`:deadreckoning`)**  
-  A public API (`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`) and an internal engine (`DeadReckoningEngine`, `DeadReckoningImpl`, etc.).  
-  `GeoLocationService` creates DR instances via `DeadReckoningFactory.create(applicationContext)` and controls them with `start()` / `stop()`. GPS fixes are treated as hard anchors: each fix resets the internal DR position to the GPS lat/lon and blends speed by `velocityGain`. The engine applies a per-step physical speed guard (`maxStepSpeedMps`) to drop IMU spikes, and exposes `isLikelyStatic()` for simple ZUPT-style static detection. Before the first GPS fix, `predict()` may return an empty list because the absolute position is not initialized yet.
+- `FusedLocationGpsEngine`:
+  - Uses `FusedLocationProviderClient` for positions and `GnssStatus`
+    for signal quality.
+  - Produces `GpsObservation` values with lat/lon, accuracy, speed,
+    optional bearing, and GNSS `(used, total, cn0Mean)`.
+- `GeoLocationService` only depends on `GpsLocationEngine` and
+  processes `GpsObservation` into DB rows and DR fixes.
 
-- **Midnight export (`MidnightExportWorker` / `MidnightExportScheduler`)**  
-  WorkManager-based pipeline that:
-  - Scans days up to “yesterday” in `Asia/Tokyo`
-  - Exports each day to GeoJSON+ZIP via `GeoJsonExporter`
-  - Marks local export (`markExportedLocal`)
-  - Optionally uploads to Drive using `UploaderFactory` and `GoogleDriveTokenProvider`
-  - Records upload status with `markUploaded` / `markExportError`
-  - Deletes ZIP files in all cases and deletes old samples after successful upload
+**Dead Reckoning (`:deadreckoning`)**
 
-- **Drive integration (`GoogleDriveTokenProvider` and friends)**  
-  `GoogleDriveTokenProvider` abstracts access tokens for Drive.  
-  `DriveTokenProviderRegistry` provides a background token provider for workers.  
-  `Uploader` / `UploaderFactory` (backed by `KotlinDriveUploader`) perform uploads using `DriveApiClient`.  
-  `GoogleAuthRepository` (GoogleAuthUtil-based) remains only for backward compatibility and is deprecated for new code.
+- Public API:
+  - `DeadReckoning`, `GpsFix`, `PredictedPoint`,
+    `DeadReckoningConfig`, `DeadReckoningFactory`.
+- Implementation (`DeadReckoningImpl`) is internal:
+  - Uses GPS fixes as anchors and integrates a 1D motion state along
+    the latest GPS direction.
+  - Maintains a short history of GPS “hold” positions to estimate
+    effective speed from both GPS speed and inter-fix distance.
+  - Uses a sliding window of horizontal accelerometer magnitude and
+    speed to detect static vs moving.
+  - Pins DR to the latest GPS hold location while static and enforces
+    `maxStepSpeedMps` to drop physically impossible spikes.
+  - `predict(from, to)` may return an empty list until a GPS anchor
+    exists.
+- `GeoLocationService`:
+  - Maintains a filtered “GPS hold” position separate from the raw
+    receive value.
+  - Submits GPS fixes using the hold position to DR:
+    `dr.submitGpsFix(GpsFix(timestampMillis, holdLat, holdLon, ...))`.
+  - Drives a DR ticker:
+    - Interval in seconds is read from
+      `SettingsRepository.drIntervalSecFlow`.
+    - `0` means “DR disabled (GPS only)” and the ticker is stopped.
+    - `> 0` periodically calls `dr.predict(...)` and inserts
+      `"dead_reckoning"` samples.
+  - Updates `DrDebugState` with engine-side static flag so the map
+    overlay can show `Static: YES/NO`.
 
-- **UI (Compose) – `MainActivity`, `GeoLocationProviderScreen`, `PickupScreen`, `DriveSettingsScreen`**  
-  The app has a two-level `NavHost`:
-  - Activity-level: `"home"` and `"drive_settings"` (Drive settings from the AppBar menu)
-  - App-level: `"home"` and `"pickup"` (Home vs Pickup in the main AppBar)  
-  Permissions are handled via `ActivityResultContracts.RequestMultiplePermissions`, and the Start/Stop toggle is encapsulated in `ServiceToggleAction`. The Map screen (under the `Map` tab in `GeoLocationProviderScreen`) uses MapConductor with a Google Maps backend and visualizes recent `LocationSample` rows as polylines: DeadReckoning as a red, thinner polyline drawn in front, and GPS as a blue, thicker polyline drawn behind it. Checkboxes for `GPS` and `DeadReckoning`, a `Count (1-1000)` field, and an `Apply` / `Cancel` button control which providers are shown and how many points are considered; the debug overlay in the top-right shows `GPS`, `DR`, and `ALL` counts as `shown / DB total`.
+**Export and Upload (`:datamanager`)**
+
+- Nightly export:
+  - `MidnightExportWorker` / `MidnightExportScheduler`:
+    - Timezone is taken from `UploadPrefs.zoneId` (IANA ID,
+      defaults to `Asia/Tokyo`).
+    - For each day up to “yesterday”, loads records via
+      `StorageService.getLocationsBetween`, exports GeoJSON+ZIP to
+      Downloads via `GeoJsonExporter`, and marks local export via
+      `markExportedLocal`.
+    - Resolves effective Drive folder using `DrivePrefsRepository`
+      (UI folder id/resourceKey) and `AppPrefs.folderId` as fallback.
+    - Uses `UploaderFactory` with `UploadEngine.KOTLIN` for upload.
+    - Records per-day status in `ExportedDay` and a human-readable
+      summary in `DrivePrefsRepository.backupStatus`.
+    - Always deletes the ZIP file; only deletes Room rows when upload
+      succeeds and the day had records.
+- Manual backlog:
+  - “Backup days before today” triggers `MidnightExportWorker.runNow`
+    in a mode that scans from the first to the last sample day using
+    `StorageService.lastSampleTimeMillis`, so days can be
+    re-processed on demand.
+- Realtime upload:
+  - `RealtimeUploadManager`:
+    - Subscribes to `UploadPrefsRepository` (schedule, interval,
+      timezone) and `SettingsRepository` (GPS/DR intervals).
+    - Watches `StorageService.latestFlow(limit = 1)` for new samples.
+    - Only acts when `UploadSchedule.REALTIME` is selected and Drive
+      is configured.
+    - Applies a cooldown based on `intervalSec` (0 or equal to the
+      sampling interval behave as “every sample”).
+    - On upload:
+      - Loads all samples via `StorageService.getAllLocations`.
+      - Generates GeoJSON to a cache file based on the latest sample
+        time and configured timezone.
+      - Resolves effective Drive folder, creates an uploader via
+        `UploaderFactory.create(context, appPrefs.engine)`, and
+        uploads the JSON.
+      - Deletes the cache file and, on success, deletes the uploaded
+        samples from Room.
+
+**UI (Compose, `:app`)**
+
+- `MainActivity`:
+  - Activity-level `NavHost` with routes: `"home"`,
+    `"drive_settings"`, `"upload_settings"`.
+  - Requests runtime permissions via
+    `ActivityResultContracts.RequestMultiplePermissions` and starts
+    `GeoLocationService` when granted.
+- `AppRoot`:
+  - Nested `NavHost` with `"home"`, `"pickup"`, `"map"`.
+  - AppBar:
+    - Title reflects current route (“GeoLocation”, “Pickup”, “Map”).
+    - Back button on Pickup and Map.
+    - On home route: `Map`, `Pickup`, `Drive`, `Upload` buttons plus
+      `ServiceToggleAction` (start/stop service).
+- Screens:
+  - `GeoLocationProviderScreen` – Interval controls + history list.
+  - `PickupScreen` – Pickup conditions and results (via
+    `SelectorUseCases`).
+  - `MapScreen` – MapConductor `GoogleMapsView` that:
+    - Shows GPS and DR polylines (blue GPS behind, red DR in front)
+      built strictly in time order.
+    - Has `GPS` / `DeadReckoning` checkboxes, `Count` field
+      (1–5000), and `Apply` / `Cancel` buttons.
+    - On `Apply`, locks controls and draws polylines using up to
+      `Count` newest samples.
+    - On `Cancel`, clears polylines and unlocks controls while
+      keeping camera position.
+    - Draws an accuracy circle for the latest GPS sample.
+    - Shows a debug overlay with:
+      - `GPS`, `DR`, `ALL` counts (`shown / DB total`).
+      - Static flag from `DrDebugState`.
+      - DR–GPS distance and latest GPS accuracy / “weight”.
+  - `DriveSettingsScreen` – Auth method selection (Credential Manager
+    vs AppAuth), sign-in/out, “Get token”, Drive folder settings,
+    “Backup days before today”, and “Today preview”.
+  - `UploadSettingsScreen` – Upload on/off, nightly vs realtime,
+    interval (seconds), timezone, and status hints.
 
 ---
 
-## Public API Overview
+## Public Library Surface
 
-GeoLocationProvider is intended to be used both as:
+The primary reusable APIs are intentionally small. When consuming the
+libraries, prefer these modules and types:
 
-- A **sample app** (module `:app`) you can run as-is
-- A **set of reusable libraries** that you can depend on from your own app
+- `:storageservice`:
+  - `StorageService`, `LocationSample`, `ExportedDay`,
+    `SettingsRepository`.
+- `:dataselector`:
+  - `SelectorCondition`, `SortOrder`, `SelectedSlot`,
+    `LocationSampleSource`, `SelectorRepository`,
+    `BuildSelectedSlots`, `SelectorPrefs`.
+- `:datamanager`:
+  - Auth and tokens:
+    `GoogleDriveTokenProvider`, `DriveTokenProviderRegistry`.
+  - Drive / upload settings:
+    `DrivePrefsRepository`, `UploadPrefsRepository`,
+    `UploadSchedule`.
+  - Drive API:
+    `DriveApiClient`, `DriveFolderId`, `UploadResult`.
+  - Export / upload:
+    `UploadEngine`, `GeoJsonExporter`, `Uploader`, `UploaderFactory`,
+    `RealtimeUploadManager`.
+  - Background jobs:
+    `MidnightExportWorker`, `MidnightExportScheduler`.
+- `:deadreckoning`:
+  - `DeadReckoning`, `GpsFix`, `PredictedPoint`,
+    `DeadReckoningConfig`, `DeadReckoningFactory`.
+- `:gps`:
+  - `GpsLocationEngine`, `GpsObservation`,
+    `FusedLocationGpsEngine`.
 
-When consuming the libraries, you typically depend on the following modules and types:
-
-### Modules and main entry points
-
-- **`:core`**
-  - `GeoLocationService` – Foreground service that records `LocationSample` into the database.
-  - `UploadEngine` – Enum indicating which upload engine to use.
-
-- **`:storageservice`**
-  - `StorageService` – Single facade around Room (`LocationSample`, `ExportedDay`).
-  - `LocationSample`, `ExportedDay` – Primary entities for location logs and export status.
-  - `SettingsRepository` – Sampling / Dead Reckoning interval configuration.
-
-- **`:dataselector`**
-  - `SelectorCondition`, `SelectedSlot`, `SortOrder` – Pickup / query domain model.
-  - `LocationSampleSource` – Abstraction over the source of `LocationSample`.
-  - `SelectorRepository`, `BuildSelectedSlots` – Core selection logic and a small use-case wrapper.
-  - `SelectorPrefs` – DataStore facade for persisting Pickup conditions.
-
-- **`:datamanager`**
-  - `GeoJsonExporter` – Export `LocationSample` to GeoJSON + ZIP.
-  - `GoogleDriveTokenProvider` – Abstraction for Drive access tokens.
-  - `DriveTokenProviderRegistry` – Registry for a background token provider.
-  - `Uploader`, `UploaderFactory` – High-level Drive upload entry points.
-  - `DriveApiClient`, `DriveFolderId`, `UploadResult` – Drive REST helpers and result types.
-  - `MidnightExportWorker`, `MidnightExportScheduler` – Daily export pipeline.
-
-- **`:deadreckoning`**
-  - `DeadReckoning`, `GpsFix`, `PredictedPoint` – DR engine API used by `GeoLocationService`.
-  - `DeadReckoningConfig`, `DeadReckoningFactory` – Configuration object and factory for creating DR instances.
-
-- **`:auth-credentialmanager` / `:auth-appauth`** (optional)
-  - `CredentialManagerTokenProvider`, `AppAuthTokenProvider` – Reference implementations of `GoogleDriveTokenProvider`.
-
-All other types (DAO and `AppDatabase` definitions, repository implementations, low-level HTTP helpers, etc.) are **internal details** and may change without notice.
+Other types (DAOs, internal engines, HTTP helpers, etc.) should be
+treated as implementation details and may change without notice.
 
 ---
 
 ## Minimal Integration Examples
-
-The following snippets illustrate end-to-end integration in your own app.
 
 ### 1. Start the location service and observe history
 
@@ -139,51 +252,12 @@ private fun startLocationService() {
     ContextCompat.startForegroundService(this, intent)
 }
 
-private fun stopLocationService() {
-    val intent = Intent(this, GeoLocationService::class.java)
-        .setAction(GeoLocationService.ACTION_STOP)
-    startService(intent)
-}
+// Observe the latest N samples from your UI/ViewModel
+val flow: Flow<List<LocationSample>> =
+    StorageService.latestFlow(context, limit = 100)
 ```
 
-```kotlin
-// In a ViewModel
-class HistoryViewModel(app: Application) : AndroidViewModel(app) {
-    val latest: StateFlow<List<LocationSample>> =
-        StorageService.latestFlow(app.applicationContext, limit = 100)
-            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-}
-```
-
-### 2. Run Pickup (selection) on stored samples
-
-```kotlin
-// Build a LocationSampleSource backed by StorageService
-class StorageSampleSource(
-    private val context: Context
-) : LocationSampleSource {
-    override suspend fun findBetween(fromInclusive: Long, toExclusive: Long): List<LocationSample> {
-        return StorageService.getLocationsBetween(context, fromInclusive, toExclusive)
-    }
-}
-
-suspend fun runPickup(context: Context): List<SelectedSlot> {
-    val source = StorageSampleSource(context.applicationContext)
-    val repo = SelectorRepository(source)
-    val useCase = BuildSelectedSlots(repo)
-
-    val cond = SelectorCondition(
-        fromMillis = /* startMs */,
-        toMillis = /* endMs */,
-        intervalSec = 60,         // 60‑second grid
-        limit = 1000,
-        order = SortOrder.OldestFirst
-    )
-    return useCase(cond)
-}
-```
-
-### 3. Configure Drive upload and daily export
+### 2. Configure Drive upload, nightly backup, and realtime upload
 
 ```kotlin
 // In your Application class
@@ -191,23 +265,26 @@ class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        // Example: reuse CredentialManagerTokenProvider from :auth-credentialmanager
+        // Example: reuse Credential Manager provider from :auth-credentialmanager
         val provider = CredentialManagerTokenProvider(
             context = this,
             serverClientId = BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
         )
 
-        // Register background provider for MidnightExportWorker
+        // Register background provider for workers and realtime uploads
         DriveTokenProviderRegistry.registerBackgroundProvider(provider)
 
-        // Schedule daily export at midnight
+        // Schedule daily export at midnight (uses UploadPrefs timezone)
         MidnightExportScheduler.scheduleNext(this)
+
+        // Start realtime upload manager (reads UploadPrefs schedule/interval)
+        RealtimeUploadManager.start(this)
     }
 }
 ```
 
 ```kotlin
-// Manually upload a file to Drive using UploaderFactory (optional)
+// Optional: manually upload a file to Drive using UploaderFactory
 suspend fun uploadFileNow(
     context: Context,
     tokenProvider: GoogleDriveTokenProvider,
@@ -226,251 +303,81 @@ suspend fun uploadFileNow(
 
 ---
 
-## Google Drive Authentication Options
+## Drive Authentication Options (Overview)
 
-All Drive uploads go through `GoogleDriveTokenProvider`. The core contract is:
+All Drive uploads go through `GoogleDriveTokenProvider`. Recommended
+paths:
 
-- Tokens are **bare access tokens** (without `"Bearer "` prefix).
-- Normal failures (network error, not signed in, missing consent, etc.) should be signalled by returning `null`, not by throwing.
-- Providers must never launch UI directly from background contexts; if a UI flow is needed, return `null` and let the app decide.
+- **Credential Manager** (`:auth-credentialmanager`):
+  - Uses Google Identity / Credential Manager with a web/server
+    client ID (`CREDENTIAL_MANAGER_SERVER_CLIENT_ID`).
+  - Good default for background workers and the sample app.
+- **AppAuth** (`:auth-appauth`):
+  - Uses AppAuth for Android with an “installed app” client ID
+    (`APPAUTH_CLIENT_ID`) and a custom scheme redirect
+    `com.mapconductor.plugin.provider.geolocation:/oauth2redirect`.
 
-You can choose one of the following implementations or provide your own.
+Both implementations:
 
-### Option 1: AppAuth (standard OAuth 2.0 with PKCE)
+- Return bare access tokens (no `"Bearer "` prefix).
+- Return `null` on normal failures instead of throwing.
+- Must not start UI from background contexts; workers use
+  `DriveTokenProviderRegistry` instead.
 
-This option uses [AppAuth for Android](https://github.com/openid/AppAuth-Android) to perform OAuth 2.0 for native apps.
-
-1) Add dependency to your app module:
-
-```gradle
-implementation(project(":auth-appauth"))
-```
-
-2) Create OAuth 2.0 credentials in Google Cloud Console:
-
-- Configure the OAuth consent screen.
-- Create an **Installed application** client (Android / other installed apps), **not** a Web application client.
-- Allow a custom URI scheme, for example: `com.mapconductor.plugin.provider.geolocation`.
-- Register a redirect URI, e.g.:
-
-```text
-com.mapconductor.plugin.provider.geolocation:/oauth2redirect
-```
-
-3) Initialize the token provider (example):
-
-```kotlin
-val tokenProvider = AppAuthTokenProvider(
-    context = applicationContext,
-    clientId = BuildConfig.APPAUTH_CLIENT_ID,
-    redirectUri = "com.mapconductor.plugin.provider.geolocation:/oauth2redirect"
-)
-
-// Start authorization from an Activity
-val intent = tokenProvider.buildAuthorizationIntent()
-startActivityForResult(intent, REQUEST_CODE)
-
-// Handle response
-tokenProvider.handleAuthorizationResponse(data)
-
-// Use with uploader
-val uploader = KotlinDriveUploader(context, tokenProvider)
-```
-
-In the sample project, `APPAUTH_CLIENT_ID` is provided via `secrets.properties` and `secrets-gradle-plugin`.
-
-### Option 2: Credential Manager (modern Android auth, used by the sample app)
-
-This option uses the Android Credential Manager + Identity APIs. It is the default path for the sample app and integrates well with Android 14+.
-
-1) Add dependency to your app module:
-
-```gradle
-implementation(project(":auth-credentialmanager"))
-```
-
-2) Create OAuth 2.0 credentials in Google Cloud Console:
-
-- Create **Web application** credentials.
-- Use the resulting client ID as the **server client ID**.
-
-3) Initialize the token provider:
-
-```kotlin
-val tokenProvider = CredentialManagerTokenProvider(
-    context = applicationContext,
-    serverClientId = BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID
-)
-
-// Sign in (from Activity / UI)
-val credential = tokenProvider.signIn()
-
-// Get token (can also be used from background)
-val token = tokenProvider.getAccessToken()
-```
-
-In the sample app:
-
-- `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` is read from `BuildConfig.CREDENTIAL_MANAGER_SERVER_CLIENT_ID`.
-- That value is generated by `secrets-gradle-plugin` from the `CREDENTIAL_MANAGER_SERVER_CLIENT_ID` key in `secrets.properties`.
-- `App` registers `CredentialManagerAuth` as background provider via `DriveTokenProviderRegistry`.
-
-### Option 3: Legacy (deprecated, backward compatibility only)
-
-The legacy `GoogleAuthRepository` (GoogleAuthUtil-based) is still available but is **deprecated** and should not be used in new code:
-
-```kotlin
-@Deprecated("Use AppAuth or Credential Manager instead")
-val tokenProvider = GoogleAuthRepository(context)
-```
-
-### Required OAuth Scopes
-
-All implementations use the following Google Drive scopes:
-
-- `https://www.googleapis.com/auth/drive.file` – Access to files created/opened by the app.
-- `https://www.googleapis.com/auth/drive.metadata.readonly` – Used for folder ID validation and metadata.
-
-### Custom Implementation
-
-You can also provide your own implementation of `GoogleDriveTokenProvider`:
-
-```kotlin
-class MyCustomTokenProvider : GoogleDriveTokenProvider {
-    override suspend fun getAccessToken(): String? {
-        // Your custom implementation
-    }
-
-    override suspend fun refreshToken(): String? {
-        // Your custom implementation
-    }
-}
-```
+See `AGENTS.md`, `README_JA.md`, or `README_ES.md` for more detailed
+Cloud Console configuration.
 
 ---
 
-## Quick Start
+## Configuration Files
 
-> The modules `app`, `core`, `dataselector`, `datamanager`, `storageservice`, `deadreckoning`, and `auth-*` are already wired together.  
-> You only need to prepare local configuration files and (optionally) Google Drive credentials to build and run the sample app.
-
-### 0. Requirements
-
-- Android Studio with AGP 8.1+ support (or the bundled `./gradlew`)
-- JDK 17 (Gradle and Kotlin JVM target 17)
-- Android SDK with API level 26+ installed (project uses `compileSdk = 36`)
-
-### 1. Prepare `local.properties`
-
-`local.properties` stores **developer machine–specific settings** such as the Android SDK path (normally excluded from Git).  
-Android Studio usually generates this file automatically; if not, create it at the project root.
-
-**Example: `local.properties` (local environment, do not commit)**
-
-```properties
-sdk.dir=C:\\Android\\Sdk          # Example for Windows
-# sdk.dir=/Users/you/Library/Android/sdk   # Example for macOS
-org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
-```
-
-### 2. Prepare `secrets.properties`
-
-`secrets.properties` stores **authentication-related and other sensitive values** used by the `secrets-gradle-plugin`.  
-The repository includes `local.default.properties` as a template; copy it and replace the values as needed:
-
-```bash
-cp local.default.properties secrets.properties   # or copy manually on Windows
-```
-
-**Example: `local.default.properties` (template, committed)**
-
-```properties
-# Credential Manager (server) client ID for Google Sign-In / Identity.
-CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
-
-# AppAuth (installed app) client ID for OAuth2 with custom scheme redirect.
-# Use an "installed app" client, not the server client ID above.
-APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
-```
-
-**Example: `secrets.properties` (local file, do not commit)**
+- `local.properties` (not committed):
+  - Local Android SDK path and Gradle-related settings.
+- `secrets.properties` (not committed):
+  - Values used by the `secrets-gradle-plugin`, for example:
 
 ```properties
 CREDENTIAL_MANAGER_SERVER_CLIENT_ID=YOUR_SERVER_CLIENT_ID.apps.googleusercontent.com
 APPAUTH_CLIENT_ID=YOUR_APPAUTH_CLIENT_ID.apps.googleusercontent.com
-
-# Optional: Google Maps API key used by the sample app manifest.
 GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY
 ```
 
-For local builds, dummy values are sufficient.  
-To actually sign in and upload to Drive or use Maps, configure real client IDs and API keys in `secrets.properties`.
-
-### 3. Configure Google Drive Integration
-
-To use Drive upload, prepare OAuth 2.0 settings in Google Cloud Console:
-
-1. Create a project and configure the OAuth consent screen.  
-2. Create OAuth client IDs:
-   - A **Web application** client for Credential Manager (`CREDENTIAL_MANAGER_SERVER_CLIENT_ID`).
-   - An **Installed app** client for AppAuth (`APPAUTH_CLIENT_ID`) using the custom scheme/redirect URI.  
-3. Enable the Drive API and grant the scopes:
-   - `https://www.googleapis.com/auth/drive.file`
-   - `https://www.googleapis.com/auth/drive.metadata.readonly`
-4. Put the client IDs in `secrets.properties` as shown above.
-
-### 4. Add permissions (for confirmation)
-
-```xml
-<!-- app/src/main/AndroidManifest.xml -->
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-<uses-permission android:name="android.permission.INTERNET" />
-
-<!-- Optional: only if you need location access while no foreground service or UI is visible -->
-<!-- <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" /> -->
-```
-
-### 5. Build
-
-```bash
-./gradlew :app:assembleDebug
-```
+Use `local.default.properties` as a template and adjust values for
+your environment.
 
 ---
 
-## Development
+## Development Notes
 
-- Follows Kotlin coding conventions.
-- UI implemented with Jetpack Compose.
-- Persistence implemented with Room + DataStore (for settings).
-- Background jobs implemented with WorkManager (`MidnightExportWorker`, `MidnightExportScheduler`).
-- Common formatting helpers live in utility classes such as `Formatters.kt`.
+- Kotlin + Jetpack Compose UI.
+- Persistence via Room (`:storageservice`) and DataStore for settings.
+- Background jobs via WorkManager (`MidnightExportWorker`,
+  `MidnightExportScheduler`).
+- GPS / Dead Reckoning via dedicated modules (`:gps`,
+  `:deadreckoning`).
 
-### Source encoding and comments
+Source encoding and comments:
 
-- All production source files in this repository (Kotlin / Java / XML / Gradle scripts, etc.) are written using **ASCII characters only**.  
-  Non-ASCII characters are not used in code, comments, or string literals to avoid encoding issues across tools and platforms.
-- Multilingual documentation (Japanese / Spanish) is provided separately in `README_JA.md`, `README_ES.md` and other `*.md` files.
-- Comment style is unified across modules:
-  - Public APIs and key classes use KDoc (`/** ... */`) to describe role, design policy, usage, and contracts.
-  - Internal implementation details use simple `// ...` line comments and minimal section headers such as `// ---- Section ----`.
-  - Decorative banners or inconsistent separator styles are avoided.
+- All production source files (Kotlin / Java / XML / Gradle scripts)
+  use **ASCII only** to avoid encoding issues.
+- Multilingual documentation is provided in separate `*.md` files.
+- Public APIs use KDoc (`/** ... */`); internal details use simple
+  `// ...` comments with consistent section headings.
 
 ---
 
-## Feature Implementation Status
+## Feature Status
 
-| Feature                    | Status          | Notes                                             |
-|----------------------------|-----------------|---------------------------------------------------|
-| Location recording (Room)  | [v] Implemented | Saved in Room DB                                  |
-| Daily export (GeoJSON+ZIP) | [v] Implemented | Executed at midnight by `MidnightExportWorker`    |
-| Google Drive upload        | [v] Implemented | Uses Kotlin-based uploader                        |
-| Pickup (interval/count)    | [v] Implemented | Uses ViewModel + UseCase + Compose UI             |
-| Drive full-scope auth      | [-] In progress | Full-scope browsing/updating of existing files    |
-| UI: DriveSettingsScreen    | [v] Implemented | Auth, folder settings, connectivity tests         |
-| UI: PickupScreen           | [v] Implemented | Input conditions and display of extracted results |
-| UI: History list           | [v] Implemented | Chronological view of saved samples               |
+| Feature                      | Status          | Notes                                              |
+|------------------------------|-----------------|----------------------------------------------------|
+| Location recording (Room)    | [v] Implemented | Saved as `LocationSample` rows                     |
+| Daily export (GeoJSON+ZIP)   | [v] Implemented | `MidnightExportWorker` + `MidnightExportScheduler` |
+| Google Drive upload          | [v] Implemented | Kotlin-based uploader via `UploaderFactory`        |
+| Pickup (interval/count)      | [v] Implemented | `:dataselector` + Compose UI                       |
+| Map visualization            | [v] Implemented | GPS/DR polylines + debug overlay                   |
+| Realtime upload              | [v] Implemented | `RealtimeUploadManager` + Upload settings          |
+| UI: DriveSettingsScreen      | [v] Implemented | Auth, folder settings, backup / preview actions    |
+| UI: UploadSettingsScreen     | [v] Implemented | Schedule, interval, timezone, guardrails           |
+| UI: PickupScreen             | [v] Implemented | Pickup input and result list                       |
+| UI: History list             | [v] Implemented | Chronological view of saved samples                |
+
