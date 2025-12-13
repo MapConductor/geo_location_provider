@@ -42,10 +42,12 @@ import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleA
 import com.mapconductor.plugin.provider.geolocation.ui.map.MapScreen
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
+import com.mapconductor.plugin.provider.geolocation.ui.settings.UploadSettingsScreen
 
 private const val ROUTE_HOME = "home"
 private const val ROUTE_PICKUP = "pickup"
 private const val ROUTE_MAP = "map"
+private const val ROUTE_UPLOAD_SETTINGS = "upload_settings"
 
 class MainActivity : ComponentActivity() {
 
@@ -75,7 +77,8 @@ class MainActivity : ComponentActivity() {
                         AppRoot(
                             onStartTracking = { requestPermissionsAndStartService() },
                             onStopTracking = { stopLocationService() },
-                            onOpenDriveSettings = { navController.navigate("drive_settings") }
+                            onOpenDriveSettings = { navController.navigate("drive_settings") },
+                            onOpenUploadSettings = { navController.navigate(ROUTE_UPLOAD_SETTINGS) }
                         ) {
                             Surface(modifier = Modifier.fillMaxSize()) {
                                 val vm: GeoLocationProviderViewModel = viewModel()
@@ -88,6 +91,11 @@ class MainActivity : ComponentActivity() {
                     }
                     composable("drive_settings") {
                         DriveSettingsScreen(
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                    composable(ROUTE_UPLOAD_SETTINGS) {
+                        UploadSettingsScreen(
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -166,6 +174,7 @@ private fun AppRoot(
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
     onOpenDriveSettings: () -> Unit,
+    onOpenUploadSettings: () -> Unit,
     content: @Composable () -> Unit
 ) {
     val navController = rememberNavController()
@@ -206,6 +215,8 @@ private fun AppRoot(
                         }) { Text("Pickup") }
 
                         TextButton(onClick = onOpenDriveSettings) { Text("Drive") }
+
+                        TextButton(onClick = onOpenUploadSettings) { Text("Upload") }
 
                         ServiceToggleAction()
                     }

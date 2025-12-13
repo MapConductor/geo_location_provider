@@ -12,11 +12,13 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
+import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import kotlinx.coroutines.flow.first
 import java.time.Duration
@@ -39,9 +41,10 @@ class MidnightExportWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
-    private val zone: ZoneId = ZoneId.of("Asia/Tokyo")
+    private var zone: ZoneId = ZoneId.of("Asia/Tokyo")
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
     private val drivePrefs: DrivePrefsRepository = DrivePrefsRepository(appContext)
+    private val uploadPrefs: UploadPrefsRepository = UploadPrefsRepository(appContext)
 
     companion object {
         private const val TAG = "MidnightExportWorker"
@@ -68,7 +71,30 @@ class MidnightExportWorker(
     }
 
     override suspend fun doWork(): Result {
+        // Resolve timezone and schedule from UploadPrefs.
+        val schedule = runCatching { uploadPrefs.scheduleFlow.first() }
+            .getOrNull() ?: UploadSchedule.NIGHTLY
+        val zoneId = runCatching { uploadPrefs.zoneIdFlow.first() }
+            .getOrNull().orEmpty()
+        zone = try {
+            if (zoneId.isNotBlank()) ZoneId.of(zoneId) else ZoneId.of("Asia/Tokyo")
+        } catch (_: Throwable) {
+            ZoneId.of("Asia/Tokyo")
+        }
+
         val forceFullScan = inputData.getBoolean(KEY_FORCE_FULL_SCAN, false)
+
+        // When invoked by scheduler (non-force), respect schedule and skip when not NIGHTLY.
+        if (!forceFullScan && schedule != UploadSchedule.NIGHTLY) {
+            runCatching {
+                val msg = "Midnight export skipped: schedule=${schedule.wire}"
+                drivePrefs.setBackupStatus(msg)
+            }
+            // Still schedule next run so that changes to schedule are picked up.
+            scheduleNext(applicationContext)
+            return Result.success()
+        }
+
         val today = ZonedDateTime.now(zone).truncatedTo(ChronoUnit.DAYS).toLocalDate()
         val todayEpochDay = today.toEpochDay()
 

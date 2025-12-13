@@ -42,6 +42,7 @@ import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
+import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
 import com.mapconductor.plugin.provider.storageservice.StorageService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -351,7 +352,14 @@ private suspend fun runTodayPreviewIO(
     ctx: android.content.Context,
     upload: Boolean
 ): String = withContext(Dispatchers.IO) {
-    val zone = ZoneId.of("Asia/Tokyo")
+    val uploadPrefs = UploadPrefsRepository(ctx)
+    val zoneId = runCatching { uploadPrefs.zoneIdFlow.first() }
+        .getOrNull().orEmpty()
+    val zone = try {
+        if (zoneId.isNotBlank()) ZoneId.of(zoneId) else ZoneId.of("Asia/Tokyo")
+    } catch (_: Throwable) {
+        ZoneId.of("Asia/Tokyo")
+    }
     val nowJst = ZonedDateTime.now(zone)
     val today0 = nowJst.truncatedTo(ChronoUnit.DAYS)
     val todayEpochDay = today0.toLocalDate().toEpochDay()

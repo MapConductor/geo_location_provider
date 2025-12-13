@@ -103,7 +103,7 @@ object GeoJsonExporter {
     }
 
     /** LocationSample -> GeoJSON (FeatureCollection). */
-    private fun toGeoJson(records: List<LocationSample>): String {
+    internal fun toGeoJson(records: List<LocationSample>): String {
         val sb = StringBuilder(1024)
         sb.append("{\"type\":\"FeatureCollection\",\"features\":[")
         records.forEachIndexed { i, r ->
@@ -132,4 +132,3 @@ object GeoJsonExporter {
         return sb.toString()
     }
 }
-
