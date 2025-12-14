@@ -12,6 +12,7 @@ import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
+import com.mapconductor.plugin.provider.geolocation.drive.auth.DriveTokenProviderRegistry
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportWorker
@@ -65,10 +66,20 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        // Initialize AppAuth login flag based on current authentication state.
         viewModelScope.launch(Dispatchers.IO) {
             val provider = AppAuthAuth.get(app)
             val ok = provider.isAuthenticated()
             _appAuthLoggedIn.value = ok
+        }
+
+        // Initialize Credential Manager login flag by probing token availability.
+        // This keeps the "CM: Start sign-in / Sign out" label consistent when
+        // the screen is recreated or revisited.
+        viewModelScope.launch(Dispatchers.IO) {
+            val provider = CredentialManagerAuth.get(app)
+            val token = provider.getAccessToken()
+            _cmLoggedIn.value = token != null
         }
     }
 
@@ -89,6 +100,32 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun setAppAuthLoggedIn(value: Boolean) {
         _appAuthLoggedIn.value = value
+    }
+
+    /**
+     * Mark AppAuth as signed in at the settings level.
+     *
+     * UploadSettingsViewModel uses DrivePrefs.accountEmail to decide whether
+     * Drive is "configured". For AppAuth we follow the same pattern as
+     * Credential Manager and store a non-blank placeholder so UploadSettings
+     * can treat Drive as configured even before a Drive API call resolves
+     * the real email address.
+     */
+    fun markAppAuthSignedIn() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Ensure authMethod is persisted as AppAuth.
+            prefs.setAuthMethod(DriveAuthMethod.APPAUTH.storageValue)
+            // Store a non-blank placeholder if none is set yet.
+            if (accountEmail.value.isBlank()) {
+                prefs.setAccountEmail("appauth_signed_in")
+            }
+            // Ensure upload engine is set to Kotlin for background paths.
+            AppPrefs.saveEngine(getApplication(), UploadEngine.KOTLIN)
+            // Use AppAuth tokens for background uploads.
+            DriveTokenProviderRegistry.registerBackgroundProvider(
+                AppAuthAuth.get(getApplication())
+            )
+        }
     }
 
     fun setAuthMethod(method: DriveAuthMethod) {
@@ -120,6 +157,31 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             prefs.setAuthMethod(method.storageValue)
+        }
+    }
+
+    /**
+     * Mark Credential Manager as signed in at the settings level.
+     *
+     * UploadSettingsViewModel uses DrivePrefs.accountEmail to decide whether
+     * Drive is "configured". To keep the UX simple, we treat a successful
+     * Credential Manager sign-in as "configured" even before a Drive API
+     * call has resolved the actual email address.
+     */
+    fun markCredentialManagerSignedIn() {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Ensure authMethod is persisted as Credential Manager.
+            prefs.setAuthMethod(DriveAuthMethod.CREDENTIAL_MANAGER.storageValue)
+            // Store a non-blank placeholder so that UploadSettings can treat
+            // Drive as configured. A later callAboutGet() will overwrite this
+            // with the real email if available.
+            if (accountEmail.value.isBlank()) {
+                prefs.setAccountEmail("cm_signed_in")
+            }
+            // Use Credential Manager tokens for background uploads.
+            DriveTokenProviderRegistry.registerBackgroundProvider(
+                CredentialManagerAuth.get(getApplication())
+            )
         }
     }
 

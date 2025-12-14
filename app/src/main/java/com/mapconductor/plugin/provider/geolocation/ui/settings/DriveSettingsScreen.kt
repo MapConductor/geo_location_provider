@@ -159,6 +159,9 @@ fun DriveSettingsScreen(
                                     if (credential != null) {
                                         vm.setCmLoggedIn(true)
                                         vm.setStatus("CM sign-in OK.")
+                                        // Persist a "signed in" marker so UploadSettings
+                                        // can treat Drive as configured.
+                                        vm.markCredentialManagerSignedIn()
                                     } else {
                                         vm.setStatus("CM sign-in canceled or failed.")
                                     }
@@ -183,21 +186,16 @@ fun DriveSettingsScreen(
                     OutlinedButton(
                         enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER && cmLoggedIn,
                         onClick = {
-                            val provider = CredentialManagerAuth.get(ctx)
-                            scope.launch(Dispatchers.IO) {
-                                val token = provider.getAccessToken()
-                                withContext(Dispatchers.Main) {
-                                    if (token != null) {
-                                        vm.setCmLoggedIn(true)
-                                        vm.setStatus("CM Token OK: ${token.take(12)}...")
-                                    } else {
-                                        vm.setStatus("CM Token is null (sign-in required?)")
-                                    }
-                                }
-                            }
+                            // Use DriveSettingsViewModel.callAboutGet() to:
+                            // - Probe token via the selected Credential Manager account.
+                            // - Call Drive API aboutGet to resolve account email.
+                            // - Persist accountEmail / tokenUpdatedAt in DrivePrefs.
+                            // This ensures UploadSettings (which checks DrivePrefs.accountEmail)
+                            // can see that Drive auth is configured.
+                            vm.callAboutGet()
                         }
                     ) {
-                        Text("CM: Get token")
+                        Text("CM: Get token & account")
                     }
                 }
 
@@ -231,22 +229,23 @@ fun DriveSettingsScreen(
                         )
                     }
 
-                    OutlinedButton(
-                        enabled = authMethod == DriveAuthMethod.APPAUTH && appAuthLoggedIn,
-                        onClick = {
-                            val provider = AppAuthAuth.get(ctx)
-                            scope.launch(Dispatchers.IO) {
-                                val token = provider.getAccessToken()
-                                withContext(Dispatchers.Main) {
-                                    if (token != null) {
-                                        vm.setAppAuthLoggedIn(true)
-                                        vm.setStatus("AppAuth Token OK: ${token.take(12)}...")
-                                    } else {
-                                        vm.setStatus("AppAuth token is null (sign-in required?)")
-                                    }
-                                }
-                            }
-                        }
+                      OutlinedButton(
+                          enabled = authMethod == DriveAuthMethod.APPAUTH && appAuthLoggedIn,
+                          onClick = {
+                              val provider = AppAuthAuth.get(ctx)
+                              scope.launch(Dispatchers.IO) {
+                                  val token = provider.getAccessToken()
+                                  withContext(Dispatchers.Main) {
+                                      if (token != null) {
+                                          vm.setAppAuthLoggedIn(true)
+                                          vm.markAppAuthSignedIn()
+                                          vm.setStatus("AppAuth Token OK: ${token.take(12)}...")
+                                      } else {
+                                          vm.setStatus("AppAuth token is null (sign-in required?)")
+                                      }
+                                  }
+                              }
+                          }
                     ) {
                         Text("AppAuth: Get token")
                     }

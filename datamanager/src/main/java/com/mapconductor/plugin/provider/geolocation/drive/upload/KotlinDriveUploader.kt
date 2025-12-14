@@ -19,6 +19,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import okio.source
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.net.URLEncoder
 
@@ -48,7 +49,8 @@ internal class KotlinDriveUploader(
                 DriveFolderId.extractFromUrlOrId(folderId)?.takeIf { it.isNotBlank() }
 
             // Small payloads use multipart (simple upload); larger ones use resumable.
-            val useResumable = size == null || size > 2L * 1024 * 1024 // >2MB threshold.
+            // When size is unknown, prefer simple upload to avoid partial-chunk errors.
+            val useResumable = size != null && size > 2L * 1024 * 1024 // >2MB threshold.
 
             return@withContext if (!useResumable) {
                 simpleUpload(token, cr, uri, name, mime, parentId)
@@ -331,7 +333,19 @@ internal class KotlinDriveUploader(
 
     private fun guessMime(cr: ContentResolver, uri: Uri): String? = cr.getType(uri)
 
-    private fun tryGetSize(cr: ContentResolver, uri: Uri): Long? =
-        cr.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+    private fun tryGetSize(cr: ContentResolver, uri: Uri): Long? {
+        val fromQuery = cr.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
             ?.use { c -> if (c.moveToFirst()) c.getLong(0) else null }
+        if (fromQuery != null) return fromQuery
+
+        if (uri.scheme == ContentResolver.SCHEME_FILE) {
+            val path = uri.path
+            if (!path.isNullOrEmpty()) {
+                val len = File(path).length()
+                if (len > 0L) return len
+            }
+        }
+
+        return null
+    }
 }
