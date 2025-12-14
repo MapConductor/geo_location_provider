@@ -52,7 +52,7 @@ fun GeoLocationProviderScreen(
         }
     )
     val historyVm: HistoryViewModel = viewModel()
-    val records by historyVm.latest.collectAsState(initial = emptyList())
+    val records by historyVm.items.collectAsState(initial = emptyList())
 
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
@@ -131,4 +131,3 @@ private fun IntervalAndDrArea(
 
     Spacer(modifier = Modifier.height(8.dp))
 }
-
