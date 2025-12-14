@@ -1,289 +1,255 @@
 # Repository Guidelines (日本語サマリ)
 
-このドキュメントは、GeoLocationProvider リポジトリで作業する際の
-**モジュール構成、レイヤ責務、コーディング方針** を日本語で簡潔に
-まとめたものです。
-
-詳細な仕様・最新版の正本は英語版 `AGENTS.md` です。
-設計を変更する際は必ず `AGENTS.md` を参照し、本ファイルも必要に応じて
-併せて更新してください。
+このドキュメントは、GeoLocationProvider リポジトリの
+**モジュール構成・レイヤ責務・コーディング方針** を日本語で要約したものです。  
+正本・最新版は英語版 `AGENTS.md` です。設計変更時は必ず `AGENTS.md` を参照し、
+必要に応じて本ファイルも更新してください。
 
 ---
 
-## モジュール構成と依存関係
+## プロジェクト構成と依存関係
 
-- ルート Gradle プロジェクト `GeoLocationProvider` は主に次のモジュールから構成されます:
+- ルート Gradle プロジェクト `GeoLocationProvider` は主に次のモジュールから構成されます。
   - `:app` – Jetpack Compose ベースのサンプル UI  
-    (履歴一覧・Pickup・Map 画面・Drive 設定・Upload 設定・手動バックアップなど)。
-  - `:core` – Foreground サービス `GeoLocationService` とデバイスセンサー処理、  
-    共有設定 (`UploadEngine` など)。永続化は `:storageservice` に委譲し、GNSS は `:gps`、  
-    Dead Reckoning は `:deadreckoning` を利用します。
-  - `:gps` – GPS 抽象化 (`GpsLocationEngine`, `GpsObservation`,  
-    `FusedLocationGpsEngine`)。`FusedLocationProviderClient` と `GnssStatus` を  
-    ドメインモデルに変換し、`GeoLocationService` から利用されます。
-  - `:storageservice` – Room `AppDatabase` / DAO と `StorageService` ファサード。  
-    位置ログ (`LocationSample`) とエクスポート状態 (`ExportedDay`) の唯一の入口です。
-  - `:dataselector` – Pickup 用の選択ロジック。`LocationSampleSource` 抽象を通じて  
-    `LocationSample` をフィルタし、代表サンプル列 `SelectedSlot` を組み立てます。
-  - `:datamanager` – GeoJSON エクスポート・ZIP 圧縮・日次バックアップ  
-    (`MidnightExportWorker` / `MidnightExportScheduler`)・Realtime アップロード  
-    (`RealtimeUploadManager`)・Drive HTTP クライアント・Drive/Upload 設定の管理を行います。
-  - `:deadreckoning` – Dead Reckoning エンジンと公開 API  
-    (`DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`,  
-    `DeadReckoningFactory`)。
-  - `:auth-appauth` / `:auth-credentialmanager` –  
-    `GoogleDriveTokenProvider` の実装を提供する認証モジュール。
-  - `mapconductor-core-src` – MapConductor のコアソース (vendored)。  
-    基本的には **読み取り専用** とみなし、変更が必要な場合は upstream 寄りで検討します。
+    （履歴・Pickup・Map・Drive 設定・Upload 設定・手動バックアップ）
+  - `:core` – フォアグラウンドサービス `GeoLocationService`、センサー処理、
+    共通設定 (`UploadEngine`)。永続化は `:storageservice` に委譲し、
+    GNSS は `:gps`、Dead Reckoning は `:deadreckoning` を利用します。
+  - `:gps` – `GpsLocationEngine` / `GpsObservation` /
+    `FusedLocationGpsEngine` を提供する GPS 抽象レイヤ。
+  - `:storageservice` – Room `AppDatabase` / DAO と `StorageService`。  
+    `LocationSample`（位置ログ）と `ExportedDay`（日次エクスポート状態）を管理します。
+  - `:dataselector` – Pickup 用の選択ロジック。
+  - `:datamanager` – GeoJSON エクスポート・ZIP 圧縮・Upload Worker 群・
+    Drive / Upload 設定リポジトリ。
+  - `:deadreckoning` – Dead Reckoning エンジンと API。
+  - `:auth-appauth` / `:auth-credentialmanager` – Drive 用トークンプロバイダ実装。
+  - `mapconductor-core-src` – MapConductor コアソース（vendored）。  
+    基本的に **読み取り専用** とし、修正は upstream 側で検討します。
 
-- 依存関係 (おおまか):
-  - `:app` → `:core`, `:dataselector`, `:datamanager`, `:storageservice`,  
-    `:deadreckoning`, `:gps`, 認証モジュール, MapConductor。
-  - `:core` → `:gps`, `:storageservice`, `:deadreckoning`。
-  - `:datamanager` → `:core`, `:storageservice`, Drive 連携クラス。
+- 依存関係（概略）:
+  - `:app` → `:core`, `:dataselector`, `:datamanager`,
+    `:storageservice`, `:deadreckoning`, `:gps`, 認証モジュール, MapConductor
+  - `:core` → `:gps`, `:storageservice`, `:deadreckoning`
+  - `:datamanager` → `:core`, `:storageservice`, Drive 連携クラス
   - `:dataselector` → `LocationSampleSource` 抽象のみ  
-    (実装は `:app` 側で `StorageService` をラップ)。
+    （実装は `:app` で `StorageService` をラップ）
 
 ---
 
 ## StorageService / Room アクセス
 
 - Room (`AppDatabase` / DAO) へのアクセスは **必ず `StorageService` 経由** で行います。
-  - 例外は `:storageservice` モジュール内部のみ (DAO 実装と `AppDatabase` 定義)。
-  - `:app`, `:core`, `:datamanager`, `:dataselector` から DAO を直接参照しないでください。
+  - 例外は `:storageservice` モジュール内のみ（DAO / DB 実装）。
+  - `:app`, `:core`, `:datamanager`, `:dataselector` から DAO を直接参照しないこと。
 
-- 代表的な API:
-  - `latestFlow(ctx, limit)` – `LocationSample` のライブな末尾 `limit` 件 (新しい順)。  
-    履歴画面・Map・Realtime Upload から使用されます。
-  - `getAllLocations(ctx)` – `timeMillis` 昇順の全件取得。  
-    小規模データ向け (Today preview・Realtime 用スナップショットなど)。
-  - `getLocationsBetween(ctx, from, to, softLimit)` – `[from, to)` (半開区間) の昇順取得。  
-    日次エクスポートや Pickup の時間範囲抽出で使用します。
-  - `insertLocation(ctx, sample)` – 1 件挿入。前後の件数と provider / timeMillis を  
-    `DB/TRACE` タグでログ出力します。
-  - `deleteLocations(ctx, items)` – バッチ削除。空リストの場合は DB に触れません。
-  - `lastSampleTimeMillis(ctx)` – 全サンプルの最大 `timeMillis`。  
-    バックアップすべき最終日の判定に利用します。
-  - `ensureExportedDay`, `oldestNotUploadedDay`, `nextNotUploadedDayAfter`,  
-    `exportedDayCount`, `markExportedLocal`, `markUploaded`, `markExportError` –  
-    `ExportedDay` テーブルを使った日次バックアップ状態管理に使用します。
+代表的な API:
 
-- すべての DB 操作は `StorageService` 側で `Dispatchers.IO` 上で実行される想定です。  
-  呼び出し側は UI スレッドでブロックしないよう注意してください。
+- `latestFlow(ctx, limit)` – `LocationSample` の末尾 `limit` 件を新しい順で流す `Flow`  
+  履歴画面・Map・Realtime Upload から利用されます。
+- `getAllLocations(ctx)` – 全 `LocationSample` を `timeMillis` 昇順で取得。  
+  Today preview や Realtime Upload 用のスナップショット向け。
+- `getLocationsBetween(ctx, from, to, softLimit)` – 半開区間 `[from, to)` を取得。  
+  日次エクスポートや Pickup の範囲抽出で使用します。
+- `insertLocation`, `deleteLocations` – 挿入・削除処理（`DB/TRACE` ログ付き）。
+- `lastSampleTimeMillis`, `ensureExportedDay`, `oldestNotUploadedDay`,
+  `nextNotUploadedDayAfter`, `exportedDayCount`, `markExportedLocal`,
+  `markUploaded`, `markExportError` – `ExportedDay` を用いた日次バックアップ状態管理。
+
+すべての DB アクセスは `StorageService` 内で `Dispatchers.IO` 上で実行される想定です。
 
 ---
 
 ## dataselector / Pickup
 
-- `:dataselector` は `LocationSampleSource` 抽象のみに依存し、Room や `StorageService` を知りません。
-  - `LocationSampleSource.findBetween(fromInclusive, toExclusive)` は  
-    半開区間 `[from, to)` を前提とします。
+- `:dataselector` は Room には依存せず、`LocationSampleSource` 抽象のみを見ます。
+- `SelectorRepository` は:
+  - `intervalSec == null` – 間引きなし（オプションの精度フィルタ＋ソート）
+  - `intervalSec != null` – グリッドスナップ＋代表サンプル選択＋ギャップ表現
 
-- `SelectorRepository` の方針 (ダイジェスト):
-  - `intervalSec == null` の場合:
-    - グリッドなしの **直接抽出モード**。昇順取得 → 精度フィルタ → 上限適用 →  
-      `SortOrder` に応じた並べ替えのみを行います。
-  - `intervalSec != null` の場合:
-    - `T = intervalSec * 1000L` とし、±`T/2` のウィンドウ毎に代表サンプル 1 件を  
-      選ぶ **グリッドスナップモード**。
-    - サンプルが存在しないグリッドは `SelectedSlot(sample = null)` でギャップを表現します。
+Pickup UI (`PickupScreen`) は `SelectorUseCases` を経由してこのレイヤを利用します。
 
 ---
 
 ## GeoLocationService / GPS / Dead Reckoning
 
-### 役割の分離
+- `GeoLocationService`:
+  - `GpsLocationEngine` からの `GpsObservation` を `LocationSample` に変換し、
+    provider `"gps"` として保存します。
+  - GPS hold 位置を `DeadReckoning` に `GpsFix` として投入します。
+  - `SettingsRepository.drIntervalSecFlow` に応じて DR ティッカーを駆動し、
+    provider `"dead_reckoning"` の `LocationSample` を生成します。
 
-- `GeoLocationService` (`:core`) の責務:
-  - `GpsLocationEngine` (`FusedLocationGpsEngine`) からの `GpsObservation` を受け取り、  
-    `provider = "gps"` の `LocationSample` として DB に保存。
-  - 「GPS hold 値」(受信値とは別のスムージング済み位置) を維持し、  
-    Dead Reckoning エンジンへのアンカーとして利用。
-  - `DeadReckoning` インスタンスを生成 (`DeadReckoningFactory.create`) し、  
-    `start()` / `stop()` / `submitGpsFix()` / `predict()` を呼び出すホストとして振る舞います。
-  - DR ティッカーを起動し、最新 GPS fix (`lastFixMillis`) から現在時刻までの  
-    予測 `PredictedPoint` を一定間隔で取得し、`provider = "dead_reckoning"` の  
-    `LocationSample` として挿入します (重複ガード付き)。
-  - `DeadReckoning.isLikelyStatic()` を定期的に読み取り、`DrDebugState` に反映することで、  
-    Map 画面のデバッグオーバーレイがエンジン内部の静止判定を表示できるようにします。
-
-- `DeadReckoning` (`:deadreckoning`) の責務:
-  - センサー購読・DR 状態・静止判定・物理ガードを内部で完結させること。  
-    (GPS との協調ロジックや DB 挿入ポリシーは `GeoLocationService` 側の責務です)
-  - `DeadReckoningConfig` により、静止判定の閾値・プロセスノイズ・`velocityGain`・  
-    `maxStepSpeedMps`・デバッグログ有無・ウィンドウサイズなどを調整可能にします。
-
-### DR 間隔と DR 無効化
-
-- サンプリング間隔 (`SettingsRepository`) の契約:
-  - `intervalSecFlow(context)` – GPS 間隔 (秒) の Flow。最低 1 秒。
-  - `drIntervalSecFlow(context)` – DR 間隔 (秒) の Flow。  
-    - `0` のときは **「Dead Reckoning 無効 (GPS のみ)」**。  
-    - `> 0` のときは最低 1 秒にクランプされます。
-  - `currentIntervalMs` / `currentDrIntervalSec` はレガシー利用向けの同期版。  
-    新規コードは Flow ベース API を優先します。
-
-- `GeoLocationService` は両 Flow を購読し、値の変化に応じて:
-  - GPS 間隔変更 → `updateIntervalMs` を更新し、サービス稼働中なら GPS 更新を再起動。
-  - DR 間隔変更 → `applyDrInterval(sec)` を通じて DR ティッカーを開始・停止。  
-    `sec <= 0` の場合は DR を無効化し、以後 DR サンプルを挿入しません。
-
-- UI (`IntervalSettingsViewModel`) は:
-  - 「GPS interval (sec)」「DR interval (sec)」の 2 つの入力フィールドを持ちます。
-  - 検証ルール:
-    - GPS: 最低 1 秒にクランプ。
-    - DR:
-      - `0` → 「DR 無効 (GPS のみ)」として保存。
-      - 有効値は `1 <= DR <= floor(GPS / 2)` の範囲に制限。
+Dead Reckoning 実装（`:deadreckoning`）は GPS 方向に沿った 1D 状態を持ち、
+加速度と GPS 速度から静止 / 移動を推定し、`maxStepSpeedMps` などでスパイクを抑制します。
 
 ---
 
-## Export / Upload / 設定
+## 設定管理（Sampling / Upload）
+
+- `storageservice.prefs.SettingsRepository`:
+  - `intervalSecFlow(context)` – GPS 間隔（秒）
+  - `drIntervalSecFlow(context)` – DR 間隔（秒。`0` は DR 無効）
+
+- `datamanager.prefs.UploadPrefsRepository`:
+  - `scheduleFlow` – `UploadSchedule.NONE` / `NIGHTLY` / `REALTIME`
+  - `intervalSecFlow` – アップロード間隔（秒。0 or 1–86400）
+  - `zoneIdFlow` – IANA タイムゾーン ID（例 `"Asia/Tokyo"`）
+
+`UploadSettingsViewModel` はこれらを UI に公開し、Drive 未設定（`accountEmail` 空）の場合は
+Upload トグルを ON にできないようにガードします。
+
+---
+
+## Auth / Drive / DriveTokenProviderRegistry
+
+- `GoogleDriveTokenProvider` は Drive アクセストークンの抽象です。
+  - `"Bearer "` を付けないトークン文字列を返すこと。
+  - 通常のエラーでは `null` を返し、例外を投げないこと。
+  - バックグラウンドから UI を開始しないこと。
+
+- 推奨実装:
+  - `CredentialManagerTokenProvider` (`:auth-credentialmanager`)
+  - `AppAuthTokenProvider` (`:auth-appauth`)
+
+### DriveTokenProviderRegistry（バックグラウンド）
+
+- `DriveTokenProviderRegistry` はバックグラウンド用 `GoogleDriveTokenProvider` を 1 つ保持し、
+  - `MidnightExportWorker` / `MidnightExportScheduler`
+  - `RealtimeUploadManager`
+ から `UploaderFactory` を通じて利用されます。
+
+- サンプルアプリの `App.onCreate()` は:
+  - 起動直後に `CredentialManagerAuth.get(this)` を登録（デフォルト）。
+  - `DrivePrefs.authMethod` を読み、`"appauth"` かつ AppAuth が認証済みなら
+    `AppAuthAuth.get(this)` をバックグラウンドプロバイダとして再登録。
+  - その上で `MidnightExportScheduler.scheduleNext(this)` と
+    `RealtimeUploadManager.start(this)` を呼びます。
+
+- `DriveSettingsViewModel` は UI 操作に応じてレジストリと設定を更新します。
+  - `markCredentialManagerSignedIn()`:
+    - `authMethod = "credential_manager"` を保存。
+    - `accountEmail` が空なら `"cm_signed_in"` を保存。
+    - `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(app))`
+      を呼びます。
+  - `markAppAuthSignedIn()`:
+    - `authMethod = "appauth"` を保存。
+    - `accountEmail` が空なら `"appauth_signed_in"` を保存。
+    - `DriveTokenProviderRegistry.registerBackgroundProvider(AppAuthAuth.get(app))`
+      を呼びます。
+- `UploadSettingsViewModel` は `DrivePrefs.accountEmail` が非空であれば
+  「Drive 設定済み」とみなし、Upload トグルを ON にできます。
+
+---
+
+## Export / Upload
 
 ### MidnightExportWorker / MidnightExportScheduler
 
-- `MidnightExportWorker` の役割 (概要):
-  - `UploadPrefs.zoneId` (IANA タイムゾーン ID、デフォルト `Asia/Tokyo`) を用いて  
-    各日 `[0:00, 24:00)` の範囲を決定し、「昨日まで」のバックログを処理します。
-  - `StorageService.ensureExportedDay`, `oldestNotUploadedDay`,  
-    `nextNotUploadedDayAfter`, `exportedDayCount`, `lastSampleTimeMillis` を用いて:
-    - どの日付を処理するか
-    - 進捗・サマリメッセージ (`backupStatus`) を Drive 設定画面用に書き出すか  
-    を決定します。
-  - 各日について:
-    - `StorageService.getLocationsBetween` で 1 日分の `LocationSample` を取得。
-    - `GeoJsonExporter` で Downloads に GeoJSON+ZIP を出力。
-    - `markExportedLocal` を呼び、ローカル出力済みとしてマーク。
-    - Drive 設定 (`DrivePrefsRepository` / `AppPrefs`) から有効なフォルダ ID を解決し、  
-      `UploadEngine.KOTLIN` の場合に `UploaderFactory` でアップローダを生成。
-    - アップロードの成否に応じて `markUploaded` / `markExportError` を呼び、  
-      `backupStatus` に人間可読なサマリを記録。
-    - ZIP ファイルは成功・失敗にかかわらず必ず削除。
-    - アップロード成功かつその日にレコードが存在する場合のみ、  
-      `StorageService.deleteLocations` で該当日のデータを削除。
+- `UploadPrefs.zoneId` からタイムゾーンを決定し、各日 `[00:00, 24:00)` を処理します。
+- 各日について:
+  - `StorageService.getLocationsBetween(...)` で `LocationSample` を取得。
+  - `GeoJsonExporter` で Downloads に `glp-YYYYMMDD.zip` を生成。
+  - `markExportedLocal` でローカルエクスポートを記録。
+  - Drive フォルダ ID を `DrivePrefs` → `AppPrefs` の順に解決。
+  - `UploaderFactory` で Kotlin ベースの uploader を生成し Drive にアップロード。
+  - 結果に応じて `markUploaded` / `markExportError` を更新。
+  - ZIP は必ず削除し、アップロード成功かつレコードありの場合のみ
+    `StorageService.deleteLocations` で当日分の行を削除。
 
-- 「Backup days before today」:
-  - `MidnightExportWorker.runNow(context)` でワーカーを即時実行し、  
-    `lastSampleTimeMillis` を基準に最初のサンプル日〜昨日までを再スキャンします。
-  - `ExportedDay` がすでに全て uploaded == true の場合でも、  
-    LocationSample の実データ範囲に基づいて再処理する設計です。
+### RealtimeUploadManager / Upload settings
 
-### RealtimeUploadManager / Upload 設定
-
-- `RealtimeUploadManager` (`:datamanager`) の役割:
-  - `UploadPrefsRepository` の Flow (`schedule`, `intervalSec`, `zoneId`) と  
-    `SettingsRepository` の Flow (GPS/DR 間隔) を購読。
-  - `StorageService.latestFlow(ctx, limit = 1)` で最新 `LocationSample` を監視し、  
-    `UploadSchedule.REALTIME` かつ Drive 設定が整っている場合のみ反応します。
-  - アップロード間隔の扱い:
-    - `intervalSec <= 0` → **「新規サンプルごとにアップロード」**。
-    - それ以外は cooldown として機能します。
-    - DR が有効な場合は DR 間隔、無効な場合は GPS 間隔を参照し、  
-      `intervalSec` がサンプリング間隔と同じ場合も「毎サンプル」とみなします。
-  - アップロード処理:
-    - `StorageService.getAllLocations` で全レコードを昇順取得。
-    - 最新サンプルの時刻と `zoneId` に基づいて  
-      `YYYYMMDD_HHmmss.json` 形式のファイル名を決め、`GeoJsonExporter.toGeoJson` の結果を  
-      `cacheDir` 配下の JSON ファイルに書き出し。
-    - Drive 設定 (`DrivePrefsRepository` の UI フォルダ ID → 空なら `AppPrefs.folderId`) を元に  
-      有効なフォルダ ID を解決。
-    - `UploaderFactory.create(context, appPrefs.engine)` でアップローダを生成  
-      (内部で `DriveTokenProviderRegistry` のトークンプロバイダを優先利用)。
-    - JSON をアップロードし、成功した場合のみ対象 `LocationSample` を  
-      `StorageService.deleteLocations` で削除。
-    - キャッシュファイルは成功・失敗に関わらず削除。
-
-- Upload 設定 UI (`UploadSettingsScreen` / `UploadSettingsViewModel`):
-  - Upload on/off:
-    - Drive が未設定 (accountEmail 空) の場合は ON にできず、警告メッセージを表示。
-  - スケジュール:
-    - `NONE` – 自動アップロードなし。
-    - `NIGHTLY` – `MidnightExportWorker` のみ。
-    - `REALTIME` – `RealtimeUploadManager` が新規サンプルに応じてアップロード。
-  - `intervalSec`:
-    - `0` → 「毎サンプル」。
-    - 1–86400 秒にクランプ (それ以上は 86400 として扱う)。
-  - `zoneId`:
-    - `Asia/Tokyo` などの IANA タイムゾーン ID。  
-    - Nightly export と Today preview の双方で使用されます。
+- `UploadPrefsRepository`（スケジュール・間隔・タイムゾーン）と
+  `SettingsRepository`（GPS/DR 間隔）を購読します。
+- `UploadSchedule.REALTIME` かつ Drive 設定済み（`UploadEngine.KOTLIN` / folderId 有効）のときのみ動作します。
+- `StorageService.latestFlow(limit = 1)` から新規サンプルを検知し、`intervalSec` と
+  サンプリング間隔から実効クールダウン秒数を計算します。
+- アップロード実行時:
+  - `StorageService.getAllLocations` で全サンプルを取得。
+  - 最新サンプル時刻と `zoneId` に基づき `YYYYMMDD_HHmmss.json` を `cacheDir` に生成。
+  - `DrivePrefs` / `AppPrefs` から Drive フォルダ ID を解決。
+  - `UploaderFactory.create(context, appPrefs.engine)` で uploader を作成し JSON をアップロード。
+  - キャッシュファイルは成功・失敗に関わらず削除。
+  - アップロード成功時のみ `StorageService.deleteLocations` でアップロード済み行を削除します。
 
 ---
 
-## UI / Compose (サマリ)
+## UI / Compose（概要）
 
-- `MainActivity`:
-  - Activity 直下の `NavHost` を持ち、`"home"`, `"drive_settings"`, `"upload_settings"` を切り替えます。
-  - ランタイム権限を `ActivityResultContracts.RequestMultiplePermissions` で取得し、  
-    許可後に `GeoLocationService` を起動します。
+- `MainActivity`
+  - Activity レベルの `NavHost` を持ち、`"home"`, `"drive_settings"`,
+    `"upload_settings"` を切り替えます。
+  - 権限をリクエストし、許可後に `GeoLocationService` を開始します。
 
-- `AppRoot`:
-  - 内部に `"home"`, `"pickup"`, `"map"` を持つ `NavHost` を持ちます。
+- `AppRoot`
+  - `"home"`, `"pickup"`, `"map"` を持つ `NavHost` を内部に持ちます。
   - AppBar:
-    - タイトルは現在のルートに応じて「GeoLocation」「Pickup」「Map」を表示。
-    - Pickup / Map 画面では戻るボタンを表示。
-    - Home では `Map`, `Pickup`, `Drive`, `Upload` ボタンと  
-      `ServiceToggleAction` (サービス Start/Stop トグル) を表示します。
+    - 現在のルートに応じてタイトル（GeoLocation / Pickup / Map）を切り替え。
+    - Pickup / Map では戻るボタン、Home では `Map` / `Pickup` / `Drive` / `Upload`
+      ボタンと `ServiceToggleAction` を表示します。
 
-- `MapScreen` / `GoogleMapsExample`:
-  - MapConductor + Google Maps backend を使用。
-  - 上部:
-    - `GPS` / `DeadReckoning` チェックボックス。
-    - `Count` 入力 (1–5000)。
-    - `Apply` / `Cancel` ボタン。
-  - `Apply` 押下:
-    - チェックボックスと Count をロックし、`Count` 件までの最新サンプルから  
-      GPS / DR ごとのポリラインを描画します。
-      - GPS: 青・太め・背面。
-      - DR : 赤・細め・前面。
-    - サンプルは距離ではなく `timeMillis` による **時系列** で接続します。
-  - `Cancel` 押下:
-    - ポリラインをクリアし、入力をアンロック。カメラ位置・ズームは維持。
-  - 右上のデバッグオーバーレイ:
-    - `GPS`, `DR`, `ALL` の表示件数 / DB 件数。
-    - `DrDebugState` 由来の静止フラグ (`Static: YES/NO`)。
-    - GPS/DR 間距離・最新 GPS 精度・エンジン内部の「GPS weight」などを表示。
-  - 最新 GPS サンプルの精度円:
-    - 中心: 最新 GPS の位置。
-    - 半径: `accuracy` [m]。
-    - 線は細めの青、塗りは半透明の青。
+- `GeoLocationProviderScreen`
+  - Interval / DR interval 設定（`IntervalSettingsViewModel`）と履歴リスト
+    (`HistoryViewModel`) を表示します。
+  - `HistoryViewModel` は `StorageService.latestFlow(limit = 9)` をもとに
+    最大 9 件の `LocationSample` を `timeMillis` 降順で保持するメモリ上のバッファを持ちます。
+    RealtimeUploadManager や MidnightExportWorker が Room 側の行を削除しても、
+    バッファから自然に溢れるまでは履歴リストから急に消えません。
 
----
+- `PickupScreen`
+  - `SelectorUseCases` 経由で Pickup 条件と結果を扱います。
 
-## コーディングポリシー (抜粋)
+- `MapScreen` / `GoogleMapsExample`
+  - MapConductor `GoogleMapsView` + Google Maps backend を用いて、GPS/DR の
+    ポリラインとデバッグオーバーレイを描画します。
 
-- すべての **コード** (Kotlin / Java / XML / Gradle スクリプト) は ASCII のみを使用します。
-  - コメント・リテラル文字列も含めて、日本語などのマルチバイト文字は使用不可。
-- 多言語ドキュメント (日本語 / スペイン語など) は `README_JA.md`,
-  `README_ES.md`, `AGENTS_JA.md`, `AGENTS_ES.md` などの Markdown のみで使用します。
-- 公開 API には KDoc (`/** ... */`) で役割・設計・契約を明示し、  
-  実装詳細には最小限の `//` コメントとシンプルなセクション見出し  
-  (`// ---- Section ----` など) を用います。
+- `DriveSettingsScreen`
+  - 認証方式（Credential Manager / AppAuth）の切り替え、サインイン/サインアウト、
+    Drive フォルダ設定、「Backup days before today」「Today preview」アクションを提供します。
+
+- `UploadSettingsScreen`
+  - Upload on/off、`UploadSchedule`（NONE/NIGHTLY/REALTIME）、
+    `intervalSec`（秒）、`zoneId`（IANA タイムゾーン）を操作し、Drive 未設定時には警告を表示します。
 
 ---
 
-## 公開 API (ライブラリとしての入口)
+## 公開 API（ライブラリとしての入口）
 
-- `:storageservice`:
+- `:storageservice`
   - `StorageService`, `LocationSample`, `ExportedDay`, `SettingsRepository`
-- `:dataselector`:
+- `:dataselector`
   - `SelectorCondition`, `SortOrder`, `SelectedSlot`,
     `LocationSampleSource`, `SelectorRepository`,
     `BuildSelectedSlots`, `SelectorPrefs`
-- `:datamanager`:
-  - 認証・トークン: `GoogleDriveTokenProvider`, `DriveTokenProviderRegistry`
-  - 設定: `DrivePrefsRepository`, `UploadPrefsRepository`, `UploadSchedule`
-  - Drive API: `DriveApiClient`, `DriveFolderId`, `UploadResult`
+- `:datamanager`
+  - 認証 / トークン:
+    `GoogleDriveTokenProvider`, `DriveTokenProviderRegistry`
+  - Drive / Upload 設定:
+    `DrivePrefsRepository`, `UploadPrefsRepository`, `UploadSchedule`
+  - Drive API:
+    `DriveApiClient`, `DriveFolderId`, `UploadResult`
   - エクスポート / アップロード:
-    - `UploadEngine` (`:core.config`)、`GeoJsonExporter`,
-      `Uploader`, `UploaderFactory`, `RealtimeUploadManager`
-  - バックグラウンド:
-    - `MidnightExportWorker`, `MidnightExportScheduler`
-- `:deadreckoning`:
+    `UploadEngine`, `GeoJsonExporter`, `Uploader`, `UploaderFactory`,
+    `RealtimeUploadManager`
+  - バックグラウンド処理:
+    `MidnightExportWorker`, `MidnightExportScheduler`
+- `:deadreckoning`
   - `DeadReckoning`, `GpsFix`, `PredictedPoint`,
     `DeadReckoningConfig`, `DeadReckoningFactory`
-- `:gps`:
+- `:gps`
   - `GpsLocationEngine`, `GpsObservation`, `FusedLocationGpsEngine`
 
-ここに挙がっていない型は原則として実装詳細 (internal) とみなし、
-互換性を保証しない想定で設計してください。
+その他の型（DAO や内部エンジン、HTTP ヘルパーなど）は実装詳細（internal）とみなし、
+後方互換性は保証されません。
+
+---
+
+## コーディングポリシー（抜粋）
+
+- Kotlin / Java / XML / Gradle などのプロダクションコードは **ASCII のみ** を使用します
+  （コメント・文字列リテラルも含む）。
+- 日本語 / スペイン語などの多言語テキストは `*.md` ドキュメント
+  （`README_JA.md`, `README_ES.md`, `AGENTS_JA.md`, `AGENTS_ES.md` など）でのみ使用します。
+- 公開 API には KDoc（`/** ... */`）で役割と契約を明示し、内部実装には最小限の
+  `//` コメントとシンプルなセクション見出し（`// ---- Section ----`）を用います。
 

@@ -303,16 +303,23 @@ mainly for CI and verification.
 
 ### DriveTokenProviderRegistry / Background
 
-- `DriveTokenProviderRegistry` provides a process-wide background
-  `GoogleDriveTokenProvider` used from:
-  - `MidnightExportWorker` / `MidnightExportScheduler`.
-  - `RealtimeUploadManager` (when UploaderFactory is created without
-    an explicit provider).
+  - `DriveTokenProviderRegistry` provides a process-wide background
+    `GoogleDriveTokenProvider` used from:
+    - `MidnightExportWorker` / `MidnightExportScheduler`.
+    - `RealtimeUploadManager` (when `UploaderFactory.create` is
+      called without an explicit provider).
 
-- `App.onCreate()` must call:
-  - `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))`
-  - `MidnightExportScheduler.scheduleNext(this)`
-  - `RealtimeUploadManager.start(this)`
+- `App.onCreate()` is responsible for wiring the background provider
+  and schedulers:
+    - The sample `App` first registers
+      `DriveTokenProviderRegistry.registerBackgroundProvider(CredentialManagerAuth.get(this))`
+      as a default.
+    - It then reads `DrivePrefs.authMethod` to swap the provider to
+      `AppAuthAuth.get(this)` when AppAuth is selected and already
+      authenticated.
+    - It always calls `MidnightExportScheduler.scheduleNext(this)`
+      and `RealtimeUploadManager.start(this)` so that both nightly and
+      realtime uploads are active according to `UploadPrefs`.
 
 - Background workers must:
   - Never start UI.
@@ -433,6 +440,12 @@ mainly for CI and verification.
   - `GeoLocationProviderScreen`:
     - Interval controls (`IntervalSettingsViewModel`) plus history
       list (`HistoryViewModel`).
+    - `HistoryViewModel` maintains an in-memory buffer of up to
+      9 latest `LocationSample` rows, populated from
+      `StorageService.latestFlow(limit = 9)` and sorted by
+      `timeMillis` (newest first). The buffer is not cleared when
+      rows are deleted from Room (for example after uploads); items
+      are dropped only when the buffer exceeds its limit.
   - `PickupScreen`:
     - Pickup conditions and results, backed by `SelectorUseCases`.
   - `MapScreen` / `GoogleMapsExample`:
@@ -539,4 +552,3 @@ implementation details where possible.
 
 Types not listed above should be considered non-public and may change
 without notice.
-

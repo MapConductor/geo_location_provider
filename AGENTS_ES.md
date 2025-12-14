@@ -1,391 +1,302 @@
 # Repository Guidelines (resumen en español)
 
-Este documento resume en español las **políticas, la estructura por
-capas y la separación de responsabilidades** del repositorio
-GeoLocationProvider.
-
-La referencia completa y siempre actualizada es la versión inglesa
-`AGENTS.md`.  
-Cuando cambies diseño o comportamiento, consulta primero `AGENTS.md` y
-actualiza este resumen si es necesario.
+Este documento resume en español la **estructura por módulos, la
+separación de responsabilidades y las políticas de código** del
+repositorio GeoLocationProvider.  
+La referencia completa y siempre actualizada es `AGENTS.md` (inglés).
 
 ---
 
 ## Estructura del proyecto y módulos
 
-El proyecto Gradle raíz `GeoLocationProvider` se compone
-principalmente de los siguientes módulos:
+- Proyecto Gradle raíz `GeoLocationProvider`:
+  - `:app` – Aplicación de ejemplo basada en Jetpack Compose  
+    (lista de historial, pantalla de Pickup, pantalla de mapa,
+    ajustes de Drive, ajustes de Upload, copia manual).
+  - `:core` – Servicio en primer plano `GeoLocationService`,
+    gestión de sensores del dispositivo y configuración compartida
+    (`UploadEngine`). Persiste en `:storageservice`, usa `:gps` y
+    `:deadreckoning`.
+  - `:gps` – Abstracción de GPS (`GpsLocationEngine`,
+    `GpsObservation`, `FusedLocationGpsEngine`) que envuelve
+    `FusedLocationProviderClient` y `GnssStatus`.
+  - `:storageservice` – `AppDatabase` de Room, DAOs y fachada
+    `StorageService`. Gestiona `LocationSample` (historial) y
+    `ExportedDay` (estado de exportación por día).
+  - `:dataselector` – Lógica de selección para Pickup sobre la
+    abstracción `LocationSampleSource`.
+  - `:datamanager` – Exportación GeoJSON, compresión ZIP,
+    `MidnightExportWorker` / `MidnightExportScheduler`,
+    `RealtimeUploadManager`, cliente HTTP de Drive y repositorios de
+    preferencias de Drive/Upload.
+  - `:deadreckoning` – Motor y API de Dead Reckoning
+    (`DeadReckoning`, `GpsFix`, `PredictedPoint`,
+    `DeadReckoningConfig`, `DeadReckoningFactory`).
+  - `:auth-appauth` / `:auth-credentialmanager` – Implementaciones de
+    `GoogleDriveTokenProvider`.
+  - `mapconductor-core-src` – Código fuente de MapConductor
+    vendorizado, usado solo desde `:app` (tratar como solo lectura).
 
-- `:app` – Aplicación de ejemplo basada en Jetpack Compose  
-  (lista de historial, pantalla de Pickup, pantalla de Mapa, ajustes
-  de Drive, ajustes de Upload, exportación manual, etc.).
-- `:core` – Servicio en primer plano `GeoLocationService`, gestión de
-  sensores del dispositivo y configuración compartida (por ejemplo
-  `UploadEngine`). La persistencia se delega en `:storageservice`, la
-  GNSS en `:gps` y Dead Reckoning en `:deadreckoning`.
-- `:gps` – Capa de abstracción de GPS:
-  `GpsLocationEngine`, `GpsObservation`, `FusedLocationGpsEngine`.  
-  Envuelve `FusedLocationProviderClient` y `GnssStatus` y expone un
-  modelo de dominio estable para `GeoLocationService`.
-- `:storageservice` – `AppDatabase` de Room, DAOs y fachada
-  `StorageService`.  
-  Gestiona de forma centralizada los registros de localización y el
-  estado de exportación.
-- `:dataselector` – Lógica de selección para Pickup. Filtra
-  `LocationSample` a través de la abstracción `LocationSampleSource`
-  y construye filas representativas `SelectedSlot`.
-- `:datamanager` – Exportación a GeoJSON, compresión ZIP,
-  `MidnightExportWorker` / `MidnightExportScheduler`,
-  `RealtimeUploadManager`, cliente HTTP de Drive y repositorios de
-  preferencias de Drive/Upload.
-- `:deadreckoning` – Motor y API pública de Dead Reckoning
-  (`DeadReckoning`, `GpsFix`, `PredictedPoint`,
-  `DeadReckoningConfig`, `DeadReckoningFactory`).
-- `:auth-appauth` / `:auth-credentialmanager` – Módulos de
-  autenticación que proporcionan implementaciones de
-  `GoogleDriveTokenProvider`.
-- `mapconductor-core-src` – Código fuente de MapConductor incluido en
-  el repositorio (vendorizado).  
-  Por defecto se considera **solo lectura**; los cambios deberían
-  idealmente hacerse upstream.
-
-Dirección aproximada de dependencias:
+Dirección de dependencias (aproximada):
 
 - `:app` → `:core`, `:dataselector`, `:datamanager`,
-  `:storageservice`, `:deadreckoning`, `:gps`, módulos de auth y
+  `:storageservice`, `:deadreckoning`, `:gps`, módulos de auth,
   MapConductor.
 - `:core` → `:gps`, `:storageservice`, `:deadreckoning`.
+- `:dataselector` → solo la abstracción `LocationSampleSource`
+  (implementada en `:app` envolviendo `StorageService`).
 - `:datamanager` → `:core`, `:storageservice`, integración con
   Drive.
-- `:dataselector` → solo la abstracción `LocationSampleSource`  
-  (la implementación concreta vive en `:app`, envolviendo
-  `StorageService`).
 
 ---
 
-## StorageService / Acceso a Room
+## StorageService / acceso a Room
 
 - Todo acceso a `AppDatabase` / DAOs desde fuera de
   `:storageservice` debe hacerse a través de `StorageService`.
-  - Dentro de `:storageservice` se permite usar DAOs directamente.
+  - Dentro de `:storageservice` se permiten DAOs directos.
   - No importes DAOs desde `:app`, `:core`, `:datamanager` ni
     `:dataselector`.
 
-API clave de `StorageService` (resumen):
+API clave (resumen):
 
-- `latestFlow(ctx, limit)` – Flow con las últimas `limit` filas de
-  `LocationSample` ordenadas de más reciente a más antigua.  
-  Lo usan las pantallas de historial, el mapa y el gestor de subida
-  en tiempo real.
-- `getAllLocations(ctx)` – Todas las filas de `LocationSample` en
-  orden ascendente por `timeMillis`.  
-  Úsalo solo para conjuntos pequeños (vista previa de hoy, snapshot
-  puntual, debug).
+- `latestFlow(ctx, limit)` – Flow con las `limit` muestras más
+  recientes de `LocationSample` (orden descendente por `timeMillis`).
+- `getAllLocations(ctx)` – Todas las muestras en orden ascendente por
+  `timeMillis` (solo para conjuntos pequeños: vista previa, snapshot).
 - `getLocationsBetween(ctx, from, to, softLimit)` – Muestras en el
-  intervalo semiabierto `[from, to)` ordenadas por `timeMillis` de
-  forma ascendente.  
-  Se usa para exportación diaria y extracción por rango de tiempo
-  (Pickup).
-- `insertLocation(ctx, sample)` – Inserta una muestra y escribe
-  trazas `DB/TRACE` con el contador antes/después.
-- `deleteLocations(ctx, items)` – Elimina en bloque; si la lista está
-  vacía, no toca la base de datos.
-- `lastSampleTimeMillis(ctx)` – Máximo `timeMillis` entre todas las
-  muestras, o `null` si la tabla está vacía.  
-  Sirve para determinar el último día que puede necesitar copia de
-  seguridad.
-- `ensureExportedDay`, `oldestNotUploadedDay`,
+  intervalo semiabierto `[from, to)` ordenadas por `timeMillis`.
+- `insertLocation`, `deleteLocations` – Inserción/borrado de filas
+  con trazas `DB/TRACE`.
+- `lastSampleTimeMillis`, `ensureExportedDay`, `oldestNotUploadedDay`,
   `nextNotUploadedDayAfter`, `exportedDayCount`, `markExportedLocal`,
-  `markUploaded`, `markExportError` – Gestionan el estado por día en
-  la tabla `ExportedDay` (exportado localmente, subido, error, etc.).
+  `markUploaded`, `markExportError` – Gestión del estado por día en
+  `ExportedDay`.
 
-Todos los accesos a DB se realizan sobre `Dispatchers.IO` dentro de
-`StorageService`.  
-Los llamadores deben evitar bloquear el hilo de UI.
+Todos los accesos a BD se ejecutan en `Dispatchers.IO` dentro de
+`StorageService`.
 
 ---
 
 ## dataselector / Pickup
 
-- El módulo `:dataselector` depende únicamente de la interfaz
-  `LocationSampleSource` y no conoce Room ni `StorageService`.
-  - `LocationSampleSource.findBetween(fromInclusive, toExclusive)`
-    usa el intervalo semiabierto `[from, to)`.
+- `:dataselector` solo depende de `LocationSampleSource` y no conoce
+  Room ni `StorageService`.
+- `SelectorRepository`:
+  - `intervalSec == null` → extracción directa (sin rejilla).
+  - `intervalSec != null` → rejilla temporal, selección de una
+    muestra representativa por ventana, huecos representados por
+    `SelectedSlot(sample = null)`.
 
-Resumen de `SelectorRepository`:
-
-- Modo **extracción directa** (`intervalSec == null`):
-  - Se obtienen las muestras en orden ascendente, se aplica un filtro
-    opcional por precisión, se aplica un límite y se ordena según
-    `SortOrder` (más reciente primero o más antiguo primero).
-
-- Modo **rejilla temporal** (`intervalSec != null`):
-  - `T = intervalSec * 1000L`.
-  - Para cada posición de la rejilla (creada desde el inicio o final
-    según `SortOrder`) se selecciona una muestra representativa dentro
-    de una ventana `±T/2` (si hay varias, se prefiere la más
-    antigua).
-  - Si no hay muestra para una posición de la rejilla, se devuelve
-    `SelectedSlot(sample = null)` para representar huecos.
+Pickup UI (`PickupScreen`) usa `SelectorUseCases` para acceder a este
+módulo.
 
 ---
 
 ## GeoLocationService / GPS / Dead Reckoning
 
-### Reparto de responsabilidades
+- `GeoLocationService`:
+  - Usa `GpsLocationEngine` para obtener `GpsObservation`, las
+    transforma en filas `LocationSample` (provider `"gps"`) y las
+    guarda vía `StorageService`.
+  - Mantiene una posición “GPS hold” filtrada que se envía a
+    `DeadReckoning` como `GpsFix`.
+  - Ejecuta un ticker de Dead Reckoning controlado por
+    `SettingsRepository.drIntervalSecFlow` y escribe muestras
+    `LocationSample` con provider `"dead_reckoning"`.
 
-- `GeoLocationService` (`:core`):
-  - Usa `GpsLocationEngine` (implementado por
-    `FusedLocationGpsEngine`) para recibir `GpsObservation` y
-    convertirlos en `LocationSample` con `provider = "gps"`.
-  - Mantiene una posición “hold de GPS” diferenciada de la posición
-    recibida en bruto; esta posición hold se usa como ancla para
-    Dead Reckoning y suaviza correcciones pequeñas sin perder
-    respuesta en movimiento rápido.
-  - Gestiona el ciclo de vida de `DeadReckoning`:
-    `DeadReckoningFactory.create(applicationContext, config)` en
-    `onCreate`, `start()` / `stop()` y llamadas a
-    `submitGpsFix` / `predict`.
-  - Ejecuta un ticker de DR:
-    - Intervalo en segundos controlado por `drIntervalSec`.
-    - Si `drIntervalSec == 0`, se desactiva DR (solo GPS).
-    - Si `drIntervalSec > 0`, se arrancan iteraciones que llaman a
-      `dr.predict(...)` y convierten el último `PredictedPoint` en
-      `LocationSample` con `provider = "dead_reckoning"`, aplicando
-      un guardado contra duplicados.
-  - Consulta `dr.isLikelyStatic()` periódicamente y publica el valor
-    en `DrDebugState` para que la pantalla de mapa pueda mostrar
-    `Static: YES/NO` en la superposición de depuración.
-
-- `DeadReckoning` (`:deadreckoning`):
-  - Gestiona internamente:
-    - Suscripción a sensores (acelerómetro/giroscopio).
-    - Estado de posición y velocidad a lo largo de una línea 1D
-      definida por la dirección GPS.
-    - Detección de estático basada en velocidad efectiva y una
-      ventana móvil de aceleración horizontal.
-    - Límite de velocidad por paso (`maxStepSpeedMps`) para descartar
-      saltos físicamente imposibles.
-  - Expone:
-    - `submitGpsFix(GpsFix)` – cada fix reancla la posición interna
-      al hold de GPS más reciente.
-    - `predict(fromMillis, toMillis)` – devuelve predicciones en el
-      intervalo pedido; puede devolver una lista vacía antes del
-      primer fix de GPS.
-    - `isImuCapable()` – indica si hay sensores necesarios.
-    - `isLikelyStatic()` – refleja el estado actual estático/móvil.
-
-### Intervalos de muestreo y DR desactivado
-
-- `SettingsRepository` (`storageservice.prefs`) define:
-  - `intervalSecFlow(context)` – intervalo de GPS (segundos).
-  - `drIntervalSecFlow(context)` – intervalo de DR (segundos):
-    - `0` significa “Dead Reckoning desactivado (solo GPS)”.
-    - `> 0` se limita a un mínimo de 1 segundo.
-  - `currentIntervalMs` y `currentDrIntervalSec` son getters
-    síncronos para compatibilidad; los Flows son preferibles para
-    código nuevo.
-
-- `GeoLocationService` se suscribe a ambos Flows:
-  - Cambios en GPS → reinicia `GpsLocationEngine` con el nuevo
-    intervalo si el servicio está en ejecución.
-  - Cambios en DR → actualiza `drIntervalSec` mediante
-    `applyDrInterval`:
-    - `sec <= 0` → para el ticker de DR y evita crear muestras
-      `"dead_reckoning"`.
-    - `sec > 0` → arranca/bloquea un loop que llama a
-      `dr.predict`.
-
-- `IntervalSettingsViewModel` (UI):
-  - Muestra campos para `GPS interval (sec)` y `DR interval (sec)` y
-    un botón “Save & Apply”.
-  - Valida:
-    - GPS: mínimo 1 segundo.
-    - DR:
-      - `0` → desactiva DR (solo GPS) y muestra un mensaje
-        explicativo.
-      - Para valores > 0, exige `1 <= DR <= floor(GPS / 2)`.
+El módulo `:deadreckoning` mantiene un estado 1D alineado con la
+dirección GPS, usa acelerómetro y velocidad para detectar estático /
+movimiento y limita saltos físicamente imposibles.
 
 ---
 
-## Exportación / subida / ajustes
+## Ajustes de sampling y subida
+
+- `SettingsRepository` (DataStore en `:storageservice`):
+  - `intervalSecFlow(context)` – intervalo de GPS en segundos.
+  - `drIntervalSecFlow(context)` – intervalo de Dead Reckoning
+    (`0` = DR desactivado).
+
+- `UploadPrefsRepository` (DataStore en `:datamanager`):
+  - `scheduleFlow` – `UploadSchedule.NONE` / `NIGHTLY` /
+    `REALTIME`.
+  - `intervalSecFlow` – intervalo de subida en segundos (0 o
+    1–86400).
+  - `zoneIdFlow` – ID de zona horaria IANA.
+
+`UploadSettingsViewModel` publica estos valores a la pantalla de
+ajustes de Upload y solo permite activar la subida si Drive está
+configurado (hay `accountEmail` en `DrivePrefs`).
+
+---
+
+## Auth / Drive / DriveTokenProviderRegistry
+
+- `GoogleDriveTokenProvider`:
+  - Devuelve tokens de acceso sin prefijo `"Bearer "`.
+  - Devuelve `null` en errores normales (sin lanzar excepciones).
+  - No debe iniciar UI desde segundo plano.
+
+- Implementaciones recomendadas:
+  - `CredentialManagerTokenProvider` (`:auth-credentialmanager`)
+  - `AppAuthTokenProvider` (`:auth-appauth`)
+
+### DriveTokenProviderRegistry (segundo plano)
+
+- `DriveTokenProviderRegistry` mantiene un `GoogleDriveTokenProvider`
+  de uso global que consumen:
+  - `MidnightExportWorker` / `MidnightExportScheduler`
+  - `RealtimeUploadManager`
+  a través de `UploaderFactory.create(context, engine, tokenProvider = null)`.
+
+- En la app de ejemplo, `App.onCreate()`:
+  - Registra inicialmente `CredentialManagerAuth.get(this)` como
+    proveedor por defecto.
+  - Lee `DrivePrefs.authMethod` y, si es `"appauth"` y AppAuth ya
+    está autenticado, cambia el proveedor de fondo a
+    `AppAuthAuth.get(this)`.
+  - Llama siempre a `MidnightExportScheduler.scheduleNext(this)` y
+    `RealtimeUploadManager.start(this)`.
+
+- `DriveSettingsViewModel` sincroniza preferencias y registro:
+  - `markCredentialManagerSignedIn()`:
+    - Guarda `authMethod = "credential_manager"`.
+    - Si `accountEmail` está vacío, guarda `"cm_signed_in"`.
+    - Registra `CredentialManagerAuth.get(app)` en la registry.
+  - `markAppAuthSignedIn()`:
+    - Guarda `authMethod = "appauth"`.
+    - Si `accountEmail` está vacío, guarda `"appauth_signed_in"`.
+    - Registra `AppAuthAuth.get(app)` como proveedor de fondo.
+- `UploadSettingsViewModel` considera que Drive está configurado
+  cuando `DrivePrefs.accountEmail` no está vacío y solo entonces
+  permite activar la subida automática.
+
+---
+
+## Exportación y subida
 
 ### MidnightExportWorker / MidnightExportScheduler
 
-- Tareas principales de `MidnightExportWorker`:
-  - Leer la zona horaria desde `UploadPrefs.zoneId` (ID IANA, por
-    defecto `Asia/Tokyo`) y procesar días en el rango
-    `[00:00, 24:00)` de esa zona.
-  - Usar `StorageService.ensureExportedDay`,
-    `oldestNotUploadedDay`, `nextNotUploadedDayAfter`,
-    `exportedDayCount` y `lastSampleTimeMillis` para determinar:
-    - Qué días procesar.
-    - Qué resumen de estado (`backupStatus`) escribir para que la
-      pantalla de ajustes de Drive pueda mostrar progreso.
-  - Para cada día:
-    - Cargar registros del rango correspondiente mediante
-      `getLocationsBetween`.
-    - Exportar a GeoJSON+ZIP en la carpeta de Descargas usando
-      `GeoJsonExporter`.
-    - Marcar la exportación local con `markExportedLocal`.
-    - Resolver la carpeta de Drive efectiva (ID configurado en la UI
-      via `DrivePrefsRepository`, con `AppPrefs.folderId` como
-      reserva).
-    - Crear un uploader usando `UploaderFactory` con
-      `UploadEngine.KOTLIN`.
-    - Subir el ZIP y marcar el día con `markUploaded` o
-      `markExportError` según el resultado.
-    - Borrar siempre el ZIP para evitar llenar el almacenamiento.
-    - Borrar filas de `LocationSample` del día en cuestión solo si la
-      subida se ha completado con éxito y existían registros.
+- Usa `UploadPrefs.zoneId` para determinar la zona horaria y procesa
+  días `[00:00, 24:00)`:
+  - Carga registros mediante `StorageService.getLocationsBetween`.
+  - Exporta a GeoJSON+ZIP con `GeoJsonExporter`.
+  - Marca exportación local con `markExportedLocal`.
+  - Resuelve folderId combinando `DrivePrefs` y `AppPrefs`.
+  - Crea un uploader (`UploadEngine.KOTLIN`) con `UploaderFactory`.
+  - Sube el ZIP y llama a `markUploaded` o `markExportError`.
+  - Borra el ZIP y, si la subida tiene éxito y hay datos, borra las
+    filas del día con `StorageService.deleteLocations`.
 
-- Acciones manuales:
-  - “Backup days before today” llama a
-    `MidnightExportWorker.runNow(context)` y fuerza un escaneo desde
-    el primer día con muestras hasta ayer, usando
-    `lastSampleTimeMillis` para determinar el rango.
+### RealtimeUploadManager / ajustes de Upload
 
-### RealtimeUploadManager / ajustes de subida
-
-- `RealtimeUploadManager` (`:datamanager`) observa nuevas filas de
-  `LocationSample` y sube a Drive en función de los ajustes de
-  Upload:
-  - Se suscribe a los Flows de `UploadPrefsRepository`
-    (`schedule`, `intervalSec`, `zoneId`) y de `SettingsRepository`
-    (intervalos de GPS/DR).
-  - Se suscribe a `StorageService.latestFlow(ctx, limit = 1)` para
-    detectar nuevas muestras.
-  - Solo actúa cuando:
-    - `UploadSchedule.REALTIME` está seleccionado, y
-    - Drive está configurado (cuenta + carpeta + engine válidos).
-  - Cálculo del intervalo efectivo:
-    - `intervalSec <= 0` → “subir en cada muestra nueva”.
-    - Para valores > 0, actúa como cooldown basado en tiempo.
-    - Si `intervalSec` coincide con el intervalo de muestreo activo
-      (DR o GPS), también se interpreta como “cada muestra”.
-  - Proceso de subida:
-    - Cargar todas las filas de `LocationSample` con
-      `getAllLocations`.
-    - Generar GeoJSON y escribirlo en un archivo temporal en
-      `cacheDir` llamado `YYYYMMDD_HHmmss.json` según la hora de la
-      última muestra y la zona `zoneId`.
-    - Resolver la carpeta de Drive combinando `DrivePrefsRepository`
-      (ID de carpeta configurado en la UI) y `AppPrefs.folderId`.
-    - Crear un uploader mediante `UploaderFactory.create(context,
-      appPrefs.engine)`, que internamente usa
-      `DriveTokenProviderRegistry` para obtener un
-      `GoogleDriveTokenProvider`.
-    - Subir el JSON y borrar el archivo temporal independientemente
-      del resultado.
-    - Si la subida tiene éxito, borrar las filas subidas mediante
-      `StorageService.deleteLocations`.
-
-- UI (`UploadSettingsScreen` / `UploadSettingsViewModel`):
-  - Permite:
-    - Activar/desactivar la subida automática (solo posible si Drive
-      está configurado).
-    - Elegir `UploadSchedule` (NONE / NIGHTLY / REALTIME).
-    - Configurar `intervalSec` (0 o 1–86400).
-    - Configurar `zoneId` (ID IANA) usada tanto por la exportación
-      nocturna como por la vista previa de hoy.
+- Observa:
+  - `UploadPrefsRepository.scheduleFlow`, `intervalSecFlow`,
+    `zoneIdFlow`.
+  - `SettingsRepository.intervalSecFlow`, `drIntervalSecFlow`.
+  - `StorageService.latestFlow(limit = 1)` para detectar nuevas
+    muestras.
+- Solo actúa cuando `UploadSchedule.REALTIME` está activo y Drive
+  está configurado.
+- Cuando debe subir:
+  - Carga todas las muestras con `StorageService.getAllLocations`.
+  - Genera `YYYYMMDD_HHmmss.json` en `cacheDir` a partir de la hora
+    de la última muestra y `zoneId`.
+  - Resuelve el folderId efectivo desde `DrivePrefs` y `AppPrefs`.
+  - Crea un uploader con `UploaderFactory.create(context, appPrefs.engine)` y sube el JSON.
+  - Borra el archivo temporal y, si la subida tiene éxito, borra las
+    filas subidas con `StorageService.deleteLocations`.
 
 ---
 
 ## UI / Compose (resumen)
 
-- `MainActivity`:
-  - Contiene un `NavHost` a nivel de Activity con rutas `"home"`,
-    `"drive_settings"`, `"upload_settings"`.
-  - Solicita permisos en tiempo de ejecución mediante
-    `ActivityResultContracts.RequestMultiplePermissions` y, tras
-    concederse, inicia `GeoLocationService`.
+- `MainActivity`
+  - `NavHost` a nivel de Activity con rutas `"home"`, `"drive_settings"`,
+    `"upload_settings"`.
+  - Solicita permisos y arranca `GeoLocationService` tras concederse.
 
-- `AppRoot`:
-  - Define un `NavHost` interno con rutas `"home"`, `"pickup"`,
-    `"map"`.
+- `AppRoot`
+  - `NavHost` interno con rutas `"home"`, `"pickup"`, `"map"`.
   - AppBar:
-    - Título según ruta (“GeoLocation”, “Pickup”, “Map”).
-    - Botón de retroceso en Pickup y Map.
-    - En Home, muestra botones `Map`, `Pickup`, `Drive`, `Upload` y
-      el componente `ServiceToggleAction` para controlar el
-      arranque/parada del servicio.
+    - Título (“GeoLocation”, “Pickup”, “Map”) según ruta.
+    - Botón atrás en Pickup y Map.
+    - En home: botones `Map`, `Pickup`, `Drive`, `Upload` y
+      `ServiceToggleAction`.
 
-- `MapScreen` / `GoogleMapsExample`:
-  - Usa `GoogleMapsView` de MapConductor con backend de Google Maps.
-  - Fila superior:
-    - Checkboxes para `GPS` y `DeadReckoning`.
-    - Campo `Count` (1–5000).
-    - Botones `Apply` / `Cancel`.
-  - `Apply`:
-    - Bloquea los controles y dibuja polilíneas por proveedor usando
-      hasta `Count` muestras más recientes:
-      - GPS: polilínea azul, trazo grueso, dibujada antes (detrás).
-      - DR : polilínea roja, trazo fino, dibujada después (delante).
-    - Las muestras se conectan **por orden temporal** (`timeMillis`),
-      no por distancia.
-  - `Cancel`:
-    - Borra las polilíneas y desbloquea los controles, manteniendo la
-      posición/zoom actual de la cámara.
-  - Superposición de depuración:
-    - Muestra `GPS`, `DR`, `ALL` como `mostrados / total BD`.
-    - Muestra el flag de estático de `DrDebugState`.
-    - Muestra la distancia DR–GPS, precisión GPS y un “peso” interno
-      que refleja la influencia de GPS en el motor.
-  - Círculo de precisión para el último GPS:
-    - Centro: última muestra GPS.
-    - Radio: `accuracy` en metros.
-    - Borde azul fino y relleno semitransparente.
+- `GeoLocationProviderScreen`
+  - Muestra controles de intervalo (GPS / DR) y la lista de historial.
+  - `HistoryViewModel` mantiene un buffer en memoria de hasta 9
+    muestras recientes (`LocationSample`) construido a partir de
+    `StorageService.latestFlow(limit = 9)` y ordenado por
+    `timeMillis` descendente. El buffer está desacoplado de los
+    borrados de Room, por lo que la lista de historial no “parpadea”
+    cuando los workers borran filas tras subidas correctas; las
+    muestras se eliminan solo al salir del buffer por antigüedad.
 
----
+- `PickupScreen`
+  - Usa `SelectorUseCases` para aplicar condiciones y mostrar
+    resultados de Pickup.
 
-## Estilo de código y comentarios (resumen)
+- `MapScreen` / `GoogleMapsExample`
+  - Usa `GoogleMapsView` de MapConductor con backend de Google Maps
+    para dibujar polilíneas de GPS/DR y una superposición de
+    depuración.
 
-- Todo el **código de producción** (Kotlin / Java / XML / scripts
-  Gradle, etc.) debe escribirse usando solo caracteres ASCII.
-  - Esto incluye comentarios y literales de cadena: evita caracteres
-    multibyte en código.
-- El contenido en japonés/español se limita a archivos de
-  documentación (`*.md`) como
-  `README_JA.md`, `README_ES.md`, `AGENTS_JA.md`, `AGENTS_ES.md`.
-- APIs públicas y clases clave deben documentarse con KDoc
-  (`/** ... */`), describiendo rol, política de diseño, uso y
-  contrato.  
-  Los detalles internos se comentan con `//` simples y encabezados
-  de sección uniformes (`// ---- Section ----`).
+- `DriveSettingsScreen`
+  - Selección de método de autenticación (Credential Manager / AppAuth),
+    inicio/cierre de sesión, botón “Get token”, ajustes de carpeta y
+    acciones “Backup days before today” / “Today preview”.
+
+- `UploadSettingsScreen`
+  - Permite activar/desactivar Upload, elegir `UploadSchedule`
+    (NONE/NIGHTLY/REALTIME), configurar `intervalSec` y `zoneId`, y
+    muestra avisos cuando Upload está activo sin Drive configurado.
 
 ---
 
 ## Superficie de API pública (librería)
 
-En general, se espera que solo los siguientes tipos formen parte de la
-superficie pública estable:
-
-- `:storageservice`:
+- `:storageservice`
   - `StorageService`, `LocationSample`, `ExportedDay`,
     `SettingsRepository`
-- `:dataselector`:
+- `:dataselector`
   - `SelectorCondition`, `SortOrder`, `SelectedSlot`,
     `LocationSampleSource`, `SelectorRepository`,
     `BuildSelectedSlots`, `SelectorPrefs`
-- `:datamanager`:
-  - Autenticación/tokens:
+- `:datamanager`
+  - Autenticación / tokens:
     `GoogleDriveTokenProvider`, `DriveTokenProviderRegistry`
   - Ajustes:
     `DrivePrefsRepository`, `UploadPrefsRepository`, `UploadSchedule`
   - API de Drive:
     `DriveApiClient`, `DriveFolderId`, `UploadResult`
-  - Exportación y subida:
-    `UploadEngine` (en `:core.config`), `GeoJsonExporter`,
-    `Uploader`, `UploaderFactory`, `RealtimeUploadManager`
+  - Exportación / subida:
+    `UploadEngine`, `GeoJsonExporter`, `Uploader`, `UploaderFactory`,
+    `RealtimeUploadManager`
   - Trabajos en segundo plano:
     `MidnightExportWorker`, `MidnightExportScheduler`
-- `:deadreckoning`:
+- `:deadreckoning`
   - `DeadReckoning`, `GpsFix`, `PredictedPoint`,
     `DeadReckoningConfig`, `DeadReckoningFactory`
-- `:gps`:
-  - `GpsLocationEngine`, `GpsObservation`,
-    `FusedLocationGpsEngine`
+- `:gps`
+  - `GpsLocationEngine`, `GpsObservation`, `FusedLocationGpsEngine`
 
-Los tipos no listados aquí deben considerarse detalles de
-implementación (idealmente `internal`) y pueden cambiar sin aviso.
+Otros tipos (DAOs, motores internos, helpers HTTP, etc.) deben
+tratarse como detalles de implementación (`internal`) y pueden
+cambiar sin aviso.
+
+---
+
+## Estilo de código (resumen)
+
+- Todo código de producción (Kotlin / Java / XML / scripts Gradle)
+  debe escribirse usando solo caracteres ASCII.
+- El contenido en español / japonés se limita a archivos de
+  documentación (`README_JA.md`, `README_ES.md`,
+  `AGENTS_JA.md`, `AGENTS_ES.md`).
+- Las APIs públicas se documentan con KDoc (`/** ... */`) y los
+  detalles internos usan comentarios `//` sencillos y encabezados
+  consistentes (`// ---- Section ----`).
 

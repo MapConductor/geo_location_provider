@@ -205,7 +205,17 @@ High-level dependency directions:
 
 ## Public Library Surface
 
-The primary reusable APIs are intentionally small. When consuming the
+### History list behavior
+
+The sample app's history view does not render directly from a live
+Room query. Instead, `HistoryViewModel` keeps an in-memory buffer of
+up to 9 latest `LocationSample` rows, built from
+`StorageService.latestFlow(limit = 9)` and sorted by `timeMillis`
+(newest first). This buffer is decoupled from realtime uploads, so
+rows deleted from Room after a successful upload remain visible in the
+history list until they naturally fall out of the buffer.
+
+ The primary reusable APIs are intentionally small. When consuming the
 libraries, prefer these modules and types:
 
 - `:storageservice`:
@@ -323,6 +333,16 @@ Both implementations:
 - Return `null` on normal failures instead of throwing.
 - Must not start UI from background contexts; workers use
   `DriveTokenProviderRegistry` instead.
+- The sample `App` wires `DriveTokenProviderRegistry` so that
+  background uploads follow the auth method selected in
+  `DriveSettingsScreen`:
+  - It registers a Credential Manager provider by default at startup.
+  - It then reads `DrivePrefs.authMethod` and swaps the background
+    provider to AppAuth when AppAuth is selected and already
+    authenticated.
+  - `DriveSettingsViewModel` keeps both `authMethod` and
+    `accountEmail` in sync and updates the registry when the user
+    completes Credential Manager or AppAuth sign-in.
 
 See `AGENTS.md`, `README_JA.md`, or `README_ES.md` for more detailed
 Cloud Console configuration.
@@ -380,4 +400,3 @@ Source encoding and comments:
 | UI: UploadSettingsScreen     | [v] Implemented | Schedule, interval, timezone, guardrails           |
 | UI: PickupScreen             | [v] Implemented | Pickup input and result list                       |
 | UI: History list             | [v] Implemented | Chronological view of saved samples                |
-
