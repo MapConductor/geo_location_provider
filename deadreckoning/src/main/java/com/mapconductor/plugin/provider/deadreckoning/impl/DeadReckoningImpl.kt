@@ -72,6 +72,14 @@ internal class DeadReckoningImpl(
 
         // High-speed regime where static detection is suppressed [m/s].
         private const val HIGH_SPEED_SUPPRESS_STATIC_MPS = 5.0
+
+        // Time window after leaving the high-speed regime where we still
+        // treat the motion as "vehicle-like" for static detection [ms].
+        private const val RECENT_HIGH_SPEED_WINDOW_MS = 30_000L
+
+        // Shorter static enter duration used only when we have recently
+        // been in the high-speed regime (for example trains or cars).
+        private const val STATIC_ENTER_DURATION_HIGH_SPEED_MS = 2_000L
     }
 
     @Volatile
@@ -93,6 +101,8 @@ internal class DeadReckoningImpl(
     private var staticEnterStartMillis: Long? = null
     @Volatile
     private var staticExitStartMillis: Long? = null
+    @Volatile
+    private var lastHighSpeedMillis: Long? = null
 
     // 1D DR state along the latest GPS direction.
     private val drLock = Any()
@@ -427,8 +437,11 @@ internal class DeadReckoningImpl(
             isStaticFlag = false
             staticEnterStartMillis = null
             staticExitStartMillis = null
+            lastHighSpeedMillis = nowMillis
             return
         }
+
+        val recentlyHighSpeed = lastHighSpeedMillis?.let { nowMillis - it <= RECENT_HIGH_SPEED_WINDOW_MS } ?: false
 
         val speedLow = effectiveSpeed <= ENTER_STATIC_SPEED_MPS.toDouble()
         val speedHigh = effectiveSpeed >= EXIT_STATIC_SPEED_MPS.toDouble()
@@ -437,7 +450,14 @@ internal class DeadReckoningImpl(
         val accelHigh = meanAccel?.let { it >= ACC_MOVING_THRESHOLD } ?: false
 
         // When accelerometer window is not ready, fall back to speed-only.
-        val accelOkForStatic = (meanAccel == null) || accelLow
+        // For recent high-speed motion (for example trains), allow speed-only
+        // static detection so that station stops are recognized even when
+        // horizontal vibration keeps mean acceleration slightly high.
+        val accelOkForStatic = if (recentlyHighSpeed) {
+            true
+        } else {
+            (meanAccel == null) || accelLow
+        }
 
         val staticCandidate = speedLow && accelOkForStatic
         val movingCandidate = speedHigh || accelHigh
@@ -446,7 +466,12 @@ internal class DeadReckoningImpl(
             val start = staticEnterStartMillis ?: nowMillis
             staticEnterStartMillis = start
             val elapsed = nowMillis - start
-            if (!isStaticFlag && elapsed >= STATIC_ENTER_DURATION_MS) {
+            val enterDurationMs = if (recentlyHighSpeed) {
+                STATIC_ENTER_DURATION_HIGH_SPEED_MS
+            } else {
+                STATIC_ENTER_DURATION_MS
+            }
+            if (!isStaticFlag && elapsed >= enterDurationMs) {
                 isStaticFlag = true
                 staticExitStartMillis = null
             }
