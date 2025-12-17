@@ -35,11 +35,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.auth.AppAuthAuth
 import com.mapconductor.plugin.provider.geolocation.auth.AppAuthSignInActivity
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.drive.DriveApiClient
 import com.mapconductor.plugin.provider.geolocation.drive.DriveFolderId
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.export.GpxExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
@@ -322,14 +324,14 @@ private fun TodayPreviewDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Today preview") },
-        text = {
-            Text(
-                "Upload today data?\n" +
-                    "- If you upload, the local GeoJSON/ZIP in Downloads will be deleted.\n" +
-                    "- If you do not upload, the file will remain in Downloads.\n" +
-                    "- Room data will NOT be deleted in either case."
-            )
-        },
+          text = {
+              Text(
+                  "Upload today data?\n" +
+                      "- If you upload, the local ZIP file in Downloads will be deleted.\n" +
+                      "- If you do not upload, the ZIP file will remain in Downloads.\n" +
+                      "- Room data will NOT be deleted in either case."
+              )
+          },
         confirmButton = {
             Button(onClick = onUpload) {
                 Text("Upload")
@@ -354,6 +356,8 @@ private suspend fun runTodayPreviewIO(
     val uploadPrefs = UploadPrefsRepository(ctx)
     val zoneId = runCatching { uploadPrefs.zoneIdFlow.first() }
         .getOrNull().orEmpty()
+    val outputFormat = runCatching { uploadPrefs.outputFormatFlow.first() }
+        .getOrNull() ?: UploadOutputFormat.GEOJSON
     val zone = try {
         if (zoneId.isNotBlank()) ZoneId.of(zoneId) else ZoneId.of("Asia/Tokyo")
     } catch (_: Throwable) {
@@ -403,18 +407,30 @@ private suspend fun runTodayPreviewIO(
 
     val baseName = "glp-" + DateTimeFormatter.ofPattern("yyyyMMdd")
         .format(LocalDate.ofEpochDay(todayEpochDay)) + "_prev"
+    val formatLabel = when (outputFormat) {
+        UploadOutputFormat.GEOJSON -> "GeoJSON"
+        UploadOutputFormat.GPX     -> "GPX"
+    }
 
-    // Export to Downloads/GeoLocationProvider as ZIP
-    val outUri = GeoJsonExporter.exportToDownloads(
-        context = ctx,
-        records = todays,
-        baseName = baseName,
-        compressAsZip = true
-    ) ?: return@withContext "Failed to create ZIP."
+    // Export to Downloads/GeoLocationProvider as ZIP (GeoJSON or GPX inside).
+    val outUri = when (outputFormat) {
+        UploadOutputFormat.GEOJSON -> GeoJsonExporter.exportToDownloads(
+            context = ctx,
+            records = todays,
+            baseName = baseName,
+            compressAsZip = true
+        )
+        UploadOutputFormat.GPX -> GpxExporter.exportToDownloads(
+            context = ctx,
+            records = todays,
+            baseName = baseName,
+            compressAsZip = true
+        )
+    } ?: return@withContext "Failed to create ZIP."
 
     if (!upload) {
         // Save only: keep Room data
-        return@withContext "Saved today's data to Downloads as $baseName.zip (Room data kept)."
+        return@withContext "Saved today's data to Downloads as $baseName.zip ($formatLabel, Room data kept)."
     }
 
     // Upload flow
@@ -476,8 +492,8 @@ private suspend fun runTodayPreviewIO(
     runCatching { ctx.contentResolver.delete(outUri, null, null) }
 
     if (success) {
-        "Uploaded today's data as $baseName.zip to folder $folderId. Local ZIP was deleted; Room data is kept."
+        "Uploaded today's data as $baseName.zip ($formatLabel) to folder $folderId. Local ZIP was deleted; Room data is kept."
     } else {
-        "Failed to upload today's data after 5 attempts (folder=$folderId). ZIP was deleted; Room data is kept."
+        "Failed to upload today's data ($formatLabel) after 5 attempts (folder=$folderId). ZIP was deleted; Room data is kept."
     }
 }

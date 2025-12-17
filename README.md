@@ -4,7 +4,7 @@ GeoLocationProvider is an Android SDK and sample application for
 **recording, storing, exporting, and uploading location data**.
 
 It records background location to a Room database, exports it as
-GeoJSON+ZIP, and can upload the results to **Google Drive** both via
+GeoJSON+ZIP (and optionally GPX), and can upload the results to **Google Drive** both via
 scheduled nightly backup and optional realtime upload.
 
 ---
@@ -13,7 +13,7 @@ scheduled nightly backup and optional realtime upload.
 
 - Background location acquisition (configurable GPS / DR intervals).
 - Storage in a Room database (`LocationSample`, `ExportedDay`).
-- Export to GeoJSON format with optional ZIP compression.
+- Export to GeoJSON or GPX format with optional ZIP compression.
 - Automatic daily export at midnight (`MidnightExportWorker`).
 - Manual export for “backup days before today” and “today preview”.
 - Pickup feature (extract representative samples by period / count).

@@ -25,6 +25,7 @@ internal class UploadPrefs(private val appContext: Context) {
         val SCHEDULE   = stringPreferencesKey("schedule")
         val INTERVAL_S = intPreferencesKey("interval_sec")
         val ZONE_ID    = stringPreferencesKey("zone_id")
+        val FORMAT     = stringPreferencesKey("output_format")
     }
 
     // ---- Read Flows ----
@@ -37,6 +38,9 @@ internal class UploadPrefs(private val appContext: Context) {
 
     val zoneId: Flow<String> =
         appContext.uploadDataStore.data.map { it[K.ZONE_ID] ?: "Asia/Tokyo" }
+
+    val outputFormat: Flow<String> =
+        appContext.uploadDataStore.data.map { it[K.FORMAT] ?: "geojson" }
 
     // ---- Write APIs ----
 
@@ -57,5 +61,9 @@ internal class UploadPrefs(private val appContext: Context) {
         val value = zoneId.ifBlank { "Asia/Tokyo" }
         appContext.uploadDataStore.edit { it[K.ZONE_ID] = value }
     }
-}
 
+    suspend fun setOutputFormat(formatWire: String) {
+        val value = formatWire.ifBlank { "geojson" }
+        appContext.uploadDataStore.edit { it[K.FORMAT] = value }
+    }
+}

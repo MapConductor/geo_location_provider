@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.prefs
 
 import android.content.Context
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -33,10 +34,16 @@ class UploadPrefsRepository(context: Context) {
     val zoneIdFlow: Flow<String> =
         prefs.zoneId.map { it.ifBlank { "Asia/Tokyo" } }
 
+    /** Output format for exported logs. Defaults to GEOJSON. */
+    val outputFormatFlow: Flow<UploadOutputFormat> =
+        prefs.outputFormat.map { UploadOutputFormat.fromString(it) }
+
     suspend fun setSchedule(schedule: UploadSchedule) = prefs.setSchedule(schedule)
 
     suspend fun setIntervalSec(sec: Int) = prefs.setIntervalSec(sec)
 
     suspend fun setZoneId(zoneId: String) = prefs.setZoneId(zoneId)
-}
 
+    suspend fun setOutputFormat(format: UploadOutputFormat) =
+        prefs.setOutputFormat(format.wire)
+}

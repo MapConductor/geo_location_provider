@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,10 +38,12 @@ fun UploadSettingsScreen(
     val schedule by vm.schedule.collectAsState()
     val intervalSec by vm.intervalSec.collectAsState()
     val zoneId by vm.zoneId.collectAsState()
+    val outputFormat by vm.outputFormat.collectAsState()
     val status by vm.status.collectAsState()
 
     val intervalText = remember(intervalSec) { mutableStateOf(intervalSec.toString()) }
     val zoneText = remember(zoneId) { mutableStateOf(zoneId) }
+    val formatState = remember(outputFormat) { mutableStateOf(outputFormat) }
 
     Scaffold(
         topBar = {
@@ -145,6 +148,47 @@ fun UploadSettingsScreen(
                 label = { Text("IANA ID (e.g. Asia/Tokyo)") }
             )
 
+            // Output format
+            Text("Output format", style = MaterialTheme.typography.titleMedium)
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    RadioButton(
+                        enabled = uploadEnabled,
+                        selected = formatState.value == UploadOutputFormat.GEOJSON,
+                        onClick = {
+                            if (uploadEnabled) {
+                                formatState.value = UploadOutputFormat.GEOJSON
+                                vm.setOutputFormat(UploadOutputFormat.GEOJSON)
+                            }
+                        }
+                    )
+                    Text("GeoJSON")
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Start
+                ) {
+                    RadioButton(
+                        enabled = uploadEnabled,
+                        selected = formatState.value == UploadOutputFormat.GPX,
+                        onClick = {
+                            if (uploadEnabled) {
+                                formatState.value = UploadOutputFormat.GPX
+                                vm.setOutputFormat(UploadOutputFormat.GPX)
+                            }
+                        }
+                    )
+                    Text("GPX")
+                }
+            }
+
             if (status.isNotBlank()) {
                 Text("Status", style = MaterialTheme.typography.titleMedium)
                 Text(status)
@@ -158,4 +202,3 @@ fun UploadSettingsScreen(
         }
     }
 }
-

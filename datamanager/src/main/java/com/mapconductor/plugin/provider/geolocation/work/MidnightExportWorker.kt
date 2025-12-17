@@ -12,10 +12,12 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.export.GpxExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
@@ -42,6 +44,7 @@ class MidnightExportWorker(
 ) : CoroutineWorker(appContext, params) {
 
     private var zone: ZoneId = ZoneId.of("Asia/Tokyo")
+    private var outputFormat: UploadOutputFormat = UploadOutputFormat.GEOJSON
     private val dateFmt: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd")
     private val drivePrefs: DrivePrefsRepository = DrivePrefsRepository(appContext)
     private val uploadPrefs: UploadPrefsRepository = UploadPrefsRepository(appContext)
@@ -71,11 +74,13 @@ class MidnightExportWorker(
     }
 
     override suspend fun doWork(): Result {
-        // Resolve timezone and schedule from UploadPrefs.
+        // Resolve timezone, schedule, and output format from UploadPrefs.
         val schedule = runCatching { uploadPrefs.scheduleFlow.first() }
             .getOrNull() ?: UploadSchedule.NIGHTLY
         val zoneId = runCatching { uploadPrefs.zoneIdFlow.first() }
             .getOrNull().orEmpty()
+        outputFormat = runCatching { uploadPrefs.outputFormatFlow.first() }
+            .getOrNull() ?: UploadOutputFormat.GEOJSON
         zone = try {
             if (zoneId.isNotBlank()) ZoneId.of(zoneId) else ZoneId.of("Asia/Tokyo")
         } catch (_: Throwable) {
@@ -111,6 +116,8 @@ class MidnightExportWorker(
                 append(oldest?.epochDay ?: "null")
                 append(", forceFullScan=")
                 append(forceFullScan)
+                append(", format=")
+                append(outputFormat.wire)
             }
             drivePrefs.setBackupStatus(msg)
         }
@@ -178,13 +185,27 @@ class MidnightExportWorker(
                 softLimit = 1_000_000
             )
 
-            // Generate local GeoJSON as ZIP.
-            val exported: Uri? = GeoJsonExporter.exportToDownloads(
-                context = applicationContext,
-                records = records,
-                baseName = baseName,
-                compressAsZip = true
-            )
+              // Generate local export as ZIP (GeoJSON or GPX).
+              val exported: Uri? = when (outputFormat) {
+                  UploadOutputFormat.GEOJSON -> GeoJsonExporter.exportToDownloads(
+                      context = applicationContext,
+                      records = records,
+                      baseName = baseName,
+                      compressAsZip = true
+                  )
+                  UploadOutputFormat.GPX -> GpxExporter.exportToDownloads(
+                      context = applicationContext,
+                      records = records,
+                      baseName = baseName,
+                      compressAsZip = true
+                  )
+                  else -> GeoJsonExporter.exportToDownloads(
+                      context = applicationContext,
+                      records = records,
+                      baseName = baseName,
+                      compressAsZip = true
+                  )
+              }
 
             // Mark local export as succeeded (even for empty day).
             StorageService.markExportedLocal(applicationContext, epochDay)

@@ -3,6 +3,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.settings
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
@@ -39,6 +40,13 @@ class UploadSettingsViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope,
             SharingStarted.Eagerly,
             "Asia/Tokyo"
+        )
+
+    val outputFormat: StateFlow<UploadOutputFormat> =
+        prefs.outputFormatFlow.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            UploadOutputFormat.GEOJSON
         )
 
     // Drive is considered configured when accountEmail is non-blank.
@@ -105,6 +113,12 @@ class UploadSettingsViewModel(app: Application) : AndroidViewModel(app) {
     fun setZoneId(zoneId: String) {
         viewModelScope.launch(Dispatchers.IO) {
             prefs.setZoneId(zoneId)
+        }
+    }
+
+    fun setOutputFormat(format: UploadOutputFormat) {
+        viewModelScope.launch(Dispatchers.IO) {
+            prefs.setOutputFormat(format)
         }
     }
 

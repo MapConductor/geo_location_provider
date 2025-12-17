@@ -4,10 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import com.mapconductor.plugin.provider.geolocation.config.UploadEngine
+import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
 import com.mapconductor.plugin.provider.geolocation.drive.UploadResult
 import com.mapconductor.plugin.provider.geolocation.drive.upload.UploaderFactory
 import com.mapconductor.plugin.provider.geolocation.export.GeoJsonExporter
+import com.mapconductor.plugin.provider.geolocation.export.GpxExporter
 import com.mapconductor.plugin.provider.geolocation.prefs.AppPrefs
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.prefs.UploadPrefsRepository
@@ -52,6 +54,7 @@ object RealtimeUploadManager {
     @Volatile private var zoneId: String = "Asia/Tokyo"
     @Volatile private var gpsIntervalSec: Int = 30
     @Volatile private var drIntervalSec: Int = 5
+    @Volatile private var outputFormat: UploadOutputFormat = UploadOutputFormat.GEOJSON
 
     @Volatile private var lastSampleTimeMillis: Long = 0L
     @Volatile private var lastUploadStartMillis: Long = 0L
@@ -84,6 +87,11 @@ object RealtimeUploadManager {
         scope.launch {
             uploadPrefs.zoneIdFlow.collect { z ->
                 zoneId = if (z.isNotBlank()) z else "Asia/Tokyo"
+            }
+        }
+        scope.launch {
+            uploadPrefs.outputFormatFlow.collect { fmt ->
+                outputFormat = fmt
             }
         }
         scope.launch {
@@ -177,17 +185,52 @@ object RealtimeUploadManager {
             val fmt = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
             val baseName = fmt.format(dt)
 
-            val json = GeoJsonExporter.toGeoJson(records).toByteArray(Charsets.UTF_8)
-            val file = File(appContext.cacheDir, "$baseName.json")
-            try {
-                FileOutputStream(file).use { os ->
-                    os.write(json)
-                    os.flush()
+            val (file, displayName) = when (outputFormat) {
+                UploadOutputFormat.GEOJSON -> {
+                    val json = GeoJsonExporter.toGeoJson(records).toByteArray(Charsets.UTF_8)
+                    val f = File(appContext.cacheDir, "$baseName.json")
+                    try {
+                        FileOutputStream(f).use { os ->
+                            os.write(json)
+                            os.flush()
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to write GeoJSON to cache file", t)
+                        runCatching { f.delete() }
+                        return
+                    }
+                    f to "$baseName.json"
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "Failed to write GeoJSON to cache file", t)
-                runCatching { file.delete() }
-                return
+                UploadOutputFormat.GPX -> {
+                    val gpx = GpxExporter.toGpx(records).toByteArray(Charsets.UTF_8)
+                    val f = File(appContext.cacheDir, "$baseName.gpx")
+                    try {
+                        FileOutputStream(f).use { os ->
+                            os.write(gpx)
+                            os.flush()
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to write GPX to cache file", t)
+                        runCatching { f.delete() }
+                        return
+                    }
+                    f to "$baseName.gpx"
+                }
+                else -> {
+                    val json = GeoJsonExporter.toGeoJson(records).toByteArray(Charsets.UTF_8)
+                    val f = File(appContext.cacheDir, "$baseName.json")
+                    try {
+                        FileOutputStream(f).use { os ->
+                            os.write(json)
+                            os.flush()
+                        }
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Failed to write GeoJSON to cache file", t)
+                        runCatching { f.delete() }
+                        return
+                    }
+                    f to "$baseName.json"
+                }
             }
 
             val uri: Uri = Uri.fromFile(file)
@@ -216,7 +259,7 @@ object RealtimeUploadManager {
                         }, folderOk=$folderOk)"
                     )
                 } else {
-                    when (val up = uploader.upload(uri, effectiveFolderId, "$baseName.json")) {
+                    when (val up = uploader.upload(uri, effectiveFolderId, displayName)) {
                         is UploadResult.Success -> {
                             uploadSucceeded = true
                             Log.d(TAG, "Realtime upload OK id=${up.id} name=${up.name}")
