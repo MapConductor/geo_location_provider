@@ -122,8 +122,11 @@ High-level dependency directions:
     overlay can show `Static: YES/NO`.
 
 **Export and Upload (`:datamanager`)**
-
-- Nightly export:
+  
+  - Output formats: GeoJSON (via `GeoJsonExporter`) and GPX (via
+    `GpxExporter`), selectable via `UploadOutputFormat` /
+    `UploadSettingsScreen`.
+  - Nightly export:
   - `MidnightExportWorker` / `MidnightExportScheduler`:
     - Timezone is taken from `UploadPrefs.zoneId` (IANA ID,
       defaults to `Asia/Tokyo`).
@@ -391,7 +394,7 @@ Source encoding and comments:
 | Feature                      | Status          | Notes                                              |
 |------------------------------|-----------------|----------------------------------------------------|
 | Location recording (Room)    | [v] Implemented | Saved as `LocationSample` rows                     |
-| Daily export (GeoJSON+ZIP)   | [v] Implemented | `MidnightExportWorker` + `MidnightExportScheduler` |
+| Daily export (GeoJSON/GPX+ZIP) | [v] Implemented | `MidnightExportWorker` + `MidnightExportScheduler` |
 | Google Drive upload          | [v] Implemented | Kotlin-based uploader via `UploaderFactory`        |
 | Pickup (interval/count)      | [v] Implemented | `:dataselector` + Compose UI                       |
 | Map visualization            | [v] Implemented | GPS/DR polylines + debug overlay                   |

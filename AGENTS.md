@@ -12,39 +12,39 @@ implementing changes.
 ## Project Structure and Modules
 
 - Root Gradle project `GeoLocationProvider` consists of:
-  - `:app` – Jetpack Compose sample app (history, Pickup, Map, Drive
+  - `:app`  EJetpack Compose sample app (history, Pickup, Map, Drive
     settings, Upload settings, manual backup).
-  - `:core` – Foreground location service (`GeoLocationService`),
+  - `:core`  EForeground location service (`GeoLocationService`),
     device sensor handling, and shared config such as `UploadEngine`.
     Persists via `:storageservice`, uses `:gps` for GNSS and
     `:deadreckoning` for IMU prediction.
-  - `:gps` – GPS abstraction (`GpsLocationEngine`,
+  - `:gps`  EGPS abstraction (`GpsLocationEngine`,
     `GpsObservation`, `FusedLocationGpsEngine`) which wraps
     `FusedLocationProviderClient` and `GnssStatus`.
-  - `:storageservice` – Room `AppDatabase`, DAOs, and the
+  - `:storageservice`  ERoom `AppDatabase`, DAOs, and the
     `StorageService` facade. Owns location logs and export status.
-  - `:dataselector` – Pickup selection logic based on
+  - `:dataselector`  EPickup selection logic based on
     `LocationSampleSource` and `SelectorCondition`.
-  - `:datamanager` – GeoJSON export, ZIP compression,
+  - `:datamanager`  EGeoJSON / GPX export, ZIP compression,
     `MidnightExportWorker` / `MidnightExportScheduler`,
     `RealtimeUploadManager`, Drive HTTP client and uploaders, Drive
     and Upload preference repositories.
-  - `:deadreckoning` – Dead Reckoning engine and public API
+  - `:deadreckoning`  EDead Reckoning engine and public API
     (`DeadReckoning`, `GpsFix`, `PredictedPoint`,
     `DeadReckoningConfig`, `DeadReckoningFactory`).
-  - `:auth-appauth` – AppAuth-based `GoogleDriveTokenProvider`.
-  - `:auth-credentialmanager` – Credential Manager + Identity-based
+  - `:auth-appauth`  EAppAuth-based `GoogleDriveTokenProvider`.
+  - `:auth-credentialmanager`  ECredential Manager + Identity-based
     `GoogleDriveTokenProvider`.
-  - `mapconductor-core-src` – Vendored MapConductor core sources used
+  - `mapconductor-core-src`  EVendored MapConductor core sources used
     only from `:app` (treat as read-only; changes should go upstream).
 
 - High-level dependency directions:
-  - `:app` → `:core`, `:dataselector`, `:datamanager`,
+  - `:app` ↁE`:core`, `:dataselector`, `:datamanager`,
     `:storageservice`, `:deadreckoning`, `:gps`, auth modules,
     MapConductor.
-  - `:core` → `:gps`, `:storageservice`, `:deadreckoning`.
-  - `:datamanager` → `:core`, `:storageservice`, Drive integration.
-  - `:dataselector` → `LocationSampleSource` abstraction only
+  - `:core` ↁE`:gps`, `:storageservice`, `:deadreckoning`.
+  - `:datamanager` ↁE`:core`, `:storageservice`, Drive integration.
+  - `:dataselector` ↁE`LocationSampleSource` abstraction only
     (implementation lives in `:app`, wrapping `StorageService`).
 
 - Production code lives under each module’s `src/main/java`,
@@ -63,13 +63,11 @@ implementing changes.
 ## Build, Test, and Development Commands
 
 - Typical Gradle commands (run from project root):
-  - `./gradlew :app:assembleDebug` – Build sample app (debug).
-  - `./gradlew :core:assemble` / `:storageservice:assemble` –
-    Build library modules.
-  - `./gradlew :deadreckoning:assemble` / `:gps:assemble` –
-    Build sensor/DR modules.
-  - `./gradlew lint` – Android / Kotlin static analysis.
-  - `./gradlew test` / `:app:connectedAndroidTest` – Unit / UI tests.
+  - `./gradlew :app:assembleDebug`  EBuild sample app (debug).
+  - `./gradlew :core:assemble` / `:storageservice:assemble`  E    Build library modules.
+  - `./gradlew :deadreckoning:assemble` / `:gps:assemble`  E    Build sensor/DR modules.
+  - `./gradlew lint`  EAndroid / Kotlin static analysis.
+  - `./gradlew test` / `:app:connectedAndroidTest`  EUnit / UI tests.
 
 Use Android Studio for day-to-day development; use command line
 mainly for CI and verification.
@@ -90,12 +88,12 @@ mainly for CI and verification.
     `com.mapconductor.plugin.provider.geolocation.deadreckoning.*`
 
 - Naming:
-  - Classes / objects / interfaces – PascalCase
-  - Functions / variables / properties – camelCase
-  - Constants – UPPER_SNAKE_CASE
-  - Screen-level Composables – end with `Screen`
-  - ViewModels – end with `ViewModel`
-  - Workers / schedulers – end with `Worker` / `Scheduler`
+  - Classes / objects / interfaces  EPascalCase
+  - Functions / variables / properties  EcamelCase
+  - Constants  EUPPER_SNAKE_CASE
+  - Screen-level Composables  Eend with `Screen`
+  - ViewModels  Eend with `ViewModel`
+  - Workers / schedulers  Eend with `Worker` / `Scheduler`
 
 - Functions should have a single, focused responsibility and clear
   names.
@@ -129,30 +127,30 @@ mainly for CI and verification.
     `:dataselector`.
 
 - Main `StorageService` API:
-  - `latestFlow(ctx, limit)` – Flow of latest `LocationSample`s,
+  - `latestFlow(ctx, limit)`  EFlow of latest `LocationSample`s,
     newest first (used by history, Map, realtime upload).
-  - `getAllLocations(ctx)` – All locations, ascending by
+  - `getAllLocations(ctx)`  EAll locations, ascending by
     `timeMillis`. Use only for small datasets (previews, debugging,
     realtime snapshot).
-  - `getLocationsBetween(ctx, from, to, softLimit)` – Locations in
+  - `getLocationsBetween(ctx, from, to, softLimit)`  ELocations in
     `[from, to)` (half-open), ascending by `timeMillis`. Use for
     daily export and range-based Pickup.
-  - `insertLocation(ctx, sample)` – Inserts one sample and logs
+  - `insertLocation(ctx, sample)`  EInserts one sample and logs
     before/after counts with `DB/TRACE`.
-  - `deleteLocations(ctx, items)` – Batch delete; no-op for an empty
+  - `deleteLocations(ctx, items)`  EBatch delete; no-op for an empty
     list; propagates exceptions.
-  - `lastSampleTimeMillis(ctx)` – Maximum `timeMillis` across all
+  - `lastSampleTimeMillis(ctx)`  EMaximum `timeMillis` across all
     samples, or `null` when empty (used by export backlog logic).
-  - `ensureExportedDay(ctx, epochDay)` – Ensure an `ExportedDay`
+  - `ensureExportedDay(ctx, epochDay)`  EEnsure an `ExportedDay`
     row exists.
-  - `oldestNotUploadedDay(ctx)` – Oldest day not yet marked as
+  - `oldestNotUploadedDay(ctx)`  EOldest day not yet marked as
     uploaded.
-  - `exportedDayCount(ctx)` – Total `ExportedDay` row count (for
+  - `exportedDayCount(ctx)`  ETotal `ExportedDay` row count (for
     diagnostics / UI).
-  - `nextNotUploadedDayAfter(ctx, afterEpochDay)` – Next
+  - `nextNotUploadedDayAfter(ctx, afterEpochDay)`  ENext
     non-uploaded day strictly after `afterEpochDay`.
   - `markExportedLocal(ctx, epochDay)` /
-    `markUploaded` / `markExportError` – Update per-day export/upload
+    `markUploaded` / `markExportError`  EUpdate per-day export/upload
     status.
 
 - All DB access runs on `Dispatchers.IO` inside `StorageService`.
@@ -198,7 +196,7 @@ mainly for CI and verification.
   - Each observation is transformed into a `LocationSample` with
     provider `"gps"`. Duplicate suppression is based on a compact
     signature so repeated callbacks do not flood the DB.
-  - A “GPS hold” position is maintained separately from the raw
+  - A “GPS hold Eposition is maintained separately from the raw
     receive position and blends old/new points using speed and
     accuracy to reduce jitter while keeping high-speed motion
     responsive.
@@ -213,7 +211,7 @@ mainly for CI and verification.
   - DR prediction is driven by a ticker:
     - Interval in seconds is `drIntervalSec`.
     - `drIntervalSec == 0` means “Dead Reckoning disabled (GPS
-      only)” and the ticker is stopped.
+      only) Eand the ticker is stopped.
     - `drIntervalSec > 0` starts a loop which:
       - Calls `dr.predict(fromMillis = lastFixMillis, toMillis =
         now)`.
@@ -238,14 +236,14 @@ mainly for CI and verification.
 
 - `storageservice.prefs.SettingsRepository` encapsulates sampling
   intervals in DataStore:
-  - `intervalSecFlow(context)` – Flow of GPS interval in seconds
+  - `intervalSecFlow(context)`  EFlow of GPS interval in seconds
     (defaults and minimums applied).
-  - `drIntervalSecFlow(context)` – Flow of DR interval in seconds.
+  - `drIntervalSecFlow(context)`  EFlow of DR interval in seconds.
     Contract:
-    - `0` → “DR disabled (GPS only)”.
-    - `> 0` → clamped to at least 1 second.
+    - `0` ↁE“DR disabled (GPS only) E
+    - `> 0` ↁEclamped to at least 1 second.
   - `currentIntervalMs(context)` /
-    `currentDrIntervalSec(context)` – synchronous getters for legacy
+    `currentDrIntervalSec(context)`  Esynchronous getters for legacy
     code; prefer Flow APIs for new code.
 
 - `GeoLocationService` subscribes to both flows:
@@ -256,10 +254,10 @@ mainly for CI and verification.
 
 - `IntervalSettingsViewModel`:
   - Provides text fields for GPS and DR intervals and a “Save &
-    Apply” button.
+    Apply Ebutton.
   - DR interval is validated against `[0, floor(GPS / 2)]` seconds.
   - When DR interval is set to `0`, a toast explicitly notes
-    “DR disabled (GPS only)”.
+    “DR disabled (GPS only) E
 
 ---
 
@@ -292,7 +290,7 @@ mainly for CI and verification.
   - `clientId = BuildConfig.APPAUTH_CLIENT_ID`.
   - Redirect URI:
     `com.mapconductor.plugin.provider.geolocation:/oauth2redirect`.
-  - Requires an “installed app” client in Google Cloud Console with
+  - Requires an “installed app Eclient in Google Cloud Console with
     the above scheme/redirect.
 
 - `AppAuthSignInActivity`:
@@ -323,25 +321,25 @@ mainly for CI and verification.
 
 - Background workers must:
   - Never start UI.
-  - Treat `getAccessToken() == null` as “not authorized”.
+  - Treat `getAccessToken() == null` as “not authorized E
   - Always delete temporary ZIP/JSON files after each attempt.
 
 ### Drive / Upload settings persistence
 
 - Two layers for Drive settings plus one for upload behavior:
-  - `core.prefs.AppPrefs` – legacy SharedPreferences:
+  - `core.prefs.AppPrefs`  Elegacy SharedPreferences:
     - `engine` (`UploadEngine`), `folderId`, and a few other fields.
     - Used by older paths and as a fallback for workers.
-  - `datamanager.prefs.DrivePrefsRepository` – DataStore-based Drive
+  - `datamanager.prefs.DrivePrefsRepository`  EDataStore-based Drive
     prefs:
     - `folderId`, `folderResourceKey`, `accountEmail`,
       `uploadEngineName`, `authMethod`, `tokenUpdatedAtMillis`,
       `backupStatus`.
-  - `datamanager.prefs.UploadPrefsRepository` – DataStore-based upload
+  - `datamanager.prefs.UploadPrefsRepository`  EDataStore-based upload
     prefs:
     - `schedule` (`UploadSchedule.NONE` / `NIGHTLY` /
       `REALTIME`).
-    - `intervalSec` (0 or 1–86400 seconds).
+    - `intervalSec` (0 or 1 E6400 seconds).
     - `zoneId` (IANA timezone string, defaults to `Asia/Tokyo`).
 
 - UI should read/write via the repositories; workers may use both the
@@ -352,44 +350,45 @@ mainly for CI and verification.
 ## Export and Upload
 
 ### MidnightExportWorker / MidnightExportScheduler
-
-- `MidnightExportWorker` processes “backlog up to yesterday”:
-  - Timezone is read from `UploadPrefs.zoneId` (defaults to
-    `Asia/Tokyo`).
-  - One-day ranges use `[0:00, 24:00)` in that zone.
-  - Uses `StorageService.ensureExportedDay`,
-    `oldestNotUploadedDay`, `nextNotUploadedDayAfter`,
-    `exportedDayCount`, and `lastSampleTimeMillis` to decide which
-    days to process and to populate status strings.
-  - For each day:
-    - Loads records via `StorageService.getLocationsBetween`.
-    - Exports GeoJSON+ZIP to Downloads via `GeoJsonExporter`.
-    - Marks local export via `markExportedLocal`.
-    - Resolves effective Drive folder (DrivePrefs first, then
-      AppPrefs).
-    - Creates an uploader via `UploaderFactory` using
-      `UploadEngine.KOTLIN` when configured.
-    - Uploads the ZIP and records success/failure via
-      `markUploaded` / `markExportError`.
-    - Writes a human-readable `backupStatus` summary string via
-      `DrivePrefsRepository` for Drive settings UI.
-    - Always deletes the ZIP from Downloads to avoid filling storage.
-    - Deletes that day’s `LocationSample` rows from Room only when
-      upload succeeds and the day had records.
+  
+- `MidnightExportWorker` processes “backlog up to yesterday E
+    - Timezone is read from `UploadPrefs.zoneId` (defaults to
+      `Asia/Tokyo`).
+    - One-day ranges use `[0:00, 24:00)` in that zone.
+    - Uses `StorageService.ensureExportedDay`,
+      `oldestNotUploadedDay`, `nextNotUploadedDayAfter`,
+      `exportedDayCount`, and `lastSampleTimeMillis` to decide which
+      days to process and to populate status strings.
+    - For each day:
+      - Loads records via `StorageService.getLocationsBetween`.
+      - Exports a ZIP to Downloads via `GeoJsonExporter` (GeoJSON) or
+        `GpxExporter` (GPX) according to `UploadOutputFormat`.
+      - Marks local export via `markExportedLocal`.
+      - Resolves effective Drive folder (DrivePrefs first, then
+        AppPrefs).
+      - Creates an uploader via `UploaderFactory` using
+        `UploadEngine.KOTLIN` when configured.
+      - Uploads the ZIP and records success/failure via
+        `markUploaded` / `markExportError`.
+      - Writes a human-readable `backupStatus` summary string via
+        `DrivePrefsRepository` for Drive settings UI.
+      - Always deletes the ZIP from Downloads to avoid filling storage.
+      - Deletes that day’s `LocationSample` rows from Room only when
+        upload succeeds and the day had records.
 
 - Manual backlog:
   - `MidnightExportWorker.runNow(context)` enqueues an immediate
     worker with a flag to force a full range scan using earliest and
-    latest sample dates, so “Backup days before today” re-processes
+    latest sample dates, so “Backup days before today Ere-processes
     all applicable days even when `exported_days.uploaded` is already
     true.
 
 ### RealtimeUploadManager / Upload settings
 
 - `RealtimeUploadManager` watches new `LocationSample` rows and
-  uploads them as GeoJSON according to upload settings:
+  uploads them as GeoJSON or GPX according to upload settings:
   - Observes `UploadPrefsRepository.scheduleFlow`, `intervalSecFlow`,
-    and `zoneIdFlow`.
+    `zoneIdFlow`, and `outputFormatFlow`.
   - Observes GPS/DR sampling intervals via
     `SettingsRepository.intervalSecFlow` and
     `SettingsRepository.drIntervalSecFlow`.
@@ -399,18 +398,18 @@ mainly for CI and verification.
     - Drive is configured (engine/folder ok).
   - Applies a cooldown based on `intervalSec`:
     - `intervalSec == 0` or equal to the active sampling interval
-      → treat as “every sample”.
+      ↁEtreat as “every sample E
   - When an upload is due:
     - Loads all samples via `StorageService.getAllLocations`.
-    - Builds GeoJSON and writes to a cache file
-      (`YYYYMMDD_HHmmss.json`) based on the latest sample and
-      configured timezone.
+    - Builds either GeoJSON (`YYYYMMDD_HHmmss.json`) or GPX
+      (`YYYYMMDD_HHmmss.gpx`) into a cache file based on the latest
+      sample, configured timezone, and `UploadOutputFormat`.
     - Resolves effective Drive folder (DrivePrefs UI folder first,
       then AppPrefs).
     - Creates an uploader via `UploaderFactory.create(context,
       appPrefs.engine)`; this uses `DriveTokenProviderRegistry` for
       auth when possible.
-    - Uploads the JSON, then deletes the cache file.
+    - Uploads the generated file, then deletes the cache file.
     - On success, deletes the uploaded `LocationSample` rows via
       `StorageService.deleteLocations`.
 
@@ -451,7 +450,7 @@ mainly for CI and verification.
   - `MapScreen` / `GoogleMapsExample`:
     - Uses MapConductor `GoogleMapsView`.
     - Top row: `GPS` and `DeadReckoning` checkboxes, `Count` field
-      (1–5000), `Apply` / `Cancel` button.
+      (1 E000), `Apply` / `Cancel` button.
     - On `Apply`, controls are locked and up to `Count` newest samples
       are considered:
       - GPS polyline: blue, thicker, drawn first (behind).
@@ -463,18 +462,18 @@ mainly for CI and verification.
       - `GPS`, `DR`, `ALL` counts (`shown / DB total`).
       - Static flag from `DrDebugState` (`Static: YES/NO`).
       - DR–GPS distance (m) when both are available.
-      - Latest GPS accuracy and an approximate “GPS weight” based on
+      - Latest GPS accuracy and an approximate “GPS weight Ebased on
         accuracy.
     - Draws an accuracy circle for the latest GPS sample (radius =
       `accuracy` [m], thin blue stroke and semi-transparent fill).
   - `DriveSettingsScreen`:
     - Auth method selection (Credential Manager vs AppAuth).
-    - Per-method sign-in / sign-out and “Get token” actions.
+    - Per-method sign-in / sign-out and “Get token Eactions.
     - Folder id / URL and optional resourceKey fields with “Validate
-      folder”.
-    - “Backup days before today” triggers `MidnightExportWorker` and
+      folder E
+    - “Backup days before today Etriggers `MidnightExportWorker` and
       shows detailed status messages.
-    - “Today preview” exports today’s data to a ZIP and optionally
+    - “Today preview Eexports today’s data to a ZIP and optionally
       uploads it; Room data is never deleted in preview mode.
   - `UploadSettingsScreen`:
     - Upload on/off, nightly vs realtime schedule, interval (seconds)
@@ -482,7 +481,7 @@ mainly for CI and verification.
 
 - AppBar behavior:
   - In `AppRoot`:
-    - Title reflects current route (“GeoLocation”, “Pickup”, “Map”).
+    - Title reflects current route (“GeoLocation E “Pickup E “Map E.
     - Back button on Pickup and Map.
     - On home route, actions for `Map`, `Pickup`, `Drive`, `Upload`,
       and `ServiceToggleAction` (start/stop `GeoLocationService`).
@@ -505,9 +504,9 @@ mainly for CI and verification.
   Cloud Console configuration.
 
 - Use **separate** client IDs for AppAuth and Credential Manager:
-  - Credential Manager – `CREDENTIAL_MANAGER_SERVER_CLIENT_ID`
+  - Credential Manager  E`CREDENTIAL_MANAGER_SERVER_CLIENT_ID`
     (web/server client).
-  - AppAuth – `APPAUTH_CLIENT_ID` (installed app + custom URI
+  - AppAuth  E`APPAUTH_CLIENT_ID` (installed app + custom URI
     scheme).
 
 ---

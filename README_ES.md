@@ -5,7 +5,7 @@ GeoLocationProvider es un SDK y una aplicación de ejemplo para
 Android.
 
 Registra localización en segundo plano en una base de datos Room,
-exporta los datos como GeoJSON+ZIP y puede subirlos a **Google Drive**
+exporta los datos como GeoJSON+ZIP (o GPX+ZIP) y puede subirlos a **Google Drive**
 tanto mediante copias de seguridad nocturnas programadas como mediante
 subida en tiempo real opcional.
 
@@ -17,7 +17,7 @@ subida en tiempo real opcional.
   (intervalos de GPS y Dead Reckoning configurables).
 - Almacenamiento en base de datos Room (`LocationSample`,
   `ExportedDay`).
-- Exportación a formato GeoJSON con compresión ZIP opcional.
+- Exportación a formato GeoJSON o GPX con compresión ZIP opcional.
 - Copia de seguridad diaria a medianoche (`MidnightExportWorker`).
 - Exportación manual para “Backup days before today” y
   “Today preview”.
@@ -81,7 +81,8 @@ subida en tiempo real opcional.
 1. Lee `UploadPrefs.zoneId` para determinar la zona horaria y define
    el rango diario `[00:00, 24:00)`.
 2. Carga muestras del día con `StorageService.getLocationsBetween`.
-3. Exporta a `glp-YYYYMMDD.zip` en Downloads mediante `GeoJsonExporter`.
+3. Exporta a `glp-YYYYMMDD.zip` en Downloads usando `GeoJsonExporter`
+   (GeoJSON) o `GpxExporter` (GPX) según `UploadOutputFormat`.
 4. Resuelve el folderId efectivo combinando `DrivePrefs` y `AppPrefs`.
 5. Crea un uploader con `UploaderFactory.create(..., UploadEngine.KOTLIN)` y sube el ZIP.
 6. Registra el resultado en `ExportedDay` (`markUploaded` /
@@ -93,7 +94,7 @@ subida en tiempo real opcional.
 
 - Observa:
   - `UploadPrefsRepository.scheduleFlow`, `intervalSecFlow`,
-    `zoneIdFlow`.
+    `zoneIdFlow`, `outputFormatFlow`.
   - `SettingsRepository.intervalSecFlow` y `drIntervalSecFlow`.
   - `StorageService.latestFlow(limit = 1)` para detectar nuevas
     muestras.
@@ -102,10 +103,12 @@ subida en tiempo real opcional.
   - Drive está configurado (engine `KOTLIN` y folderId válido).
 - Cuando toca subir:
   - Carga todas las muestras con `StorageService.getAllLocations`.
-  - Genera `YYYYMMDD_HHmmss.json` en `cacheDir` usando la hora de la
-    última muestra y `zoneId`.
+  - Genera, según `UploadOutputFormat`,
+    - GeoJSON: `YYYYMMDD_HHmmss.json`
+    - GPX   : `YYYYMMDD_HHmmss.gpx`
+    en `cacheDir` usando la hora de la última muestra y `zoneId`.
   - Resuelve el folderId efectivo desde `DrivePrefs` y `AppPrefs`.
-  - Crea un uploader con `UploaderFactory.create(context, appPrefs.engine)` y sube el JSON.
+  - Crea un uploader con `UploaderFactory.create(context, appPrefs.engine)` y sube el archivo generado.
   - Borra el archivo temporal y, si la subida tiene éxito, borra las
     filas subidas con `StorageService.deleteLocations`.
 
@@ -242,4 +245,3 @@ subida en tiempo real opcional.
 - Cuando cambies la integración con Drive, asegúrate de que los
   scopes OAuth y las redirect URIs de los README (EN/JA/ES) coinciden
   con la configuración en Google Cloud Console。
-
