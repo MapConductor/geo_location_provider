@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -179,19 +180,19 @@ fun MapScreen() {
             CurveModeDropdown(
                 selected = state.curveMode,
                 onSelected = { vm.onCurveModeChange(it) },
-                enabled = true,
+                enabled = !state.filterApplied,
                 modifier = Modifier
                     .padding(start = 16.dp)
-                    .weight(1f)
+                    .weight(0.8f)
             )
 
             PointSelectionModeDropdown(
                 selected = state.pointSelectionMode,
                 onSelected = { vm.onPointSelectionModeChange(it) },
-                enabled = true,
+                enabled = !state.filterApplied,
                 modifier = Modifier
-                    .padding(start = 16.dp)
-                    .weight(1f)
+                    .padding(start = 8.dp)
+                    .weight(1.2f)
             )
         }
 
@@ -358,10 +359,13 @@ private fun CurveModeDropdown(
             MapCurveMode.SPLINE -> "Spline"
         }
 
+    val contentAlpha = if (enabled) 1f else 0.5f
+
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .alpha(contentAlpha)
                 .clickable(enabled = enabled) {
                     if (enabled) {
                         expanded.value = true
@@ -419,14 +423,17 @@ private fun PointSelectionModeDropdown(
     val label = "Point selection"
     val text =
         when (selected) {
-            MapPointSelectionMode.TIME_PRIORITY -> "Time priority"
-            MapPointSelectionMode.DISTANCE_PRIORITY -> "Distance priority"
+            MapPointSelectionMode.TIME_PRIORITY -> "Time"
+            MapPointSelectionMode.DISTANCE_PRIORITY -> "Distance"
         }
+
+    val contentAlpha = if (enabled) 1f else 0.5f
 
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .alpha(contentAlpha)
                 .clickable(enabled = enabled) {
                     if (enabled) {
                         expanded.value = true

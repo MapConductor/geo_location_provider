@@ -34,6 +34,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
@@ -53,6 +56,15 @@ class GeoLocationService : Service() {
         /** Update DR prediction interval (seconds). */
         const val ACTION_UPDATE_DR_INTERVAL = "ACTION_UPDATE_DR_INTERVAL"
         const val EXTRA_DR_INTERVAL_SEC = "EXTRA_DR_INTERVAL_SEC"
+
+        // Maximum number of recent GPS samples kept for DR static clamping.
+        private const val GPS_HISTORY_SIZE = 8
+
+        // Static-mode GPS outlier thresholds.
+        private const val GPS_STATIC_MAX_ACCURACY_M = 80f
+        private const val GPS_STATIC_MAX_STEP_METERS = 25.0
+        private const val GPS_STATIC_MAX_SPEED_MPS = 1.5
+        private const val GPS_STATIC_MAX_ACCEL_MPS2 = 3.0
     }
 
     inner class LocalBinder : Binder() {
@@ -96,6 +108,18 @@ class GeoLocationService : Service() {
     @Volatile private var lastGpsRecvLon: Double? = null
     @Volatile private var lastGpsRecvTimeMillis: Long? = null
     @Volatile private var lastGpsRecvAccM: Float? = null
+
+    // Recent raw GPS samples used for DR clamping when static.
+    private data class GpsHistorySample(
+        val lat: Double,
+        val lon: Double,
+        val timeMillis: Long,
+        val accuracyM: Float,
+        val speedMps: Double
+    )
+
+    private val gpsHistoryLock = Any()
+    private val gpsHistory: ArrayDeque<GpsHistorySample> = ArrayDeque()
 
     fun getUpdateIntervalMs(): Long = updateIntervalMs
     fun isLocationRunning(): Boolean = isRunning.get()
@@ -366,6 +390,21 @@ class GeoLocationService : Service() {
         lastGpsRecvLon = recvLon
         lastGpsRecvTimeMillis = now
         lastGpsRecvAccM = recvAcc
+
+        // Record this raw GPS sample for DR static clamping.
+        val historyEntry = GpsHistorySample(
+            lat = recvLat,
+            lon = recvLon,
+            timeMillis = now,
+            accuracyM = recvAcc,
+            speedMps = speedMps.toDouble()
+        )
+        synchronized(gpsHistoryLock) {
+            gpsHistory.addLast(historyEntry)
+            while (gpsHistory.size > GPS_HISTORY_SIZE) {
+                gpsHistory.removeFirst()
+            }
+        }
 
           val used: Int? = observation.gnssUsed
           val total: Int? = observation.gnssTotal
@@ -697,9 +736,101 @@ class GeoLocationService : Service() {
     }
 
     private fun adjustDrSample(lat: Double, lon: Double, speedMps: Double): Pair<Double, Double> {
-        // DR output is used as-is. DeadReckoningImpl already handles static
-        // detection and position behavior, so no additional clamping is
-        // applied at the service layer.
-        return lat to lon
+        // When DeadReckoning reports "static", clamp the DR output to a
+        // recent raw GPS position and treat DR as co-located with GPS.
+        // To avoid snapping to obvious GPS outliers, walk the GPS history
+        // backward and pick the last sample whose movement, approximate
+        // acceleration, and accuracy are consistent with a static state.
+        val debugSnapshot = DrDebugState.snapshot.value
+        if (!debugSnapshot.isStatic) {
+            return lat to lon
+        }
+
+        val history: List<GpsHistorySample> = synchronized(gpsHistoryLock) {
+            gpsHistory.toList()
+        }
+        if (history.isEmpty()) {
+            return lat to lon
+        }
+
+        val replacement = chooseStaticGpsPosition(history)
+        return replacement ?: (lat to lon)
+    }
+
+    private fun chooseStaticGpsPosition(
+        history: List<GpsHistorySample>
+    ): Pair<Double, Double>? {
+        if (history.isEmpty()) {
+            return null
+        }
+
+        // Walk from the newest sample backward. The first sample that
+        // passes static-mode checks is treated as the "true" GPS position.
+        for (i in history.indices.reversed()) {
+            val current = history[i]
+            val previous = history.getOrNull(i - 1)
+            if (isStaticGpsSampleReliable(current, previous)) {
+                return current.lat to current.lon
+            }
+        }
+
+        return null
+    }
+
+    private fun isStaticGpsSampleReliable(
+        current: GpsHistorySample,
+        previous: GpsHistorySample?
+    ): Boolean {
+        val acc = current.accuracyM
+        if (acc.isNaN() || acc <= 0f) {
+            return false
+        }
+        if (acc > GPS_STATIC_MAX_ACCURACY_M) {
+            return false
+        }
+
+        if (previous != null) {
+            val dtMillis = current.timeMillis - previous.timeMillis
+            if (dtMillis > 0L) {
+                val dtSec = dtMillis.toDouble() / 1000.0
+                val stepMeters = distanceMeters(
+                    previous.lat,
+                    previous.lon,
+                    current.lat,
+                    current.lon
+                )
+                val stepSpeed = stepMeters / dtSec
+                if (stepMeters > GPS_STATIC_MAX_STEP_METERS) {
+                    return false
+                }
+                if (stepSpeed > GPS_STATIC_MAX_SPEED_MPS) {
+                    return false
+                }
+
+                val dv = abs(current.speedMps - previous.speedMps)
+                val accel = dv / dtSec
+                if (accel > GPS_STATIC_MAX_ACCEL_MPS2) {
+                    return false
+                }
+            }
+        }
+
+        return true
+    }
+
+    private fun distanceMeters(
+        lat1: Double,
+        lon1: Double,
+        lat2: Double,
+        lon2: Double
+    ): Double {
+        val meanLatRad = Math.toRadians((lat1 + lat2) * 0.5)
+        val dLatRad = Math.toRadians(lat2 - lat1)
+        val dLonRad = Math.toRadians(lon2 - lon1)
+
+        val north = dLatRad * 6371000.0
+        val east = dLonRad * cos(meanLatRad) * 6371000.0
+
+        return hypot(east, north)
     }
 }
