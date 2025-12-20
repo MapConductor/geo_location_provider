@@ -3,10 +3,10 @@ package com.mapconductor.plugin.provider.geolocation.ui.map
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.mapconductor.plugin.provider.storageservice.StorageService
-import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import com.mapconductor.plugin.provider.geolocation.ui.common.ProviderKind
+import com.mapconductor.plugin.provider.storageservice.StorageService
+import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -15,6 +15,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.asin
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
+
+enum class MapCurveMode {
+    LINEAR,
+    BEZIER,
+    SPLINE
+}
+
+enum class MapPointSelectionMode {
+    TIME_PRIORITY,
+    DISTANCE_PRIORITY
+}
 
 /**
  * ViewModel for the map screen.
@@ -32,6 +47,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private val gpsEnabled = MutableStateFlow(false)
     private val drEnabled = MutableStateFlow(false)
+    private val gpsDrEnabled = MutableStateFlow(false)
+    private val curveMode = MutableStateFlow(MapCurveMode.LINEAR)
+    private val pointSelectionMode =
+        MutableStateFlow(MapPointSelectionMode.TIME_PRIORITY)
     private val limitText = MutableStateFlow(DEFAULT_LIMIT.toString())
     private val appliedFilter = MutableStateFlow<Filter?>(null)
     private val mapSession = MutableStateFlow(0)
@@ -56,10 +75,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     data class UiState(
         val gpsChecked: Boolean,
         val drChecked: Boolean,
+        val gpsDrChecked: Boolean,
         val limitText: String,
         val markers: List<LocationSample>,
+        val gpsDrPath: List<LocationSample>,
         val latest: LocationSample?,
         val filterApplied: Boolean,
+        val curveMode: MapCurveMode,
+        val pointSelectionMode: MapPointSelectionMode,
         val displayedGpsCount: Int,
         val displayedDrCount: Int,
         val displayedTotalCount: Int,
@@ -76,12 +99,26 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     val uiState: StateFlow<UiState> =
-        combine(sourceFlow, gpsEnabled, drEnabled, limitText, appliedFilter) {
-                samples,
-                gps,
-                dr,
-                limitStr,
-                filter ->
+        combine(
+            sourceFlow,
+            gpsEnabled,
+            drEnabled,
+            gpsDrEnabled,
+            limitText,
+            appliedFilter,
+            curveMode,
+            pointSelectionMode
+        ) { values ->
+            @Suppress("UNCHECKED_CAST")
+            val samples = values[0] as List<LocationSample>
+            val gps = values[1] as Boolean
+            val dr = values[2] as Boolean
+            val gpsDr = values[3] as Boolean
+            val limitStr = values[4] as String
+            val filter = values[5] as Filter?
+            val currentCurveMode = values[6] as MapCurveMode
+            val currentPointSelectionMode = values[7] as MapPointSelectionMode
+
             val filterApplied = filter != null
 
             val normalized = samples.map { sample ->
@@ -116,6 +153,38 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 markers = clipped
                 latest = clipped.firstOrNull()
             }
+
+            val gpsDrPath: List<LocationSample> =
+                if (filterApplied && filter != null && gpsDr) {
+                    val candidates = normalized
+                        .filter { (_, kind) ->
+                            kind == ProviderKind.Gps ||
+                                kind == ProviderKind.DeadReckoning
+                        }
+                        .map { it.first }
+                        .take(filter.limit)
+
+                    val hasGps = candidates.any { sample ->
+                        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+                    }
+                    val hasDr = candidates.any { sample ->
+                        Formatters.providerKind(sample.provider) ==
+                            ProviderKind.DeadReckoning
+                    }
+
+                    if (!hasGps || !hasDr) {
+                        emptyList()
+                    } else {
+                        when (currentPointSelectionMode) {
+                            MapPointSelectionMode.TIME_PRIORITY ->
+                                buildTimePriorityPath(candidates)
+                            MapPointSelectionMode.DISTANCE_PRIORITY ->
+                                buildDistancePriorityPath(candidates)
+                        }
+                    }
+                } else {
+                    emptyList()
+                }
 
             val displayedGpsCount = markers.count {
                 Formatters.providerKind(it.provider) == ProviderKind.Gps
@@ -184,10 +253,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             UiState(
                 gpsChecked = gps,
                 drChecked = dr,
+                gpsDrChecked = gpsDr,
                 limitText = limitStr,
                 markers = markers,
+                gpsDrPath = gpsDrPath,
                 latest = latest,
                 filterApplied = filterApplied,
+                 curveMode = currentCurveMode,
+                 pointSelectionMode = currentPointSelectionMode,
                 displayedGpsCount = displayedGpsCount,
                 displayedDrCount = displayedDrCount,
                 displayedTotalCount = displayedTotalCount,
@@ -207,10 +280,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             UiState(
                 gpsChecked = false,
                 drChecked = false,
+                gpsDrChecked = false,
                 limitText = DEFAULT_LIMIT.toString(),
                 markers = emptyList(),
+                gpsDrPath = emptyList(),
                 latest = null,
                 filterApplied = false,
+                curveMode = MapCurveMode.LINEAR,
+                pointSelectionMode = MapPointSelectionMode.TIME_PRIORITY,
                 displayedGpsCount = 0,
                 displayedDrCount = 0,
                 displayedTotalCount = 0,
@@ -232,6 +309,18 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onDrCheckedChange(checked: Boolean) {
         drEnabled.value = checked
+    }
+
+    fun onGpsDrCheckedChange(checked: Boolean) {
+        gpsDrEnabled.value = checked
+    }
+
+    fun onCurveModeChange(mode: MapCurveMode) {
+        curveMode.value = mode
+    }
+
+    fun onPointSelectionModeChange(mode: MapPointSelectionMode) {
+        pointSelectionMode.value = mode
     }
 
     fun onLimitChanged(text: String) {
@@ -289,10 +378,94 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val rLat1 = Math.toRadians(lat1)
         val rLat2 = Math.toRadians(lat2)
         val a =
-            kotlin.math.sin(dLat / 2.0) * kotlin.math.sin(dLat / 2.0) +
-                kotlin.math.cos(rLat1) * kotlin.math.cos(rLat2) *
-                kotlin.math.sin(dLon / 2.0) * kotlin.math.sin(dLon / 2.0)
-        val c = 2.0 * kotlin.math.asin(kotlin.math.sqrt(a))
+            sin(dLat / 2.0) * sin(dLat / 2.0) +
+                cos(rLat1) * cos(rLat2) *
+                sin(dLon / 2.0) * sin(dLon / 2.0)
+        val c = 2.0 * asin(sqrt(a))
         return r * c
+    }
+
+    private fun buildTimePriorityPath(
+        samples: List<LocationSample>
+    ): List<LocationSample> {
+        return samples.sortedWith(
+            compareBy<LocationSample> { it.timeMillis }
+                .thenBy { providerSortKey(it.provider) }
+        )
+    }
+
+    private fun buildDistancePriorityPath(
+        samples: List<LocationSample>
+    ): List<LocationSample> {
+        if (samples.isEmpty()) {
+            return emptyList()
+        }
+
+        val remaining = samples.toMutableList()
+        remaining.sortBy { it.timeMillis }
+
+        val path = mutableListOf<LocationSample>()
+        var current = remaining.removeAt(0)
+        path.add(current)
+
+        var avgStepMeters: Double? = null
+
+        while (remaining.isNotEmpty()) {
+            var bestIndex = -1
+            var bestDistance = Double.MAX_VALUE
+
+            for (i in remaining.indices) {
+                val candidate = remaining[i]
+                val d = distanceMeters(
+                    current.lat,
+                    current.lon,
+                    candidate.lat,
+                    candidate.lon
+                )
+                if (d < bestDistance) {
+                    bestDistance = d
+                    bestIndex = i
+                }
+            }
+
+            if (bestIndex < 0) {
+                break
+            }
+
+            val thresholdExceeded =
+                if (avgStepMeters != null) {
+                    val threshold = (avgStepMeters * 4.0).coerceAtLeast(50.0)
+                    bestDistance > threshold
+                } else {
+                    false
+                }
+
+            if (thresholdExceeded) {
+                remaining.removeAt(bestIndex)
+                continue
+            }
+
+            val next = remaining.removeAt(bestIndex)
+            path.add(next)
+
+            avgStepMeters =
+                if (avgStepMeters == null) {
+                    bestDistance
+                } else {
+                    avgStepMeters * 0.8 + bestDistance * 0.2
+                }
+
+            current = next
+        }
+
+        return path
+    }
+
+    private fun providerSortKey(provider: String): Int {
+        return when (Formatters.providerKind(provider)) {
+            ProviderKind.Gps -> 0
+            ProviderKind.DeadReckoning -> 1
+            else -> 2
+        }
     }
 }

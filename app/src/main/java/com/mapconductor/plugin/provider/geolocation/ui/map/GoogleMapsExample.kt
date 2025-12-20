@@ -2,6 +2,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.map
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,6 +12,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,6 +21,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,6 +30,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.core.circle.Circle
@@ -157,6 +163,38 @@ fun MapScreen() {
             }
         }
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(
+                checked = state.gpsDrChecked,
+                onCheckedChange = { vm.onGpsDrCheckedChange(it) },
+                enabled = !state.filterApplied
+            )
+            Text(text = "GPS&DR")
+
+            CurveModeDropdown(
+                selected = state.curveMode,
+                onSelected = { vm.onCurveModeChange(it) },
+                enabled = true,
+                modifier = Modifier
+                    .padding(start = 16.dp)
+                    .weight(1f)
+            )
+
+            PointSelectionModeDropdown(
+                selected = state.pointSelectionMode,
+                onSelected = { vm.onPointSelectionModeChange(it) },
+                enabled = true,
+                modifier = Modifier
+                    .padding(start = 16.dp)
+                    .weight(1f)
+            )
+        }
+
         key(session) {
             val mapViewState = rememberGoogleMapViewState(
                 cameraPosition = camera
@@ -194,22 +232,45 @@ fun MapScreen() {
                         }
 
                     // Draw GPS polyline first (behind).
-                    if (gpsPoints.size >= 2) {
+                    if (state.gpsChecked && gpsPoints.size >= 2) {
                         Polyline(
                             points = gpsPoints,
                             id = "gps-polyline",
                             strokeColor = Color.Blue,
-                            strokeWidth = 4.5.dp
+                            strokeWidth = 6.dp
                         )
                     }
 
-                    // Draw DR polyline second (in front).
-                    if (drPoints.size >= 2) {
+                    // Draw GPS&DR mixed polyline (green) next.
+                    if (state.gpsDrChecked && state.gpsDrPath.size >= 2) {
+                        val basePoints = state.gpsDrPath.map { sample ->
+                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                        }
+
+                        val mixedPoints =
+                            when (state.curveMode) {
+                                MapCurveMode.LINEAR -> basePoints
+                                MapCurveMode.BEZIER -> buildBezierPolyline(basePoints)
+                                MapCurveMode.SPLINE -> buildSplinePolyline(basePoints)
+                            }
+
+                          if (mixedPoints.size >= 2) {
+                              Polyline(
+                                  points = mixedPoints,
+                                  id = "gpsdr-polyline",
+                                  strokeColor = Color.Green,
+                                  strokeWidth = 3.dp
+                              )
+                          }
+                      }
+
+                    // Draw DR polyline last (in front).
+                    if (state.drChecked && drPoints.size >= 2) {
                         Polyline(
                             points = drPoints,
                             id = "dr-polyline",
                             strokeColor = Color.Red,
-                            strokeWidth = 1.5.dp
+                            strokeWidth = 1.dp
                         )
                     }
 
@@ -279,4 +340,206 @@ fun MapScreen() {
             }
         }
     }
+}
+
+@Composable
+private fun CurveModeDropdown(
+    selected: MapCurveMode,
+    onSelected: (MapCurveMode) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val expanded = remember { mutableStateOf(false) }
+    val label = "Curve"
+    val text =
+        when (selected) {
+            MapCurveMode.LINEAR -> "Linear"
+            MapCurveMode.BEZIER -> "Bezier"
+            MapCurveMode.SPLINE -> "Spline"
+        }
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) {
+                    if (enabled) {
+                        expanded.value = true
+                    }
+                }
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label)
+            Text(
+                text = ": $text",
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "v",
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded.value,
+            onDismissRequest = { expanded.value = false }
+        ) {
+            MapCurveMode.values().forEach { mode ->
+                val optionText =
+                    when (mode) {
+                        MapCurveMode.LINEAR -> "Linear"
+                        MapCurveMode.BEZIER -> "Bezier"
+                        MapCurveMode.SPLINE -> "Spline"
+                    }
+                DropdownMenuItem(
+                    text = { Text(optionText) },
+                    onClick = {
+                        expanded.value = false
+                        onSelected(mode)
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PointSelectionModeDropdown(
+    selected: MapPointSelectionMode,
+    onSelected: (MapPointSelectionMode) -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val expanded = remember { mutableStateOf(false) }
+    val label = "Point selection"
+    val text =
+        when (selected) {
+            MapPointSelectionMode.TIME_PRIORITY -> "Time priority"
+            MapPointSelectionMode.DISTANCE_PRIORITY -> "Distance priority"
+        }
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) {
+                    if (enabled) {
+                        expanded.value = true
+                    }
+                }
+                .padding(horizontal = 4.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = label)
+            Text(
+                text = ": $text",
+                modifier = Modifier
+                    .padding(start = 4.dp)
+                    .weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "v",
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+
+        DropdownMenu(
+            expanded = expanded.value,
+            onDismissRequest = { expanded.value = false }
+        ) {
+            MapPointSelectionMode.values().forEach { mode ->
+                val optionText =
+                    when (mode) {
+                        MapPointSelectionMode.TIME_PRIORITY -> "Time priority"
+                        MapPointSelectionMode.DISTANCE_PRIORITY -> "Distance priority"
+                    }
+                DropdownMenuItem(
+                    text = { Text(optionText) },
+                    onClick = {
+                        expanded.value = false
+                        onSelected(mode)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun buildBezierPolyline(points: List<GeoPointImpl>): List<GeoPointImpl> {
+    if (points.size < 2) {
+        return points
+    }
+
+    val result = mutableListOf<GeoPointImpl>()
+    result.add(points.first())
+
+    for (i in 0 until points.size - 1) {
+        val p0 = points[i]
+        val p1 = points[i + 1]
+
+        val qLat = p0.latitude * 0.75 + p1.latitude * 0.25
+        val qLon = p0.longitude * 0.75 + p1.longitude * 0.25
+        val rLat = p0.latitude * 0.25 + p1.latitude * 0.75
+        val rLon = p0.longitude * 0.25 + p1.longitude * 0.75
+
+        result.add(GeoPointImpl.fromLatLong(qLat, qLon))
+        result.add(GeoPointImpl.fromLatLong(rLat, rLon))
+    }
+
+    result.add(points.last())
+    return result
+}
+
+private fun buildSplinePolyline(points: List<GeoPointImpl>): List<GeoPointImpl> {
+    if (points.size < 2) {
+        return points
+    }
+    if (points.size == 2) {
+        return points
+    }
+
+    val result = mutableListOf<GeoPointImpl>()
+    val stepsPerSegment = 6
+
+    for (i in 0 until points.size - 1) {
+        val p0 = if (i == 0) points[i] else points[i - 1]
+        val p1 = points[i]
+        val p2 = points[i + 1]
+        val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
+
+        for (step in 0 until stepsPerSegment) {
+            val t = step.toDouble() / stepsPerSegment.toDouble()
+            val lat = catmullRom(p0.latitude, p1.latitude, p2.latitude, p3.latitude, t)
+            val lon = catmullRom(p0.longitude, p1.longitude, p2.longitude, p3.longitude, t)
+            result.add(GeoPointImpl.fromLatLong(lat, lon))
+        }
+    }
+
+    result.add(points.last())
+    return result
+}
+
+private fun catmullRom(
+    p0: Double,
+    p1: Double,
+    p2: Double,
+    p3: Double,
+    t: Double
+): Double {
+    val t2 = t * t
+    val t3 = t2 * t
+    return 0.5 *
+        (
+            (2.0 * p1) +
+                (-p0 + p2) * t +
+                (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+                (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+        )
 }
