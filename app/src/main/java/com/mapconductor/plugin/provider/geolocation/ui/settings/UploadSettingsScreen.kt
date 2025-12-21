@@ -1,12 +1,16 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,10 +27,44 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
+
+private data class TimezoneOption(
+    val zoneId: String,
+    val label: String
+)
+
+private val TIMEZONE_OPTIONS: List<TimezoneOption> =
+    listOf(
+        TimezoneOption("Pacific/Auckland", "+12H (Wellington, Auckland etc...)"),
+        TimezoneOption("Pacific/Noumea", "+11H (Noumea etc...)"),
+        TimezoneOption("Australia/Sydney", "+10H (Sydney, Guam etc...)"),
+        TimezoneOption("Asia/Tokyo", "+9H (Tokyo, Seoul etc...)"),
+        TimezoneOption("Asia/Singapore", "+8H (Beijing, Hong Kong, Singapore etc...)"),
+        TimezoneOption("Asia/Bangkok", "+7H (Bangkok, Jakarta etc...)"),
+        TimezoneOption("Asia/Dhaka", "+6H (Dhaka etc...)"),
+        TimezoneOption("Asia/Karachi", "+5H (Karachi etc...)"),
+        TimezoneOption("Asia/Dubai", "+4H (Dubai etc...)"),
+        TimezoneOption("Asia/Riyadh", "+3H (Jeddah, Baghdad etc...)"),
+        TimezoneOption("Africa/Cairo", "+2H (Cairo, Athens etc...)"),
+        TimezoneOption("Europe/Paris", "+1H (Paris, Rome, Berlin etc...)"),
+        TimezoneOption("Europe/London", "+0H (London etc...)"),
+        TimezoneOption("Atlantic/Azores", "-1H (Azores etc...)"),
+        TimezoneOption("America/Noronha", "-2H (etc...)"),
+        TimezoneOption("America/Sao_Paulo", "-3H (Rio de Janeiro etc...)"),
+        TimezoneOption("America/Santo_Domingo", "-4H (Santo Domingo etc...)"),
+        TimezoneOption("America/New_York", "-5H (New York, Montreal etc...)"),
+        TimezoneOption("America/Chicago", "-6H (Chicago, Mexico City etc...)"),
+        TimezoneOption("America/Denver", "-7H (Denver etc...)"),
+        TimezoneOption("America/Los_Angeles", "-8H (Los Angeles, Vancouver etc...)"),
+        TimezoneOption("America/Anchorage", "-9H (Anchorage etc...)"),
+        TimezoneOption("Pacific/Honolulu", "-10H (Honolulu etc...)"),
+        TimezoneOption("Pacific/Midway", "-11H (Midway Islands etc...)")
+    )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,8 +80,13 @@ fun UploadSettingsScreen(
     val status by vm.status.collectAsState()
 
     val intervalText = remember(intervalSec) { mutableStateOf(intervalSec.toString()) }
-    val zoneText = remember(zoneId) { mutableStateOf(zoneId) }
     val formatState = remember(outputFormat) { mutableStateOf(outputFormat) }
+
+    val timezoneExpanded = remember { mutableStateOf(false) }
+    val selectedTimezone: TimezoneOption? =
+        TIMEZONE_OPTIONS.firstOrNull { it.zoneId == zoneId }
+    val timezoneLabel =
+        selectedTimezone?.label ?: zoneId
 
     Scaffold(
         topBar = {
@@ -137,16 +180,44 @@ fun UploadSettingsScreen(
 
             // Timezone
             Text("Timezone", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                enabled = uploadEnabled,
-                value = zoneText.value,
-                onValueChange = { v ->
-                    zoneText.value = v
-                    vm.setZoneId(v)
-                },
-                label = { Text("IANA ID (e.g. Asia/Tokyo)") }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+            ) {
+                val enabled = uploadEnabled
+                val alpha = if (enabled) 1f else 0.5f
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(alpha)
+                        .clickable(enabled = enabled) {
+                            if (enabled) {
+                                timezoneExpanded.value = true
+                            }
+                        }
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = timezoneLabel)
+                    Text(text = "v")
+                }
+
+                DropdownMenu(
+                    expanded = timezoneExpanded.value,
+                    onDismissRequest = { timezoneExpanded.value = false }
+                ) {
+                    TIMEZONE_OPTIONS.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                timezoneExpanded.value = false
+                                vm.setZoneId(option.zoneId)
+                            }
+                        )
+                    }
+                }
+            }
 
             // Output format
             Text("Output format", style = MaterialTheme.typography.titleMedium)
