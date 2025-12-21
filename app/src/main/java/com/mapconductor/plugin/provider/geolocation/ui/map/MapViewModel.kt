@@ -341,6 +341,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        if (!gpsEnabled.value && !drEnabled.value && !gpsDrEnabled.value) {
+            viewModelScope.launch {
+                eventsFlow.emit(Event.ShowToast("At least one checkbox must be selected."))
+            }
+            return
+        }
+
         val raw = limitText.value
         val parsed = raw.toIntOrNull()
         val (limit, message) =
