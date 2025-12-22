@@ -214,7 +214,7 @@ fun MapScreen() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     // Build per-provider polylines, connecting points in time order.
-                    val gpsPoints = state.markers
+                    val gpsBasePoints = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.Gps
                         }
@@ -223,7 +223,7 @@ fun MapScreen() {
                             GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                         }
 
-                    val drPoints = state.markers
+                    val drBasePoints = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.DeadReckoning
                         }
@@ -231,6 +231,9 @@ fun MapScreen() {
                         .map { sample ->
                             GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                         }
+
+                    val gpsPoints = applyCurveMode(gpsBasePoints, state.curveMode)
+                    val drPoints = applyCurveMode(drBasePoints, state.curveMode)
 
                     // Draw GPS polyline first (behind).
                     if (state.gpsChecked && gpsPoints.size >= 2) {
@@ -248,22 +251,17 @@ fun MapScreen() {
                             GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                         }
 
-                        val mixedPoints =
-                            when (state.curveMode) {
-                                MapCurveMode.LINEAR -> basePoints
-                                MapCurveMode.BEZIER -> buildBezierPolyline(basePoints)
-                                MapCurveMode.SPLINE -> buildSplinePolyline(basePoints)
-                            }
+                        val mixedPoints = applyCurveMode(basePoints, state.curveMode)
 
-                          if (mixedPoints.size >= 2) {
-                              Polyline(
-                                  points = mixedPoints,
-                                  id = "gpsdr-polyline",
-                                  strokeColor = Color.Green,
-                                  strokeWidth = 3.dp
-                              )
-                          }
-                      }
+                        if (mixedPoints.size >= 2) {
+                            Polyline(
+                                points = mixedPoints,
+                                id = "gpsdr-polyline",
+                                strokeColor = Color.Green,
+                                strokeWidth = 3.dp
+                            )
+                        }
+                    }
 
                     // Draw DR polyline last (in front).
                     if (state.drChecked && drPoints.size >= 2) {
@@ -357,6 +355,9 @@ private fun CurveModeDropdown(
             MapCurveMode.LINEAR -> "Linear"
             MapCurveMode.BEZIER -> "Bezier"
             MapCurveMode.SPLINE -> "Spline"
+            MapCurveMode.CORNER_CUTTING_1 -> "corner-cutting[1]"
+            MapCurveMode.CORNER_CUTTING_2 -> "corner-cutting[2]"
+            MapCurveMode.CORNER_CUTTING_3 -> "corner-cutting[3]"
         }
 
     val contentAlpha = if (enabled) 1f else 0.5f
@@ -399,6 +400,9 @@ private fun CurveModeDropdown(
                         MapCurveMode.LINEAR -> "Linear"
                         MapCurveMode.BEZIER -> "Bezier"
                         MapCurveMode.SPLINE -> "Spline"
+                        MapCurveMode.CORNER_CUTTING_1 -> "corner-cutting[1]"
+                        MapCurveMode.CORNER_CUTTING_2 -> "corner-cutting[2]"
+                        MapCurveMode.CORNER_CUTTING_3 -> "corner-cutting[3]"
                     }
                 DropdownMenuItem(
                     text = { Text(optionText) },
@@ -549,4 +553,55 @@ private fun catmullRom(
                 (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
                 (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
         )
+}
+
+private fun buildChaikinPolyline(
+    points: List<GeoPointImpl>,
+    iterations: Int
+): List<GeoPointImpl> {
+    if (points.size < 2) {
+        return points
+    }
+    val clampedIterations = iterations.coerceIn(1, 5)
+    var current = points
+
+    repeat(clampedIterations) {
+        if (current.size < 2) {
+            return current
+        }
+        val next = mutableListOf<GeoPointImpl>()
+        next.add(current.first())
+
+        for (i in 0 until current.size - 1) {
+            val p0 = current[i]
+            val p1 = current[i + 1]
+
+            val qLat = p0.latitude * 0.75 + p1.latitude * 0.25
+            val qLon = p0.longitude * 0.75 + p1.longitude * 0.25
+            val rLat = p0.latitude * 0.25 + p1.latitude * 0.75
+            val rLon = p0.longitude * 0.25 + p1.longitude * 0.75
+
+            next.add(GeoPointImpl.fromLatLong(qLat, qLon))
+            next.add(GeoPointImpl.fromLatLong(rLat, rLon))
+        }
+
+        next.add(current.last())
+        current = next
+    }
+
+    return current
+}
+
+private fun applyCurveMode(
+    basePoints: List<GeoPointImpl>,
+    mode: MapCurveMode
+): List<GeoPointImpl> {
+    return when (mode) {
+        MapCurveMode.LINEAR -> basePoints
+        MapCurveMode.BEZIER -> buildBezierPolyline(basePoints)
+        MapCurveMode.SPLINE -> buildSplinePolyline(basePoints)
+        MapCurveMode.CORNER_CUTTING_1 -> buildChaikinPolyline(basePoints, iterations = 1)
+        MapCurveMode.CORNER_CUTTING_2 -> buildChaikinPolyline(basePoints, iterations = 2)
+        MapCurveMode.CORNER_CUTTING_3 -> buildChaikinPolyline(basePoints, iterations = 3)
+    }
 }

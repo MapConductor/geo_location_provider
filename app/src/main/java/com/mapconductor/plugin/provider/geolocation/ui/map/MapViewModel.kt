@@ -23,7 +23,10 @@ import kotlin.math.sqrt
 enum class MapCurveMode {
     LINEAR,
     BEZIER,
-    SPLINE
+    SPLINE,
+    CORNER_CUTTING_1,
+    CORNER_CUTTING_2,
+    CORNER_CUTTING_3
 }
 
 enum class MapPointSelectionMode {
@@ -155,7 +158,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val gpsDrPath: List<LocationSample> =
-                if (filterApplied && filter != null && gpsDr) {
+                if (filter != null && gpsDr) {
                     val candidates = normalized
                         .filter { (_, kind) ->
                             kind == ProviderKind.Gps ||
@@ -235,7 +238,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             // When a DR-only filter is applied, follow the latest DR point by
             // bumping the map session whenever a new DR sample arrives.
-            if (filterApplied && filter != null && filter.dr && !filter.gps) {
+            if (filter != null && filter.dr && !filter.gps) {
                 val latestDrTime = latestDr?.timeMillis
                 if (latestDrTime != null) {
                     val prev = lastFollowedDrTimeMillis
