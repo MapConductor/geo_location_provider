@@ -88,6 +88,41 @@ Todos los accesos a BD se ejecutan en `Dispatchers.IO` dentro de
 
 ---
 
+## GeoLocationService / Dead Reckoning / ajustes de intervalos
+
+- `GeoLocationService` (`:core`) es un servicio en primer plano que
+  orquesta:
+  - GPS a través de `GpsLocationEngine` / `FusedLocationGpsEngine`.
+  - Dead Reckoning mediante `DeadReckoning` (módulo `:deadreckoning`).
+  - Sensores auxiliares como batería y heading.
+- Dead Reckoning:
+  - La configuración de intervalo se almacena en
+    `SettingsRepository.drIntervalSecFlow` /
+    `SettingsRepository.currentDrIntervalSec`.
+  - `drIntervalSec == 0`  Einterpreta “DR desactivado (solo GPS)” y
+    no se generan muestras `dead_reckoning`.
+  - `drIntervalSec > 0` y `DrMode.Prediction` activan un ticker que
+    llama periódicamente a `dr.predict(fromMillis, toMillis)` y usa el
+    último `PredictedPoint` para insertar muestras
+    `"dead_reckoning"` entre fixes de GPS.
+  - `drIntervalSec > 0` y `DrMode.Completion` desactivan el ticker y,
+    en cada nuevo fix de GPS, usan `dr.predict(fromMillis, toMillis)`
+    para rellenar el tramo GPS–GPS con muestras `dead_reckoning`
+    corrigiendo el trazado para terminar exactamente en la posición
+    GPS “hold” más reciente.
+- Modo de DR (`DrMode`):
+  - Persistido en `SettingsRepository` como `Prediction` o
+    `Completion` (vía `drModeFlow` / `currentDrMode`).
+  - `GeoLocationService` se suscribe tanto al intervalo (GPS/DR) como
+    al modo para activar/parar el ticker según la combinación
+    actual.
+- `IntervalSettingsViewModel`:
+  - Expone campos de texto para intervalos de GPS y DR, un selector de
+    modo de Dead Reckoning (Predicción vs Relleno) y un botón
+    “Save & Apply” que guarda en DataStore y notifica al servicio.
+
+---
+
 ## Exportación y subida (UploadPrefs / formatos)
 
 ### UploadPrefsRepository / ajustes de Upload

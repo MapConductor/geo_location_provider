@@ -208,11 +208,11 @@ mainly for CI and verification.
     size, `velocityGain`, etc.).
   - GPS fixes are submitted using the **hold** position:
     `dr.submitGpsFix(GpsFix(timestampMillis, holdLat, holdLon, ...))`.
-  - DR prediction is driven by a ticker:
+  - DR prediction is driven by interval and mode:
     - Interval in seconds is `drIntervalSec`.
     - `drIntervalSec == 0` means “Dead Reckoning disabled (GPS
       only) Eand the ticker is stopped.
-    - `drIntervalSec > 0` starts a loop which:
+    - `drIntervalSec > 0` and `DrMode.Prediction` start a loop which:
       - Calls `dr.predict(fromMillis = lastFixMillis, toMillis =
         now)`.
       - Uses the last `PredictedPoint` to insert a
@@ -220,7 +220,14 @@ mainly for CI and verification.
         suppressed).
       - Reads `dr.isLikelyStatic()` and publishes it to
         `DrDebugState` so the Map overlay can reflect engine-side
-        static detection.
+        static detection in realtime.
+    - When `drIntervalSec > 0` and `DrMode.Completion`, the ticker is
+      disabled and instead, on each new GPS fix, `dr.predict(fromMillis
+      = lastFixMillis, toMillis = now)` is used to backfill
+      `"dead_reckoning"` samples between the previous and current GPS
+      times. The DR path is linearly blended so the last backfilled
+      point lands on the latest GPS hold location, giving a smooth
+      GPS–GPS bridge without extra realtime DR points.
   - `DeadReckoningImpl` is internal:
     - Uses GPS fixes to anchor a 1D state along the latest GPS
       direction.
@@ -246,18 +253,23 @@ mainly for CI and verification.
     `currentDrIntervalSec(context)`  Esynchronous getters for legacy
     code; prefer Flow APIs for new code.
 
-- `GeoLocationService` subscribes to both flows:
+- `GeoLocationService` subscribes to all three flows (GPS interval,
+  DR interval, and DR mode):
   - GPS interval changes restart GPS updates when the service is
     running.
-  - DR interval changes start/stop the DR ticker via
-    `applyDrInterval`.
+  - DR interval changes start/stop DR based on the current mode via
+    `applyDrInterval` / `updateDrTicker`.
+  - DR mode changes switch between realtime prediction and GPS EGPS
+    completion and also go through `updateDrTicker` so the ticker
+    state stays consistent.
 
 - `IntervalSettingsViewModel`:
-  - Provides text fields for GPS and DR intervals and a “Save &
-    Apply Ebutton.
+  - Provides text fields for GPS and DR intervals, a DR mode toggle
+    (Prediction vs Completion), and a “Save & Apply Ebutton.
   - DR interval is validated against `[0, floor(GPS / 2)]` seconds.
   - When DR interval is set to `0`, a toast explicitly notes
-    “DR disabled (GPS only) E
+    “DR disabled (GPS only) Eand DR mode is still persisted for the
+    next time DR is enabled.
 
 ---
 

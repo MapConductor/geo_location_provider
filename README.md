@@ -12,6 +12,7 @@ scheduled nightly backup and optional realtime upload.
 ## Features
 
 - Background location acquisition (configurable GPS / DR intervals).
+- Dead Reckoning with configurable modes (Prediction / Completion).
 - Storage in a Room database (`LocationSample`, `ExportedDay`).
 - Export to GeoJSON or GPX format with optional ZIP compression.
 - Automatic daily export at midnight (`MidnightExportWorker`).
@@ -112,14 +113,19 @@ High-level dependency directions:
     receive value.
   - Submits GPS fixes using the hold position to DR:
     `dr.submitGpsFix(GpsFix(timestampMillis, holdLat, holdLon, ...))`.
-  - Drives a DR ticker:
-    - Interval in seconds is read from
-      `SettingsRepository.drIntervalSecFlow`.
-    - `0` means “DR disabled (GPS only)” and the ticker is stopped.
-    - `> 0` periodically calls `dr.predict(...)` and inserts
-      `"dead_reckoning"` samples.
+  - Drives Dead Reckoning in two modes controlled by
+    `SettingsRepository.drIntervalSecFlow` and `SettingsRepository.drModeFlow`:
+    - `drIntervalSec == 0` means “DR disabled (GPS only)” and no DR
+      samples are generated.
+    - `drIntervalSec > 0` and `DrMode.Prediction` start a foreground
+      ticker which periodically calls `dr.predict(...)` and inserts
+      realtime `"dead_reckoning"` samples.
+    - `drIntervalSec > 0` and `DrMode.Completion` disable the ticker
+      and instead backfill `"dead_reckoning"` samples between the
+      previous and current GPS fixes using `dr.predict(from, to)` and
+      a simple GPS-to-GPS bridging scheme.
   - Updates `DrDebugState` with engine-side static flag so the map
-    overlay can show `Static: YES/NO`.
+    overlay can show `Static: YES/NO` in both modes.
 
 **Export and Upload (`:datamanager`)**
   

@@ -15,6 +15,7 @@ subida en tiempo real opcional.
 
 - Obtención de localización en segundo plano  
   (intervalos de GPS y Dead Reckoning configurables).
+- Dead Reckoning con modos configurables (Predicción / Relleno).
 - Almacenamiento en base de datos Room (`LocationSample`,
   `ExportedDay`).
 - Exportación a formato GeoJSON o GPX con compresión ZIP opcional.

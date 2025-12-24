@@ -11,6 +11,7 @@ SDK / サンプルアプリです。
 ## 主な機能
 
 - バックグラウンド位置取得（GPS / Dead Reckoning の間隔を個別に設定可能）
+- Dead Reckoning のモード切り替え（予測 / 補完）
 - Room データベース（`LocationSample`, `ExportedDay`）による履歴保存
 - GeoJSON / GPX + ZIP 形式でのエクスポート
 - `MidnightExportWorker` による日次バックアップ（前日までのバックログ処理）
@@ -119,4 +120,3 @@ SDK / サンプルアプリです。
   `AGENTS_JA.md` / `AGENTS_ES.md` などの Markdown ドキュメントに限定します。
 - Google Drive 連携（認証方式 / スコープ / redirect URI）を変更した場合は、
   英語版 `README.md` / `AGENTS.md` と本ファイル（および ES 版）を更新してください。
-
