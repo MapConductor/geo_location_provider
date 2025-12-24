@@ -4,19 +4,18 @@ import android.content.Intent
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.util.ServiceStateIndicator
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -31,17 +30,15 @@ fun ServiceToggleAction() {
     // Prevent double taps while a request is in flight
     val busyState = remember { mutableStateOf(false) }
 
-    // Scope used for periodic state checks
-    val scope = remember { CoroutineScope(Dispatchers.Main + Job()) }
+    // Scope used for one-shot actions tied to this composable
+    val scope = rememberCoroutineScope()
 
-    fun refreshState() {
-        scope.launch {
-            val running = ServiceStateIndicator.isRunning(
-                context,
-                GeoLocationService::class.java
-            )
-            runningState.value = running
-        }
+    suspend fun refreshState() {
+        val running = ServiceStateIndicator.isRunning(
+            context,
+            GeoLocationService::class.java
+        )
+        runningState.value = running
     }
 
     // Periodically poll service state
@@ -53,13 +50,16 @@ fun ServiceToggleAction() {
     }
 
     // Refresh state when the screen returns to foreground
-    LaunchedEffect(lifecycleOwner) {
-        val obs = LifecycleEventObserver { _, ev ->
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, ev ->
             if (ev == Lifecycle.Event.ON_RESUME) {
-                refreshState()
+                scope.launch { refreshState() }
             }
         }
-        lifecycleOwner.lifecycle.addObserver(obs)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     IconButton(
@@ -101,4 +101,3 @@ fun ServiceToggleAction() {
         Text(if (runningState.value) "Stop" else "Start")
     }
 }
-

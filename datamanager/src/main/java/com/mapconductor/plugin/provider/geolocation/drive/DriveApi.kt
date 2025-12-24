@@ -238,7 +238,8 @@ class DriveApiClient(
             is ApiResult.Success -> {
                 val v = r.data
                 val final = if (v.mimeType == "application/vnd.google-apps.shortcut" && !v.shortcutTargetId.isNullOrBlank()) {
-                    when (val r2 = validateFolder(token, v.shortcutTargetId!!, null)) {
+                    val targetId = v.shortcutTargetId
+                    when (val r2 = validateFolder(token, targetId, null)) {
                         is ApiResult.Success -> r2.data
                         is ApiResult.HttpError -> return r2
                         is ApiResult.NetworkError -> return r2
@@ -369,4 +370,3 @@ class DriveApiClient(
         }
     }
 }
-

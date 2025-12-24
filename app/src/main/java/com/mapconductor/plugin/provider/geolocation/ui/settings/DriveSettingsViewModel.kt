@@ -238,8 +238,9 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
                     var resolvedId = r.data.id
                     var detail = r.data
 
-                    if (!detail.shortcutTargetId.isNullOrBlank()) {
-                        when (val r2 = api.validateFolder(token, detail.shortcutTargetId!!, null)) {
+                    val shortcutId = detail.shortcutTargetId
+                    if (!shortcutId.isNullOrBlank()) {
+                        when (val r2 = api.validateFolder(token, shortcutId, null)) {
                             is ApiResult.Success -> { resolvedId = r2.data.id; detail = r2.data }
                             is ApiResult.HttpError -> {
                                 _status.value = "Shortcut target ${r2.code}: ${r2.body}"

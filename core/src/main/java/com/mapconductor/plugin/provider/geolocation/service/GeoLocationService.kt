@@ -79,7 +79,7 @@ class GeoLocationService : Service() {
     private var dr: DeadReckoning? = null
 
     @Volatile private var updateIntervalMs: Long = 30_000L
-    @Volatile private var isRunning = AtomicBoolean(false)
+    private val isRunning = AtomicBoolean(false)
     @Volatile private var lastFixMillis: Long? = null // Most recent GPS fix timestamp (used as DR base).
 
     // DR ticker for real-time prediction loop.

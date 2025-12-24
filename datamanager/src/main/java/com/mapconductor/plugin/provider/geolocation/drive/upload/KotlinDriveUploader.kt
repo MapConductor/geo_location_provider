@@ -218,9 +218,9 @@ internal class KotlinDriveUploader(
         } ?: return UploadResult.Failure(code = 400, body = "openInputStream failed")
 
         // Completed: if final id/name/link was returned, use it.
-        if (finalId != null) {
+        finalId?.let { id ->
             return UploadResult.Success(
-                id = finalId!!,
+                id = id,
                 name = (finalName ?: name),
                 webViewLink = (finalLink ?: "")
             )

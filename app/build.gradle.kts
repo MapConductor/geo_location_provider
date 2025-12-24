@@ -77,13 +77,13 @@ secrets {
 val mapconductorVersion = "1.1.0"
 
 dependencies {
-    // BOM を利用してバージョンを統一
+    // Use BOM to keep versions consistent
     implementation(platform("com.mapconductor:mapconductor-bom:$mapconductorVersion"))
 
-    // コアモジュール
+    // Core module
     implementation("com.mapconductor:core")
 
-    // 利用する地図プロバイダモジュールを追加
+    // Map provider module for Google Maps
     implementation("com.mapconductor:for-googlemaps")
     implementation("com.google.android.gms:play-services-maps:19.0.0")
 

@@ -1,13 +1,12 @@
 package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /** Simple UI state for the main screen. */
@@ -30,11 +29,10 @@ class GeoLocationProviderViewModel : ViewModel() {
     private val _events = MutableSharedFlow<UiEvent>()
     val events = _events.asSharedFlow()
 
-    private val vmScope = CoroutineScope(Dispatchers.Default)
-
     fun onGeoLocationProviderClicked() {
-        vmScope.launch { _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked")) }
+        viewModelScope.launch {
+            _events.emit(UiEvent.ShowToast("GeoLocationProvider button clicked"))
+        }
         _uiState.update { it.copy() }
     }
 }
-

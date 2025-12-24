@@ -31,12 +31,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.mapconductor.core.features.GeoPointImpl
-import com.mapconductor.core.map.MapCameraPositionImpl
-import com.mapconductor.core.marker.DefaultIcon
-import com.mapconductor.core.marker.Marker
-import com.mapconductor.googlemaps.GoogleMapsView
-import com.mapconductor.googlemaps.rememberGoogleMapViewState
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.geolocation.ui.components.ServiceToggleAction
 import com.mapconductor.plugin.provider.geolocation.ui.map.MapScreen
