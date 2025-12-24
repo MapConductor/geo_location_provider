@@ -17,6 +17,7 @@ import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.ui.history.HistoryViewModel
 import com.mapconductor.plugin.provider.geolocation.ui.history.LocationHistoryList
+import com.mapconductor.plugin.provider.storageservice.prefs.DrMode
 
 /**
  * Entry point for the main screen.
@@ -93,6 +95,7 @@ private fun IntervalAndDrArea(
 ) {
     val sec by vm.secondsText.collectAsState()
     val dr by vm.drIntervalText.collectAsState()
+    val mode by vm.drMode.collectAsState()
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -130,4 +133,34 @@ private fun IntervalAndDrArea(
     }
 
     Spacer(modifier = Modifier.height(8.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "DR mode",
+            modifier = Modifier.width(96.dp)
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = mode == DrMode.Prediction,
+                onClick = { vm.onDrModeChanged(DrMode.Prediction) }
+            )
+            Text("Prediction")
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            RadioButton(
+                selected = mode == DrMode.Completion,
+                onClick = { vm.onDrModeChanged(DrMode.Completion) }
+            )
+            Text("Completion")
+        }
+    }
 }

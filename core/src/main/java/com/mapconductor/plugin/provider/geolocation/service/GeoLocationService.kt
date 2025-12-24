@@ -24,6 +24,7 @@ import com.mapconductor.plugin.provider.geolocation.debug.DrDebugState
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import androidx.core.app.NotificationCompat
 import com.mapconductor.plugin.provider.storageservice.StorageService
+import com.mapconductor.plugin.provider.storageservice.prefs.DrMode
 import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,6 +80,7 @@ class GeoLocationService : Service() {
     private var dr: DeadReckoning? = null
 
     @Volatile private var updateIntervalMs: Long = 30_000L
+    @Volatile private var drMode: DrMode = DrMode.Prediction
     private val isRunning = AtomicBoolean(false)
     @Volatile private var lastFixMillis: Long? = null // Most recent GPS fix timestamp (used as DR base).
 
@@ -173,6 +175,14 @@ class GeoLocationService : Service() {
                     applyDrInterval(sec)
                 }
         }
+        // DR mode (prediction vs completion) is also synced from a Flow.
+        serviceScope.launch {
+            SettingsRepository.drModeFlow(applicationContext)
+                .distinctUntilChanged()
+                .collect { mode ->
+                    applyDrMode(mode)
+                }
+        }
         // ---- end of initial setup ----
     }
 
@@ -216,11 +226,7 @@ class GeoLocationService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification())
         gpsEngine.updateInterval(updateIntervalMs)
         gpsEngine.start()
-        if (drIntervalSec > 0) {
-            startDrTicker() // Start DR ticker for real-time prediction.
-        } else {
-            Log.d(TAG, "startLocation: DR disabled (intervalSec=$drIntervalSec)")
-        }
+        updateDrTicker()
     }
 
     private fun stopLocation() {
@@ -472,33 +478,41 @@ class GeoLocationService : Service() {
             }
         }
 
-        // 2) Notify DR of the fix (update its reference only).
+        // 2) Notify DR of the fix and optionally backfill the previous segment.
         if (drIntervalSec > 0) {
-            lastFixMillis = now
+            val startMillis = lastFixMillis
+            val endMillis = now
+            val modeSnapshot = drMode
+            if (modeSnapshot == DrMode.Completion && startMillis != null && endMillis > startMillis) {
+                scheduleDrBackfill(
+                    startMillis = startMillis,
+                    endMillis = endMillis,
+                    endHoldLat = holdLat,
+                    endHoldLon = holdLon,
+                    endAccuracyM = observation.accuracyM,
+                    endSpeedMps = speedMps
+                )
+            }
+            lastFixMillis = endMillis
             serviceScope.launch(Dispatchers.Default) {
-                try {
-                    dr?.submitGpsFix(
-                        GpsFix(
-                            timestampMillis = now,
-                            lat = holdLat,
-                            lon = holdLon,
-                            accuracyM = observation.accuracyM,
-                            speedMps = speedMps.takeIf { it > 0f }
+                val engine = dr
+                if (engine != null) {
+                    try {
+                        engine.submitGpsFix(
+                            GpsFix(
+                                timestampMillis = endMillis,
+                                lat = holdLat,
+                                lon = holdLon,
+                                accuracyM = observation.accuracyM,
+                                speedMps = speedMps.takeIf { it > 0f }
+                            )
                         )
-                    )
-                } catch (t: Throwable) {
-                    Log.w(TAG, "dr.submitGpsFix()", t)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "dr.submitGpsFix()", t)
+                    }
                 }
             }
         }
-
-        // 3) Backfill: disabled for the current DeadReckoning implementation.
-        // The 1D engine is designed for forward prediction from the latest
-        // GPS anchor and is not suitable for reconstructing past positions
-        // after a new fix has been applied. Keeping the backfill logic here
-        // would insert dead_reckoning samples whose timestamps are in the
-        // past but whose coordinates are anchored to the most recent GPS
-        // hold value, which produces fan-shaped artifacts on the map.
     }
 
     // ------------------------
@@ -643,11 +657,182 @@ class GeoLocationService : Service() {
         val clamped = if (sec <= 0) 0 else max(1, sec)
         Log.d(TAG, "applyDrInterval: $drIntervalSec -> $clamped")
         drIntervalSec = clamped
-        if (isRunning.get()) {
-            if (drIntervalSec > 0) {
-                startDrTicker()
-            } else {
+        updateDrTicker()
+    }
+
+    private fun applyDrMode(mode: DrMode) {
+        if (mode == drMode) {
+            return
+        }
+        Log.d(TAG, "applyDrMode: $drMode -> $mode")
+        drMode = mode
+        updateDrTicker()
+    }
+
+    private fun updateDrTicker() {
+        if (!isRunning.get()) {
+            return
+        }
+        when {
+            drIntervalSec <= 0 -> {
+                Log.d(TAG, "updateDrTicker: DR disabled (intervalSec=$drIntervalSec)")
                 stopDrTicker()
+            }
+            drMode == DrMode.Prediction -> {
+                startDrTicker()
+            }
+            drMode == DrMode.Completion -> {
+                Log.d(TAG, "updateDrTicker: completion mode uses backfill only (no real-time ticker)")
+                stopDrTicker()
+            }
+        }
+    }
+
+    private fun scheduleDrBackfill(
+        startMillis: Long,
+        endMillis: Long,
+        endHoldLat: Double,
+        endHoldLon: Double,
+        endAccuracyM: Float?,
+        endSpeedMps: Float
+    ) {
+        val engine = dr ?: return
+        if (endMillis <= startMillis) {
+            return
+        }
+        serviceScope.launch(Dispatchers.Default) {
+            try {
+                backfillDrSegment(
+                    dr = engine,
+                    startMillis = startMillis,
+                    endMillis = endMillis,
+                    endHoldLat = endHoldLat,
+                    endHoldLon = endHoldLon,
+                    endAccuracyM = endAccuracyM,
+                    endSpeedMps = endSpeedMps.toDouble()
+                )
+            } catch (t: Throwable) {
+                Log.w(TAG, "dr backfill failed", t)
+            }
+        }
+    }
+
+    private suspend fun backfillDrSegment(
+        dr: DeadReckoning,
+        startMillis: Long,
+        endMillis: Long,
+        endHoldLat: Double,
+        endHoldLon: Double,
+        endAccuracyM: Float?,
+        endSpeedMps: Double
+    ) {
+        val pts: List<PredictedPoint> = try {
+            dr.predict(fromMillis = startMillis, toMillis = endMillis)
+        } catch (t: Throwable) {
+            Log.w(TAG, "dr.predict(backfill) from=$startMillis to=$endMillis", t)
+            emptyList()
+        }
+        if (pts.isEmpty()) {
+            Log.d(TAG, "backfillDrSegment: no predicted points for segment [$startMillis, $endMillis]")
+            return
+        }
+
+        val last = pts.last()
+        val dtTotalMillis = (endMillis - startMillis).toDouble()
+        if (dtTotalMillis <= 0.0) {
+            return
+        }
+
+        val errorLat = endHoldLat - last.lat
+        val errorLon = endHoldLon - last.lon
+
+        val staticFlag = try {
+            dr.isLikelyStatic()
+        } catch (t: Throwable) {
+            Log.w(TAG, "dr.isLikelyStatic() in backfill", t)
+            false
+        }
+        DrDebugState.update(isStatic = staticFlag, lastUpdateMillis = endMillis)
+
+        val bat = BatteryStatusReader.read(applicationContext)
+
+        for (p in pts) {
+            val t = p.timestampMillis
+            if (t < startMillis || t > endMillis) {
+                continue
+            }
+            val alphaRaw = (t - startMillis).toDouble() / dtTotalMillis
+            val alpha: Double = when {
+                alphaRaw < 0.0 -> 0.0
+                alphaRaw > 1.0 -> 1.0
+                else -> alphaRaw
+            }
+            val correctedLat = p.lat + alpha * errorLat
+            val correctedLon = p.lon + alpha * errorLon
+
+            val headingForDr = headingSensor.headingTrueDeg()?.toDouble() ?: 0.0
+            val courseForDr = if (!lastCourseDeg.isNaN()) {
+                lastCourseDeg
+            } else {
+                headingForDr
+            }
+
+            val sample = LocationSample(
+                id = 0,
+                timeMillis = t,
+                lat = correctedLat,
+                lon = correctedLon,
+                accuracy = p.accuracyM ?: (endAccuracyM ?: 0f),
+                provider = "dead_reckoning",
+                headingDeg = headingForDr,
+                courseDeg = courseForDr,
+                speedMps = (p.speedMps?.toDouble() ?: endSpeedMps),
+                gnssUsed = -1,
+                gnssTotal = -1,
+                cn0 = 0.0,
+                batteryPercent = bat.percent,
+                isCharging = bat.isCharging
+            )
+
+            val sigValue = sig(
+                sample.lat, sample.lon, sample.accuracy,
+                sample.provider,
+                sample.headingDeg,
+                sample.courseDeg ?: 0.0,
+                sample.speedMps,
+                sample.gnssUsed, sample.gnssTotal, sample.cn0,
+                sample.batteryPercent, sample.isCharging
+            )
+            var skip = false
+            synchronized(drInsertLock) {
+                if (sigValue == lastDrInsertSig && t - lastDrInsertMillis <= (drIntervalSec * 500L)) {
+                    skip = true
+                } else {
+                    lastDrInsertSig = sigValue
+                    lastDrInsertMillis = t
+                }
+            }
+            if (skip) {
+                Log.d("DB/TRACE", "dr backfill insert skipped (dup guard)")
+                continue
+            }
+
+            Log.d(
+                "DB/TRACE",
+                "before-insert provider=dead_reckoning(backfill) t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+            )
+            try {
+                StorageService.insertLocation(applicationContext, sample)
+                Log.d(
+                    "DB/TRACE",
+                    "after-insert ok provider=dead_reckoning(backfill) t=${sample.timeMillis}"
+                )
+            } catch (tInsert: Throwable) {
+                Log.e(
+                    "DB/TRACE",
+                    "insert failed provider=dead_reckoning(backfill) t=${sample.timeMillis}",
+                    tInsert
+                )
             }
         }
     }

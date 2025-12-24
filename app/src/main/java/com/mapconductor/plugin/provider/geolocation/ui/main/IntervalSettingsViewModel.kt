@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
 import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
+import com.mapconductor.plugin.provider.storageservice.prefs.DrMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +45,9 @@ class IntervalSettingsViewModel(
     private val _drIntervalText = MutableStateFlow("5")
     val drIntervalText: StateFlow<String> = _drIntervalText.asStateFlow()
 
+    private val _drMode = MutableStateFlow(DrMode.Prediction)
+    val drMode: StateFlow<DrMode> = _drMode.asStateFlow()
+
     private val _imuAvailable = MutableStateFlow(false)
     val imuAvailable: StateFlow<Boolean> = _imuAvailable.asStateFlow()
 
@@ -53,9 +57,11 @@ class IntervalSettingsViewModel(
             val gpsSec = (SettingsRepository.currentIntervalMs(appContext) / 1000L).toInt()
                 .coerceAtLeast(MIN_INTERVAL_SEC)
             val drSec = SettingsRepository.currentDrIntervalSec(appContext)
+            val mode = SettingsRepository.currentDrMode(appContext)
 
             _secondsText.value = gpsSec.toString()
             _drIntervalText.value = drSec.toString()
+            _drMode.value = mode
 
             _imuAvailable.value = detectImuAvailable(appContext)
         }
@@ -76,6 +82,10 @@ class IntervalSettingsViewModel(
         if (text.isEmpty() || text.all { it.isDigit() }) _drIntervalText.value = text
     }
 
+    fun onDrModeChanged(mode: DrMode) {
+        _drMode.value = mode
+    }
+
     /**
      * Save settings and apply them to the service.
      *
@@ -91,6 +101,9 @@ class IntervalSettingsViewModel(
             val ms = clampedSec * 1000L
             SettingsRepository.setIntervalSec(appContext, clampedSec)
             applyIntervalToService(ms)
+
+            // 1.5) Save DR mode (applies when DR is enabled).
+            SettingsRepository.setDrMode(appContext, _drMode.value)
 
             // 2) Validate and save DR interval, or roll back with toast
             val drInterval = _drIntervalText.value.toIntOrNull()

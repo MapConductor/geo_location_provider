@@ -216,21 +216,6 @@ object RealtimeUploadManager {
                     }
                     f to "$baseName.gpx"
                 }
-                else -> {
-                    val json = GeoJsonExporter.toGeoJson(records).toByteArray(Charsets.UTF_8)
-                    val f = File(appContext.cacheDir, "$baseName.json")
-                    try {
-                        FileOutputStream(f).use { os ->
-                            os.write(json)
-                            os.flush()
-                        }
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Failed to write GeoJSON to cache file", t)
-                        runCatching { f.delete() }
-                        return
-                    }
-                    f to "$baseName.json"
-                }
             }
 
             val uri: Uri = Uri.fromFile(file)

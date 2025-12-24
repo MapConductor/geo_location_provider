@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -26,9 +27,11 @@ object SettingsRepository {
     private const val DEFAULT_DR_SEC = 5            // Default DR interval in seconds
     private const val MIN_DR_SEC = 1                // Minimum 1 second when enabled
     private const val FIRST_TIMEOUT_MS = 700L       // Safety timeout for sync getters
+    private val DEFAULT_DR_MODE: DrMode = DrMode.Prediction
 
     private val KEY_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("interval_sec")
     private val KEY_DR_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("dr_interval_sec")
+    private val KEY_DR_MODE: Preferences.Key<String> = stringPreferencesKey("dr_mode")
 
     // ---------- Flow ----------
 
@@ -50,6 +53,15 @@ object SettingsRepository {
             if (raw <= 0) 0 else raw.coerceAtLeast(MIN_DR_SEC)
         }
 
+    /** Flow of DR mode (prediction vs completion). */
+    fun drModeFlow(context: Context): Flow<DrMode> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            when (val raw = prefs[KEY_DR_MODE]) {
+                null -> DEFAULT_DR_MODE
+                else -> runCatching { DrMode.valueOf(raw) }.getOrElse { DEFAULT_DR_MODE }
+            }
+        }
+
     // ---------- Write ----------
 
     suspend fun setIntervalSec(context: Context, sec: Int) {
@@ -61,6 +73,12 @@ object SettingsRepository {
     suspend fun setDrIntervalSec(context: Context, sec: Int) {
         context.applicationContext.settingsDataStore.edit {
             it[KEY_DR_INTERVAL_SEC] = if (sec <= 0) 0 else sec.coerceAtLeast(MIN_DR_SEC)
+        }
+    }
+
+    suspend fun setDrMode(context: Context, mode: DrMode) {
+        context.applicationContext.settingsDataStore.edit {
+            it[KEY_DR_MODE] = mode.name
         }
     }
 
@@ -88,6 +106,15 @@ object SettingsRepository {
             if (v <= 0) 0 else v.coerceAtLeast(MIN_DR_SEC)
         } catch (_: Throwable) {
             DEFAULT_DR_SEC
+        }
+    }
+
+    /** Synchronously returns the current DR mode. */
+    fun currentDrMode(context: Context): DrMode = runBlocking {
+        try {
+            withTimeout(FIRST_TIMEOUT_MS) { drModeFlow(context).first() }
+        } catch (_: Throwable) {
+            DEFAULT_DR_MODE
         }
     }
 }
