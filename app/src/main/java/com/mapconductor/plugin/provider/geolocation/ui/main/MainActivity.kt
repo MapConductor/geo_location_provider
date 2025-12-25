@@ -8,8 +8,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,6 +39,7 @@ import com.mapconductor.plugin.provider.geolocation.ui.settings.UploadSettingsSc
 private const val ROUTE_HOME = "home"
 private const val ROUTE_PICKUP = "pickup"
 private const val ROUTE_MAP = "map"
+private const val ROUTE_DRIVE_SETTINGS = "drive_settings"
 private const val ROUTE_UPLOAD_SETTINGS = "upload_settings"
 
 class MainActivity : ComponentActivity() {
@@ -63,18 +62,44 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 val navController = rememberNavController()
-                NavHost(
-                    navController = navController,
-                    startDestination = ROUTE_HOME
-                ) {
-                    composable(ROUTE_HOME) {
-                        AppRoot(
-                            onStartTracking = { requestPermissionsAndStartService() },
-                            onStopTracking = { stopLocationService() },
-                            onOpenDriveSettings = { navController.navigate("drive_settings") },
-                            onOpenUploadSettings = { navController.navigate(ROUTE_UPLOAD_SETTINGS) }
-                        ) {
-                            Surface(modifier = Modifier.fillMaxSize()) {
+                val backStackEntry by navController.currentBackStackEntryAsState()
+                val currentRoute = backStackEntry?.destination?.route
+
+                Scaffold(
+                    topBar = {
+                        AppTopBar(
+                            currentRoute = currentRoute,
+                            onNavigateMap = {
+                                navController.navigate(ROUTE_MAP) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onNavigatePickup = {
+                                navController.navigate(ROUTE_PICKUP) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onOpenDriveSettings = {
+                                navController.navigate(ROUTE_DRIVE_SETTINGS) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onOpenUploadSettings = {
+                                navController.navigate(ROUTE_UPLOAD_SETTINGS) {
+                                    launchSingleTop = true
+                                }
+                            },
+                            onBack = { navController.popBackStack() }
+                        )
+                    }
+                ) { innerPadding ->
+                    NavHost(
+                        navController = navController,
+                        startDestination = ROUTE_HOME,
+                        modifier = Modifier.padding(innerPadding)
+                    ) {
+                        composable(ROUTE_HOME) {
+                            Surface {
                                 val vm: GeoLocationProviderViewModel = viewModel()
                                 GeoLocationProviderScreen(
                                     state = vm.uiState.value,
@@ -82,16 +107,22 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-                    }
-                    composable("drive_settings") {
-                        DriveSettingsScreen(
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-                    composable(ROUTE_UPLOAD_SETTINGS) {
-                        UploadSettingsScreen(
-                            onBack = { navController.popBackStack() }
-                        )
+                        composable(ROUTE_PICKUP) {
+                            PickupScreen()
+                        }
+                        composable(ROUTE_MAP) {
+                            MapScreen()
+                        }
+                        composable(ROUTE_DRIVE_SETTINGS) {
+                            DriveSettingsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
+                        composable(ROUTE_UPLOAD_SETTINGS) {
+                            UploadSettingsScreen(
+                                onBack = { navController.popBackStack() }
+                            )
+                        }
                     }
                 }
             }
@@ -164,70 +195,49 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AppRoot(
-    onStartTracking: () -> Unit,
-    onStopTracking: () -> Unit,
+private fun AppTopBar(
+    currentRoute: String?,
+    onNavigateMap: () -> Unit,
+    onNavigatePickup: () -> Unit,
     onOpenDriveSettings: () -> Unit,
     onOpenUploadSettings: () -> Unit,
-    content: @Composable () -> Unit
+    onBack: () -> Unit
 ) {
-    val navController = rememberNavController()
-    val backStackEntry by navController.currentBackStackEntryAsState()
-    val currentRoute = backStackEntry?.destination?.route
+    val route = currentRoute ?: ROUTE_HOME
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    val title = when (currentRoute) {
-                        ROUTE_PICKUP -> "Pickup"
-                        ROUTE_MAP -> "Map"
-                        else -> "GeoLocation"
-                    }
-                    Text(title)
-                },
-                navigationIcon = {
-                    if (currentRoute == ROUTE_PICKUP || currentRoute == ROUTE_MAP) {
-                        IconButton(onClick = { navController.popBackStack() }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back"
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // On HOME: show Pickup / Drive / Start/Stop.
-                    // On Pickup / Map screens: only show Back button.
-                    if (currentRoute != ROUTE_PICKUP && currentRoute != ROUTE_MAP) {
-                        TextButton(onClick = {
-                            navController.navigate(ROUTE_MAP) { launchSingleTop = true }
-                        }) { Text("Map") }
-
-                        TextButton(onClick = {
-                            navController.navigate(ROUTE_PICKUP) { launchSingleTop = true }
-                        }) { Text("Pickup") }
-
-                        TextButton(onClick = onOpenDriveSettings) { Text("Drive") }
-
-                        TextButton(onClick = onOpenUploadSettings) { Text("Upload") }
-
-                        ServiceToggleAction()
-                    }
-                }
-            )
-        }
-    ) { inner ->
-        Box(Modifier.padding(inner).fillMaxSize()) {
-            NavHost(navController = navController, startDestination = ROUTE_HOME) {
-                composable(ROUTE_HOME) { content() }
-                composable(ROUTE_PICKUP) {
-                    PickupScreen()
-                }
-                composable(ROUTE_MAP) {
-                    MapScreen()
+    TopAppBar(
+        title = {
+            val title = when (route) {
+                ROUTE_PICKUP -> "Pickup"
+                ROUTE_MAP -> "Map"
+                ROUTE_DRIVE_SETTINGS -> "Google Drive Settings"
+                ROUTE_UPLOAD_SETTINGS -> "Upload settings"
+                else -> "GeoLocation"
+            }
+            Text(title)
+        },
+        navigationIcon = {
+            if (route != ROUTE_HOME) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back"
+                    )
                 }
             }
+        },
+        actions = {
+            if (route == ROUTE_HOME) {
+                TextButton(onClick = onNavigateMap) { Text("Map") }
+
+                TextButton(onClick = onNavigatePickup) { Text("Pickup") }
+
+                TextButton(onClick = onOpenDriveSettings) { Text("Drive") }
+
+                TextButton(onClick = onOpenUploadSettings) { Text("Upload") }
+
+                ServiceToggleAction()
+            }
         }
-    }
+    )
 }

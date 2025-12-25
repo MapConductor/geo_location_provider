@@ -7,20 +7,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -66,7 +59,6 @@ private val TIMEZONE_OPTIONS: List<TimezoneOption> =
         TimezoneOption("Pacific/Midway", "-11H (Midway Islands etc...)")
     )
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UploadSettingsScreen(
     vm: UploadSettingsViewModel = viewModel(),
@@ -88,28 +80,12 @@ fun UploadSettingsScreen(
     val timezoneLabel =
         selectedTimezone?.label ?: zoneId
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Upload settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
-                }
-            )
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+    Column(
+        modifier = Modifier
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
             // Upload on/off
             Text("Upload", style = MaterialTheme.typography.titleMedium)
             Row(
@@ -272,4 +248,3 @@ fun UploadSettingsScreen(
             )
         }
     }
-}

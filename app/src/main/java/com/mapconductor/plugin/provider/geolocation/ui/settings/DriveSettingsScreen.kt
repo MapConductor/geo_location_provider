@@ -89,203 +89,189 @@ fun DriveSettingsScreen(
     var showPreviewDialog by remember { mutableStateOf(false) }
     var uiMsg by remember { mutableStateOf<String?>(null) }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Google Drive Settings") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+    Column(
+        modifier = Modifier
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        // Auth method selection
+        Text("Auth method", style = MaterialTheme.typography.titleMedium)
+        Column {
+            DriveAuthMethod.values().forEach { method ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = authMethod == method,
+                        onClick = { vm.setAuthMethod(method) }
+                    )
+                    Text(method.label)
                 }
-            )
+            }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // Auth method selection
-            Text("Auth method", style = MaterialTheme.typography.titleMedium)
-            Column {
-                DriveAuthMethod.values().forEach { method ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.Start,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = authMethod == method,
-                            onClick = { vm.setAuthMethod(method) }
-                        )
-                        Text(method.label)
-                    }
-                }
+
+        HorizontalDivider(color = DividerDefaults.color)
+
+        // Basic Drive settings
+        Text("Drive settings", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = folderId,
+            onValueChange = { vm.updateFolderId(it) },
+            label = { Text("Folder URL or ID") }
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { vm.validateFolder() }) {
+                Text("Validate folder")
             }
+        }
 
-            HorizontalDivider(color = DividerDefaults.color)
+        HorizontalDivider(color = DividerDefaults.color)
 
-            // Basic Drive settings
-            Text("Drive settings", style = MaterialTheme.typography.titleMedium)
-            OutlinedTextField(
-                modifier = Modifier.fillMaxWidth(),
-                value = folderId,
-                onValueChange = { vm.updateFolderId(it) },
-                label = { Text("Folder URL or ID") }
-            )
+        // Auth-method specific UI
+        Text("Auth actions", style = MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            // Row 1: Credential Manager actions
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { vm.validateFolder() }) {
-                    Text("Validate folder")
+                OutlinedButton(
+                    enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER,
+                    onClick = {
+                        val provider = CredentialManagerAuth.get(ctx)
+                        if (!cmLoggedIn) {
+                            scope.launch {
+                                val credential = provider.signIn(ctx)
+                                if (credential != null) {
+                                    vm.setCmLoggedIn(true)
+                                    vm.setStatus("CM sign-in OK.")
+                                    // Persist a "signed in" marker so UploadSettings
+                                    // can treat Drive as configured.
+                                    vm.markCredentialManagerSignedIn()
+                                } else {
+                                    vm.setStatus("CM sign-in canceled or failed.")
+                                }
+                            }
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                provider.signOut()
+                                withContext(Dispatchers.Main) {
+                                    vm.setCmLoggedIn(false)
+                                    vm.clearAuthInfo()
+                                    vm.setStatus("CM signed out.")
+                                }
+                            }
+                        }
+                    }
+                ) {
+                    Text(
+                        if (!cmLoggedIn) "CM: Start sign-in" else "CM: Sign out"
+                    )
+                }
+
+                OutlinedButton(
+                    enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER && cmLoggedIn,
+                    onClick = {
+                        // Use DriveSettingsViewModel.callAboutGet() to:
+                        // - Probe token via the selected Credential Manager account.
+                        // - Call Drive API aboutGet to resolve account email.
+                        // - Persist accountEmail / tokenUpdatedAt in DrivePrefs.
+                        // This ensures UploadSettings (which checks DrivePrefs.accountEmail)
+                        // can see that Drive auth is configured.
+                        vm.callAboutGet()
+                    }
+                ) {
+                    Text("CM: Get token & account")
                 }
             }
 
-            HorizontalDivider(color = DividerDefaults.color)
-
-            // Auth-method specific UI
-            Text("Auth actions", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Row 1: Credential Manager actions
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER,
-                        onClick = {
-                            val provider = CredentialManagerAuth.get(ctx)
-                            if (!cmLoggedIn) {
-                                scope.launch {
-                                    val credential = provider.signIn(ctx)
-                                    if (credential != null) {
-                                        vm.setCmLoggedIn(true)
-                                        vm.setStatus("CM sign-in OK.")
-                                        // Persist a "signed in" marker so UploadSettings
-                                        // can treat Drive as configured.
-                                        vm.markCredentialManagerSignedIn()
-                                    } else {
-                                        vm.setStatus("CM sign-in canceled or failed.")
-                                    }
-                                }
-                            } else {
-                                scope.launch(Dispatchers.IO) {
-                                    provider.signOut()
-                                    withContext(Dispatchers.Main) {
-                                        vm.setCmLoggedIn(false)
-                                        vm.clearAuthInfo()
-                                        vm.setStatus("CM signed out.")
-                                    }
+            // Row 2: AppAuth actions
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    enabled = authMethod == DriveAuthMethod.APPAUTH,
+                    onClick = {
+                        if (!appAuthLoggedIn) {
+                            vm.setAppAuthLoggedIn(true)
+                            val intent = android.content.Intent(
+                                ctx,
+                                AppAuthSignInActivity::class.java
+                            )
+                            ctx.startActivity(intent)
+                        } else {
+                            val provider = AppAuthAuth.get(ctx)
+                            scope.launch(Dispatchers.IO) {
+                                provider.signOut()
+                                withContext(Dispatchers.Main) {
+                                    vm.setAppAuthLoggedIn(false)
+                                    vm.clearAuthInfo()
+                                    vm.setStatus("AppAuth signed out.")
                                 }
                             }
                         }
-                    ) {
-                        Text(
-                            if (!cmLoggedIn) "CM: Start sign-in" else "CM: Sign out"
-                        )
                     }
-
-                    OutlinedButton(
-                        enabled = authMethod == DriveAuthMethod.CREDENTIAL_MANAGER && cmLoggedIn,
-                        onClick = {
-                            // Use DriveSettingsViewModel.callAboutGet() to:
-                            // - Probe token via the selected Credential Manager account.
-                            // - Call Drive API aboutGet to resolve account email.
-                            // - Persist accountEmail / tokenUpdatedAt in DrivePrefs.
-                            // This ensures UploadSettings (which checks DrivePrefs.accountEmail)
-                            // can see that Drive auth is configured.
-                            vm.callAboutGet()
-                        }
-                    ) {
-                        Text("CM: Get token & account")
-                    }
+                ) {
+                    Text(
+                        if (!appAuthLoggedIn) "AppAuth: Start sign-in" else "AppAuth: Sign out"
+                    )
                 }
 
-                // Row 2: AppAuth actions
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(
-                        enabled = authMethod == DriveAuthMethod.APPAUTH,
-                        onClick = {
-                            if (!appAuthLoggedIn) {
-                                vm.setAppAuthLoggedIn(true)
-                                val intent = android.content.Intent(
-                                    ctx,
-                                    AppAuthSignInActivity::class.java
-                                )
-                                ctx.startActivity(intent)
-                            } else {
-                                val provider = AppAuthAuth.get(ctx)
-                                scope.launch(Dispatchers.IO) {
-                                    provider.signOut()
-                                    withContext(Dispatchers.Main) {
-                                        vm.setAppAuthLoggedIn(false)
-                                        vm.clearAuthInfo()
-                                        vm.setStatus("AppAuth signed out.")
-                                    }
-                                }
-                            }
-                        }
-                    ) {
-                        Text(
-                            if (!appAuthLoggedIn) "AppAuth: Start sign-in" else "AppAuth: Sign out"
-                        )
-                    }
-
-                      OutlinedButton(
-                          enabled = authMethod == DriveAuthMethod.APPAUTH && appAuthLoggedIn,
-                          onClick = {
-                              val provider = AppAuthAuth.get(ctx)
-                              scope.launch(Dispatchers.IO) {
-                                  val token = provider.getAccessToken()
-                                  withContext(Dispatchers.Main) {
-                                      if (token != null) {
-                                          vm.setAppAuthLoggedIn(true)
-                                          vm.markAppAuthSignedIn()
-                                          vm.setStatus("AppAuth Token OK: ${token.take(12)}...")
-                                      } else {
-                                          vm.setStatus("AppAuth token is null (sign-in required?)")
-                                      }
+                  OutlinedButton(
+                      enabled = authMethod == DriveAuthMethod.APPAUTH && appAuthLoggedIn,
+                      onClick = {
+                          val provider = AppAuthAuth.get(ctx)
+                          scope.launch(Dispatchers.IO) {
+                              val token = provider.getAccessToken()
+                              withContext(Dispatchers.Main) {
+                                  if (token != null) {
+                                      vm.setAppAuthLoggedIn(true)
+                                      vm.markAppAuthSignedIn()
+                                      vm.setStatus("AppAuth Token OK: ${token.take(12)}...")
+                                  } else {
+                                      vm.setStatus("AppAuth token is null (sign-in required?)")
                                   }
                               }
                           }
-                    ) {
-                        Text("AppAuth: Get token")
-                    }
+                      }
+                ) {
+                    Text("AppAuth: Get token")
                 }
             }
+        }
 
-            HorizontalDivider(color = DividerDefaults.color)
+        HorizontalDivider(color = DividerDefaults.color)
 
-            // Backup and preview actions
-            Text("Backup & preview", style = MaterialTheme.typography.titleMedium)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                OutlinedButton(onClick = {
-                    vm.runBacklogNow()
-                }) {
-                    Text("Backup days before today")
-                }
-
-                OutlinedButton(onClick = { showPreviewDialog = true }) {
-                    Text("Today preview")
-                }
+        // Backup and preview actions
+        Text("Backup & preview", style = MaterialTheme.typography.titleMedium)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            OutlinedButton(onClick = {
+                vm.runBacklogNow()
+            }) {
+                Text("Backup days before today")
             }
 
-            HorizontalDivider(color = DividerDefaults.color)
+            OutlinedButton(onClick = { showPreviewDialog = true }) {
+                Text("Today preview")
+            }
+        }
 
-            // Status section
-            if (!status.isNullOrBlank()) {
-                Text("Status:", style = MaterialTheme.typography.titleMedium)
-                Text(status)
-            }
-            if (!account.isNullOrBlank()) {
-                Text("Account: $account")
-            }
-            if (lastRefreshText != null) {
-                Text(lastRefreshText)
-            }
-            if (!uiMsg.isNullOrBlank()) {
-                Text(uiMsg!!)
-            }
+        HorizontalDivider(color = DividerDefaults.color)
+
+        // Status section
+        if (!status.isNullOrBlank()) {
+            Text("Status:", style = MaterialTheme.typography.titleMedium)
+            Text(status)
+        }
+        if (!account.isNullOrBlank()) {
+            Text("Account: $account")
+        }
+        if (lastRefreshText != null) {
+            Text(lastRefreshText)
+        }
+        if (!uiMsg.isNullOrBlank()) {
+            Text(uiMsg!!)
         }
     }
 
