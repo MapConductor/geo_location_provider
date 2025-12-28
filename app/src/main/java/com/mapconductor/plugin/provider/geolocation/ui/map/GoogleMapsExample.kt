@@ -355,6 +355,9 @@ private fun CurveModeDropdown(
             MapCurveMode.LINEAR -> "Linear"
             MapCurveMode.BEZIER -> "Bezier"
             MapCurveMode.SPLINE -> "Spline"
+            MapCurveMode.MOVING_AVERAGE_LINEAR -> "Moving average (linear)"
+            MapCurveMode.MOVING_AVERAGE_BEZIER -> "Moving average (Bezier)"
+            MapCurveMode.MOVING_AVERAGE_SPLINE -> "Moving average (Spline)"
             MapCurveMode.CORNER_CUTTING_1 -> "corner-cutting[1]"
             MapCurveMode.CORNER_CUTTING_2 -> "corner-cutting[2]"
             MapCurveMode.CORNER_CUTTING_3 -> "corner-cutting[3]"
@@ -400,6 +403,9 @@ private fun CurveModeDropdown(
                         MapCurveMode.LINEAR -> "Linear"
                         MapCurveMode.BEZIER -> "Bezier"
                         MapCurveMode.SPLINE -> "Spline"
+                        MapCurveMode.MOVING_AVERAGE_LINEAR -> "Moving average (linear)"
+                        MapCurveMode.MOVING_AVERAGE_BEZIER -> "Moving average (Bezier)"
+                        MapCurveMode.MOVING_AVERAGE_SPLINE -> "Moving average (Spline)"
                         MapCurveMode.CORNER_CUTTING_1 -> "corner-cutting[1]"
                         MapCurveMode.CORNER_CUTTING_2 -> "corner-cutting[2]"
                         MapCurveMode.CORNER_CUTTING_3 -> "corner-cutting[3]"
@@ -481,6 +487,31 @@ private fun PointSelectionModeDropdown(
             }
         }
     }
+}
+
+private fun buildMovingAverage3Polyline(
+    points: List<GeoPointImpl>
+): List<GeoPointImpl> {
+    if (points.size < 3) {
+        return points
+    }
+
+    val result = mutableListOf<GeoPointImpl>()
+    result.add(points.first())
+
+    for (i in 0 until points.size - 2) {
+        val p0 = points[i]
+        val p1 = points[i + 1]
+        val p2 = points[i + 2]
+
+        val lat = (p0.latitude + p1.latitude + p2.latitude) / 3.0
+        val lon = (p0.longitude + p1.longitude + p2.longitude) / 3.0
+
+        result.add(GeoPointImpl.fromLatLong(lat, lon))
+    }
+
+    result.add(points.last())
+    return result
 }
 
 private fun buildBezierPolyline(points: List<GeoPointImpl>): List<GeoPointImpl> {
@@ -600,6 +631,15 @@ private fun applyCurveMode(
         MapCurveMode.LINEAR -> basePoints
         MapCurveMode.BEZIER -> buildBezierPolyline(basePoints)
         MapCurveMode.SPLINE -> buildSplinePolyline(basePoints)
+        MapCurveMode.MOVING_AVERAGE_LINEAR -> buildMovingAverage3Polyline(basePoints)
+        MapCurveMode.MOVING_AVERAGE_BEZIER -> {
+            val filtered = buildMovingAverage3Polyline(basePoints)
+            buildBezierPolyline(filtered)
+        }
+        MapCurveMode.MOVING_AVERAGE_SPLINE -> {
+            val filtered = buildMovingAverage3Polyline(basePoints)
+            buildSplinePolyline(filtered)
+        }
         MapCurveMode.CORNER_CUTTING_1 -> buildChaikinPolyline(basePoints, iterations = 1)
         MapCurveMode.CORNER_CUTTING_2 -> buildChaikinPolyline(basePoints, iterations = 2)
         MapCurveMode.CORNER_CUTTING_3 -> buildChaikinPolyline(basePoints, iterations = 3)
