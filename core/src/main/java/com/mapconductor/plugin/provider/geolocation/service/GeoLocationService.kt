@@ -15,6 +15,9 @@ import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckon
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningFactory
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.GpsFix
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedPoint
+import com.mapconductor.plugin.provider.geolocation.fusion.GpsCorrectionHint
+import com.mapconductor.plugin.provider.geolocation.fusion.GpsCorrectionEngineRegistry
+import com.mapconductor.plugin.provider.geolocation.fusion.LifecycleAwareGpsCorrectionEngine
 import com.mapconductor.plugin.provider.geolocation.gps.FusedLocationGpsEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsLocationEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsObservation
@@ -46,6 +49,8 @@ class GeoLocationService : Service() {
     companion object {
         private const val TAG = "GeoLocationService"
         private const val NOTIFICATION_ID = 1
+        private const val PROVIDER_GPS = "gps"
+        private const val PROVIDER_GPS_CORRECTED = "gps_corrected"
 
         const val ACTION_START = "ACTION_START_LOCATION"
         const val ACTION_STOP  = "ACTION_STOP_LOCATION"
@@ -92,6 +97,9 @@ class GeoLocationService : Service() {
     @Volatile private var lastInsertMillis: Long = 0L
     @Volatile private var lastInsertSig: Long = 0L
     private val insertLock = Any()
+    @Volatile private var lastCorrectedInsertMillis: Long = 0L
+    @Volatile private var lastCorrectedInsertSig: Long = 0L
+    private val correctedInsertLock = Any()
     @Volatile private var lastDrInsertMillis: Long = 0L
     @Volatile private var lastDrInsertSig: Long = 0L
     private val drInsertLock = Any()
@@ -193,6 +201,10 @@ class GeoLocationService : Service() {
         try { gpsEngine.stop() } catch (t: Throwable) { Log.w(TAG, "gpsEngine.stop()", t) }
         try { headingSensor.stop() } catch (t: Throwable) { Log.w(TAG, "headingSensor.stop()", t) }
         try { dr?.stop() } catch (t: Throwable) { Log.w(TAG, "dr.stop()", t) }
+        val correction = GpsCorrectionEngineRegistry.get()
+        if (correction is LifecycleAwareGpsCorrectionEngine) {
+            try { correction.stop() } catch (t: Throwable) { Log.w(TAG, "correction.stop()", t) }
+        }
         serviceScope.cancel()
     }
 
@@ -224,6 +236,10 @@ class GeoLocationService : Service() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
         startForeground(NOTIFICATION_ID, buildNotification())
+        val correction = GpsCorrectionEngineRegistry.get()
+        if (correction is LifecycleAwareGpsCorrectionEngine) {
+            try { correction.start() } catch (t: Throwable) { Log.w(TAG, "correction.start()", t) }
+        }
         gpsEngine.updateInterval(updateIntervalMs)
         gpsEngine.start()
         updateDrTicker()
@@ -235,6 +251,11 @@ class GeoLocationService : Service() {
 
         // Remove foreground service state.
         stopForeground(STOP_FOREGROUND_DETACH)
+
+        val correction = GpsCorrectionEngineRegistry.get()
+        if (correction is LifecycleAwareGpsCorrectionEngine) {
+            try { correction.stop() } catch (t: Throwable) { Log.w(TAG, "correction.stop()", t) }
+        }
 
         // Stop location updates.
         try { gpsEngine.stop() } catch (t: Throwable) {
@@ -269,8 +290,20 @@ class GeoLocationService : Service() {
         val now = observation.timestampMillis
         val lastFix = lastFixMillis
 
-        val headingDeg: Float = headingSensor.headingTrueDeg() ?: 0f
+        val headingTrueDeg: Float? = headingSensor.headingTrueDeg()
+        val headingDeg: Float = headingTrueDeg ?: 0f
         val speedMps: Float = max(0f, observation.speedMps.takeIf { !it.isNaN() } ?: 0f)
+
+        val correctedObservation: GpsObservation = GpsCorrectionEngineRegistry.get().correct(
+            observation,
+            GpsCorrectionHint(
+                headingTrueDeg = headingTrueDeg,
+                speedMps = speedMps,
+                isLikelyStatic = DrDebugState.snapshot.value.isStatic,
+                updateIntervalMs = updateIntervalMs
+            )
+        )
+        val hasCorrected: Boolean = correctedObservation !== observation
 
         // --- Estimate course (direction of travel) ---
         val prevLat = lastCourseLat
@@ -289,11 +322,11 @@ class GeoLocationService : Service() {
 
             // 2) If bearing is not available, estimate direction from the last position.
             prevLat != null && prevLon != null -> {
-                val prev = android.location.Location("gps").apply {
+                val prev = android.location.Location(PROVIDER_GPS).apply {
                     latitude = prevLat
                     longitude = prevLon
                 }
-                val current = android.location.Location("gps").apply {
+                val current = android.location.Location(PROVIDER_GPS).apply {
                     latitude = observation.lat
                     longitude = observation.lon
                 }
@@ -425,7 +458,7 @@ class GeoLocationService : Service() {
                 lat = observation.lat,
                 lon = observation.lon,
                 accuracy = observation.accuracyM,
-                provider = "gps",
+                provider = PROVIDER_GPS,
                 headingDeg = headingDeg.toDouble(),
                 courseDeg = courseDeg,
                 speedMps = speedMps.toDouble(),
@@ -457,24 +490,92 @@ class GeoLocationService : Service() {
                   serviceScope.launch(Dispatchers.IO) {
                       Log.d(
                           "DB/TRACE",
-                          "before-insert provider=gps t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                          "before-insert provider=${PROVIDER_GPS} t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
                       )
                       try {
                           StorageService.insertLocation(applicationContext, sample)
                           Log.d(
                               "DB/TRACE",
-                              "after-insert ok provider=gps t=${sample.timeMillis}"
+                              "after-insert ok provider=${PROVIDER_GPS} t=${sample.timeMillis}"
                           )
                       } catch (t: Throwable) {
                           Log.e(
                               "DB/TRACE",
-                              "insert failed provider=gps t=${sample.timeMillis}",
+                              "insert failed provider=${PROVIDER_GPS} t=${sample.timeMillis}",
                               t
                           )
                       }
                   }
             } else {
                 Log.d("DB/TRACE", "gps insert skipped (dup guard)")
+            }
+        }
+
+        // 1b) Insert corrected GPS sample (separate provider) when enabled.
+        if (hasCorrected) {
+            val bat = BatteryStatusReader.read(applicationContext)
+            val correctedCourse: Double =
+                correctedObservation.bearingDeg?.toDouble()?.takeIf { correctedObservation.hasBearing }
+                    ?: Double.NaN
+            val sample = LocationSample(
+                id = 0,
+                timeMillis = now,
+                lat = correctedObservation.lat,
+                lon = correctedObservation.lon,
+                accuracy = correctedObservation.accuracyM,
+                provider = PROVIDER_GPS_CORRECTED,
+                headingDeg = headingDeg.toDouble(),
+                courseDeg = correctedCourse,
+                speedMps = speedMps.toDouble(),
+                gnssUsed = used ?: -1,
+                gnssTotal = total ?: -1,
+                cn0 = cn0 ?: 0.0,
+                batteryPercent = bat.percent,
+                isCharging = bat.isCharging
+            )
+            val sig = sig(
+                sample.lat, sample.lon, sample.accuracy,
+                sample.provider,
+                sample.headingDeg,
+                correctedCourse,
+                sample.speedMps,
+                sample.gnssUsed, sample.gnssTotal, sample.cn0,
+                sample.batteryPercent, sample.isCharging
+            )
+            var skip = false
+            synchronized(correctedInsertLock) {
+                if (
+                    sig == lastCorrectedInsertSig &&
+                    now - lastCorrectedInsertMillis <= min(1000L, updateIntervalMs / 2)
+                ) {
+                    skip = true
+                } else {
+                    lastCorrectedInsertSig = sig
+                    lastCorrectedInsertMillis = now
+                }
+            }
+            if (!skip) {
+                serviceScope.launch(Dispatchers.IO) {
+                    Log.d(
+                        "DB/TRACE",
+                        "before-insert provider=${PROVIDER_GPS_CORRECTED} t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                    )
+                    try {
+                        StorageService.insertLocation(applicationContext, sample)
+                        Log.d(
+                            "DB/TRACE",
+                            "after-insert ok provider=${PROVIDER_GPS_CORRECTED} t=${sample.timeMillis}"
+                        )
+                    } catch (t: Throwable) {
+                        Log.e(
+                            "DB/TRACE",
+                            "insert failed provider=${PROVIDER_GPS_CORRECTED} t=${sample.timeMillis}",
+                            t
+                        )
+                    }
+                }
+            } else {
+                Log.d("DB/TRACE", "gps_corrected insert skipped (dup guard)")
             }
         }
 
@@ -726,25 +827,23 @@ class GeoLocationService : Service() {
         endAccuracyM: Float?,
         endSpeedMps: Double
     ) {
-        val pts: List<PredictedPoint> = try {
-            dr.predict(fromMillis = startMillis, toMillis = endMillis)
-        } catch (t: Throwable) {
-            Log.w(TAG, "dr.predict(backfill) from=$startMillis to=$endMillis", t)
-            emptyList()
-        }
-        if (pts.isEmpty()) {
-            Log.d(TAG, "backfillDrSegment: no predicted points for segment [$startMillis, $endMillis]")
-            return
-        }
-
-        val last = pts.last()
         val dtTotalMillis = (endMillis - startMillis).toDouble()
         if (dtTotalMillis <= 0.0) {
             return
         }
 
-        val errorLat = endHoldLat - last.lat
-        val errorLon = endHoldLon - last.lon
+        val endPoint: PredictedPoint = try {
+            dr.predict(fromMillis = startMillis, toMillis = endMillis).lastOrNull()
+        } catch (t: Throwable) {
+            Log.w(TAG, "dr.predict(backfill/end) from=$startMillis to=$endMillis", t)
+            null
+        } ?: run {
+            Log.d(TAG, "backfillDrSegment: no predicted end point for segment [$startMillis, $endMillis]")
+            return
+        }
+
+        val errorLat = endHoldLat - endPoint.lat
+        val errorLon = endHoldLon - endPoint.lon
 
         val staticFlag = try {
             dr.isLikelyStatic()
@@ -756,8 +855,23 @@ class GeoLocationService : Service() {
 
         val bat = BatteryStatusReader.read(applicationContext)
 
-        for (p in pts) {
-            val t = p.timestampMillis
+        val stepMs = max(1, drIntervalSec) * 1000L
+        var next = startMillis + stepMs
+        val times = mutableListOf<Long>()
+        while (next < endMillis) {
+            times.add(next)
+            next += stepMs
+        }
+        times.add(endMillis)
+
+        for (t in times) {
+            val p: PredictedPoint =
+                try {
+                    dr.predict(fromMillis = startMillis, toMillis = t).lastOrNull()
+                } catch (tPred: Throwable) {
+                    Log.w(TAG, "dr.predict(backfill/step) from=$startMillis to=$t", tPred)
+                    null
+                } ?: continue
             if (t < startMillis || t > endMillis) {
                 continue
             }

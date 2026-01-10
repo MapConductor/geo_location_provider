@@ -75,12 +75,16 @@ fun MapScreen() {
     val gpsLatestSample = state.markers.firstOrNull { sample ->
         Formatters.providerKind(sample.provider) == ProviderKind.Gps
     }
+    val gpsCorrectedLatestSample = state.markers.firstOrNull { sample ->
+        Formatters.providerKind(sample.provider) == ProviderKind.GpsCorrected
+    }
     val drLatestSample = state.markers.firstOrNull { sample ->
         Formatters.providerKind(sample.provider) == ProviderKind.DeadReckoning
     }
 
     val centerSample =
         when {
+            state.gpsCorrectedChecked && gpsCorrectedLatestSample != null -> gpsCorrectedLatestSample
             state.gpsChecked && gpsLatestSample != null -> gpsLatestSample
             !state.gpsChecked && state.drChecked && drLatestSample != null -> drLatestSample
             gpsLatestSample != null -> gpsLatestSample
@@ -128,6 +132,29 @@ fun MapScreen() {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            CurveModeDropdown(
+                selected = state.curveMode,
+                onSelected = { vm.onCurveModeChange(it) },
+                enabled = !state.filterApplied,
+                modifier = Modifier.weight(1f)
+            )
+
+            PointSelectionModeDropdown(
+                selected = state.pointSelectionMode,
+                onSelected = { vm.onPointSelectionModeChange(it) },
+                enabled = !state.filterApplied,
+                modifier = Modifier
+                    .padding(start = 8.dp)
+                    .weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Checkbox(
                 checked = state.gpsChecked,
                 onCheckedChange = { vm.onGpsCheckedChange(it) },
@@ -136,32 +163,24 @@ fun MapScreen() {
             Text(text = "GPS")
 
             Checkbox(
-                checked = state.drChecked,
-                onCheckedChange = { vm.onDrCheckedChange(it) },
-                modifier = Modifier.padding(start = 16.dp),
+                checked = state.gpsCorrectedChecked,
+                onCheckedChange = { vm.onGpsCorrectedCheckedChange(it) },
+                modifier = Modifier.padding(start = 8.dp),
                 enabled = !state.filterApplied
             )
-            Text(text = "DeadReckoning")
+            Text(text = "GPS(corrected)")
 
             OutlinedTextField(
                 value = state.limitText,
                 onValueChange = { vm.onLimitChanged(it) },
-                label = { Text("Count (1-5000)") },
+                label = { Text("Count") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 enabled = !state.filterApplied,
                 modifier = Modifier
-                    .padding(start = 16.dp)
+                    .padding(start = 8.dp)
                     .weight(1f)
             )
-
-            Button(
-                onClick = { vm.onApplyClicked() },
-                modifier = Modifier.padding(start = 16.dp)
-            ) {
-                val label = if (state.filterApplied) "Cancel" else "Apply"
-                Text(text = label)
-            }
         }
 
         Row(
@@ -177,23 +196,22 @@ fun MapScreen() {
             )
             Text(text = "GPS&DR")
 
-            CurveModeDropdown(
-                selected = state.curveMode,
-                onSelected = { vm.onCurveModeChange(it) },
+            Checkbox(
+                checked = state.drChecked,
+                onCheckedChange = { vm.onDrCheckedChange(it) },
+                modifier = Modifier.padding(start = 8.dp),
                 enabled = !state.filterApplied,
-                modifier = Modifier
-                    .padding(start = 16.dp)
-                    .weight(0.8f)
             )
+            Text(text = "DeadReckoning")
 
-            PointSelectionModeDropdown(
-                selected = state.pointSelectionMode,
-                onSelected = { vm.onPointSelectionModeChange(it) },
-                enabled = !state.filterApplied,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .weight(1.2f)
-            )
+            Box(modifier = Modifier.weight(1f))
+
+            Button(
+                onClick = { vm.onApplyClicked() }
+            ) {
+                val label = if (state.filterApplied) "Cancel" else "Apply"
+                Text(text = label)
+            }
         }
 
         key(session) {
@@ -214,6 +232,15 @@ fun MapScreen() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     // Build per-provider polylines, connecting points in time order.
+                    val gpsCorrectedBasePoints = state.markers
+                        .filter { sample ->
+                            Formatters.providerKind(sample.provider) == ProviderKind.GpsCorrected
+                        }
+                        .sortedBy { it.timeMillis }
+                        .map { sample ->
+                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                        }
+
                     val gpsBasePoints = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.Gps
@@ -232,8 +259,19 @@ fun MapScreen() {
                             GeoPointImpl.fromLatLong(sample.lat, sample.lon)
                         }
 
+                    val gpsCorrectedPoints = applyCurveMode(gpsCorrectedBasePoints, state.curveMode)
                     val gpsPoints = applyCurveMode(gpsBasePoints, state.curveMode)
                     val drPoints = applyCurveMode(drBasePoints, state.curveMode)
+
+                    // Draw corrected GPS polyline first (backmost).
+                    if (state.gpsCorrectedChecked && gpsCorrectedPoints.size >= 2) {
+                        Polyline(
+                            points = gpsCorrectedPoints,
+                            id = "gps-corrected-polyline",
+                            strokeColor = Color(0xFFFF00FF),
+                            strokeWidth = 8.dp
+                        )
+                    }
 
                     // Draw GPS polyline first (behind).
                     if (state.gpsChecked && gpsPoints.size >= 2) {
@@ -299,6 +337,10 @@ fun MapScreen() {
                 ) {
                     Text(
                         text = "GPS : ${state.displayedGpsCount} / ${state.dbGpsCount}",
+                        color = Color.White
+                    )
+                    Text(
+                        text = "GPSC: ${state.displayedGpsCorrectedCount} / ${state.dbGpsCorrectedCount}",
                         color = Color.White
                     )
                     Text(

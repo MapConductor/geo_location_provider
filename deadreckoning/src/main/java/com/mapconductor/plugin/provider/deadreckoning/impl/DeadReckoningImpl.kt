@@ -214,7 +214,8 @@ internal class DeadReckoningImpl(
 
         // Re-anchor the 1D DR state along the latest GPS direction.
         synchronized(drLock) {
-            val hasPrev = previous != null && timeMillis > previous.timeMillis
+            val prev = previous
+            val hasPrev = prev != null && timeMillis > prev.timeMillis
             val baselineSpeed = selectBaselineSpeedMps(fix, previous)
 
             drAnchorLat = latest.lat
@@ -225,8 +226,8 @@ internal class DeadReckoningImpl(
             drOffsetMeters = 0.0
             drLastUpdateTimeMillis = timeMillis
 
-            if (hasPrev && previous != null) {
-                val dir = computeDirectionUnit(previous.lat, previous.lon, latest.lat, latest.lon)
+            if (hasPrev) {
+                val dir = computeDirectionUnit(prev!!.lat, prev.lon, latest.lat, latest.lon)
                 if (dir != null) {
                     drDirEastUnit = dir.first
                     drDirNorthUnit = dir.second

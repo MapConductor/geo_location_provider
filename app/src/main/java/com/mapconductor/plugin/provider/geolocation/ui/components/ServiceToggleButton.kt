@@ -34,10 +34,10 @@ fun ServiceToggleAction() {
     val scope = rememberCoroutineScope()
 
     suspend fun refreshState() {
-        val running = ServiceStateIndicator.isRunning(
-            context,
-            GeoLocationService::class.java
-        )
+        val running =
+            runCatching {
+                ServiceStateIndicator.isRunning(context, GeoLocationService::class.java)
+            }.getOrElse { false }
         runningState.value = running
     }
 
@@ -91,9 +91,12 @@ fun ServiceToggleAction() {
 
             // Wait a bit and then re-query the real state
             scope.launch {
-                delay(500) // Increase to 700-1000ms if needed
-                refreshState()
-                busyState.value = false
+                try {
+                    delay(500) // Increase to 700-1000ms if needed
+                    refreshState()
+                } finally {
+                    busyState.value = false
+                }
             }
         },
         enabled = !busyState.value

@@ -52,6 +52,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val gpsEnabled = MutableStateFlow(false)
+    private val gpsCorrectedEnabled = MutableStateFlow(false)
     private val drEnabled = MutableStateFlow(false)
     private val gpsDrEnabled = MutableStateFlow(false)
     private val curveMode = MutableStateFlow(MapCurveMode.LINEAR)
@@ -70,6 +71,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private data class Filter(
         val gps: Boolean,
+        val gpsCorrected: Boolean,
         val dr: Boolean,
         val limit: Int
     )
@@ -80,6 +82,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     data class UiState(
         val gpsChecked: Boolean,
+        val gpsCorrectedChecked: Boolean,
         val drChecked: Boolean,
         val gpsDrChecked: Boolean,
         val limitText: String,
@@ -90,9 +93,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val curveMode: MapCurveMode,
         val pointSelectionMode: MapPointSelectionMode,
         val displayedGpsCount: Int,
+        val displayedGpsCorrectedCount: Int,
         val displayedDrCount: Int,
         val displayedTotalCount: Int,
         val dbGpsCount: Int,
+        val dbGpsCorrectedCount: Int,
         val dbDrCount: Int,
         val dbTotalCount: Int,
         // Debug information for the map overlay.
@@ -108,6 +113,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         combine(
             sourceFlow,
             gpsEnabled,
+            gpsCorrectedEnabled,
             drEnabled,
             gpsDrEnabled,
             limitText,
@@ -118,12 +124,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             @Suppress("UNCHECKED_CAST")
             val samples = values[0] as List<LocationSample>
             val gps = values[1] as Boolean
-            val dr = values[2] as Boolean
-            val gpsDr = values[3] as Boolean
-            val limitStr = values[4] as String
-            val filter = values[5] as Filter?
-            val currentCurveMode = values[6] as MapCurveMode
-            val currentPointSelectionMode = values[7] as MapPointSelectionMode
+            val gpsCorrected = values[2] as Boolean
+            val dr = values[3] as Boolean
+            val gpsDr = values[4] as Boolean
+            val limitStr = values[5] as String
+            val filter = values[6] as Filter?
+            val currentCurveMode = values[7] as MapCurveMode
+            val currentPointSelectionMode = values[8] as MapPointSelectionMode
 
             val filterApplied = filter != null
 
@@ -132,6 +139,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val dbGpsCount = normalized.count { (_, kind) -> kind == ProviderKind.Gps }
+            val dbGpsCorrectedCount = normalized.count { (_, kind) -> kind == ProviderKind.GpsCorrected }
             val dbDrCount = normalized.count { (_, kind) -> kind == ProviderKind.DeadReckoning }
             val dbTotalCount = samples.size
 
@@ -145,11 +153,16 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 val filtered = normalized
                     .filter { (_, kind) ->
                         val isGps = kind == ProviderKind.Gps
+                        val isGpsCorrected = kind == ProviderKind.GpsCorrected
                         val isDr = kind == ProviderKind.DeadReckoning
                         when {
-                            filter.gps && !filter.dr -> isGps
-                            !filter.gps && filter.dr -> isDr
-                            filter.gps && filter.dr -> isGps || isDr
+                            filter.gps && !filter.gpsCorrected && !filter.dr -> isGps
+                            !filter.gps && filter.gpsCorrected && !filter.dr -> isGpsCorrected
+                            !filter.gps && !filter.gpsCorrected && filter.dr -> isDr
+                            filter.gps && filter.gpsCorrected && !filter.dr -> isGps || isGpsCorrected
+                            filter.gps && !filter.gpsCorrected && filter.dr -> isGps || isDr
+                            !filter.gps && filter.gpsCorrected && filter.dr -> isGpsCorrected || isDr
+                            filter.gps && filter.gpsCorrected && filter.dr -> isGps || isGpsCorrected || isDr
                             else -> false
                         }
                     }
@@ -194,6 +207,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             val displayedGpsCount = markers.count {
                 Formatters.providerKind(it.provider) == ProviderKind.Gps
+            }
+            val displayedGpsCorrectedCount = markers.count {
+                Formatters.providerKind(it.provider) == ProviderKind.GpsCorrected
             }
             val displayedDrCount = markers.count {
                 Formatters.providerKind(it.provider) == ProviderKind.DeadReckoning
@@ -258,6 +274,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             UiState(
                 gpsChecked = gps,
+                gpsCorrectedChecked = gpsCorrected,
                 drChecked = dr,
                 gpsDrChecked = gpsDr,
                 limitText = limitStr,
@@ -268,9 +285,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                  curveMode = currentCurveMode,
                  pointSelectionMode = currentPointSelectionMode,
                 displayedGpsCount = displayedGpsCount,
+                displayedGpsCorrectedCount = displayedGpsCorrectedCount,
                 displayedDrCount = displayedDrCount,
                 displayedTotalCount = displayedTotalCount,
                 dbGpsCount = dbGpsCount,
+                dbGpsCorrectedCount = dbGpsCorrectedCount,
                 dbDrCount = dbDrCount,
                 dbTotalCount = dbTotalCount,
                 debugIsStatic = debugIsStatic,
@@ -285,6 +304,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             SharingStarted.WhileSubscribed(5000),
             UiState(
                 gpsChecked = false,
+                gpsCorrectedChecked = false,
                 drChecked = false,
                 gpsDrChecked = false,
                 limitText = DEFAULT_LIMIT.toString(),
@@ -295,9 +315,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 curveMode = MapCurveMode.LINEAR,
                 pointSelectionMode = MapPointSelectionMode.TIME_PRIORITY,
                 displayedGpsCount = 0,
+                displayedGpsCorrectedCount = 0,
                 displayedDrCount = 0,
                 displayedTotalCount = 0,
                 dbGpsCount = 0,
+                dbGpsCorrectedCount = 0,
                 dbDrCount = 0,
                 dbTotalCount = 0,
                 debugIsStatic = false,
@@ -311,6 +333,10 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     fun onGpsCheckedChange(checked: Boolean) {
         gpsEnabled.value = checked
+    }
+
+    fun onGpsCorrectedCheckedChange(checked: Boolean) {
+        gpsCorrectedEnabled.value = checked
     }
 
     fun onDrCheckedChange(checked: Boolean) {
@@ -347,7 +373,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
-        if (!gpsEnabled.value && !drEnabled.value && !gpsDrEnabled.value) {
+        if (!gpsEnabled.value && !gpsCorrectedEnabled.value && !drEnabled.value && !gpsDrEnabled.value) {
             viewModelScope.launch {
                 eventsFlow.emit(Event.ShowToast("At least one checkbox must be selected."))
             }
@@ -367,6 +393,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         limitText.value = limit.toString()
         appliedFilter.value = Filter(
             gps = gpsEnabled.value,
+            gpsCorrected = gpsCorrectedEnabled.value,
             dr = drEnabled.value,
             limit = limit
         )

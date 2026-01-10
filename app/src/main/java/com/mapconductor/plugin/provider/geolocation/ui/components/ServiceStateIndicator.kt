@@ -29,70 +29,71 @@ object ServiceStateIndicator {
     suspend fun isRunning(context: Context, service: Class<*>): Boolean {
         val intent = Intent(context, service)
 
-        return withTimeout(600) {
-            suspendCancellableCoroutine { cont ->
-                var delivered = false
+        return runCatching {
+            withTimeout(2000) {
+                suspendCancellableCoroutine { cont ->
+                    var delivered = false
+                    var bound = false
 
-                val conn = object : ServiceConnection {
-                    override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                        delivered = true
+                    val conn = object : ServiceConnection {
+                        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                            delivered = true
 
-                        val running = when (binder) {
-                            is GeoLocationService.LocalBinder -> {
-                                try {
-                                    binder.getService().isLocationRunning()
-                                } catch (_: Throwable) {
-                                    // If something is wrong, still treat as "service exists"
+                            val running = when (binder) {
+                                is GeoLocationService.LocalBinder -> {
+                                    try {
+                                        binder.getService().isLocationRunning()
+                                    } catch (_: Throwable) {
+                                        true
+                                    }
+                                }
+                                else -> {
                                     true
                                 }
                             }
-                            else -> {
-                                // Unexpected binder type but service exists, treat as running
-                                true
+
+                            cont.resume(running)
+                            try {
+                                context.unbindService(this)
+                            } catch (_: Exception) {
                             }
                         }
 
-                        cont.resume(running)
-                        try {
-                            context.unbindService(this)
-                        } catch (_: Exception) {
+                        override fun onNullBinding(name: ComponentName?) {
+                            delivered = true
+                            cont.resume(true)
+                            try {
+                                context.unbindService(this)
+                            } catch (_: Exception) {
+                            }
+                        }
+
+                        override fun onServiceDisconnected(name: ComponentName?) {
+                            // Temporary disconnect; nothing to do here
                         }
                     }
 
-                    override fun onNullBinding(name: ComponentName?) {
-                        // Service instance exists; treat as running
-                        delivered = true
-                        cont.resume(true)
-                        try {
-                            context.unbindService(this)
-                        } catch (_: Exception) {
-                        }
-                    }
-
-                    override fun onServiceDisconnected(name: ComponentName?) {
-                        // Temporary disconnect; nothing to do here
-                    }
-                }
-
-                // flags = 0 -> do not auto-create; if service does not exist, this returns false
-                val ok = try {
-                    context.bindService(intent, conn, 0)
-                } catch (_: Exception) {
-                    false
-                }
-
-                if (!ok && !delivered) {
-                    cont.resume(false)
-                }
-
-                cont.invokeOnCancellation {
-                    try {
-                        context.unbindService(conn)
+                    // flags = 0 -> do not auto-create; if service does not exist, this returns false
+                    val ok = try {
+                        context.bindService(intent, conn, 0)
                     } catch (_: Exception) {
+                        false
+                    }
+                    bound = ok
+
+                    if (!ok && !delivered) {
+                        cont.resume(false)
+                    }
+
+                    cont.invokeOnCancellation {
+                        if (!bound) return@invokeOnCancellation
+                        try {
+                            context.unbindService(conn)
+                        } catch (_: Exception) {
+                        }
                     }
                 }
             }
-        }
+        }.getOrElse { false }
     }
 }
-

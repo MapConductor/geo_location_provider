@@ -228,4 +228,3 @@ private fun StringBuilder.appendXmlEscaped(value: String) {
         }
     }
 }
-

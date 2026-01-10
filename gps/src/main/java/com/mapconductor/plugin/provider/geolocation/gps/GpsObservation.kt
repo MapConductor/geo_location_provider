@@ -8,6 +8,7 @@ package com.mapconductor.plugin.provider.geolocation.gps
  */
 data class GpsObservation(
     val timestampMillis: Long,
+    val elapsedRealtimeNanos: Long?,
     val lat: Double,
     val lon: Double,
     val accuracyM: Float,

@@ -16,6 +16,7 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import kotlin.math.max
 
 /**
  * GPS engine backed by FusedLocationProviderClient and GnssStatus callbacks.
@@ -101,9 +102,13 @@ class FusedLocationGpsEngine(
         override fun onLocationResult(result: LocationResult) {
             val loc: Location = result.lastLocation ?: return
             val now = System.currentTimeMillis()
-            val gnss = lastGnss
+            val gnss = lastGnss?.takeIf { snap ->
+                val maxAgeMs = max(5_000L, intervalMs * 2L)
+                (now - snap.timestampMs) <= maxAgeMs
+            }
             val observation = GpsObservation(
-                timestampMillis = now,
+                timestampMillis = loc.time.takeIf { it > 0L } ?: now,
+                elapsedRealtimeNanos = runCatching { loc.elapsedRealtimeNanos }.getOrNull(),
                 lat = loc.latitude,
                 lon = loc.longitude,
                 accuracyM = loc.accuracy,

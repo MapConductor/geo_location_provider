@@ -1,10 +1,13 @@
 package com.mapconductor.plugin.provider.geolocation.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DropdownMenu
@@ -13,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -25,9 +29,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mapconductor.plugin.provider.geolocation.config.UploadOutputFormat
 import com.mapconductor.plugin.provider.geolocation.config.UploadSchedule
+import com.mapconductor.plugin.provider.geolocation.fusion.ImsUseCase
 
 private data class TimezoneOption(
     val zoneId: String,
+    val label: String
+)
+
+private data class UseCaseOption(
+    val value: ImsUseCase,
     val label: String
 )
 
@@ -59,9 +69,18 @@ private val TIMEZONE_OPTIONS: List<TimezoneOption> =
         TimezoneOption("Pacific/Midway", "-11H (Midway Islands etc...)")
     )
 
+private val USE_CASE_OPTIONS: List<UseCaseOption> =
+    listOf(
+        UseCaseOption(ImsUseCase.WALK, "Walk"),
+        UseCaseOption(ImsUseCase.BIKE, "Bike"),
+        UseCaseOption(ImsUseCase.CAR, "Car"),
+        UseCaseOption(ImsUseCase.TRAIN, "Train")
+    )
+
 @Composable
 fun UploadSettingsScreen(
     vm: UploadSettingsViewModel = viewModel(),
+    imsVm: ImsEkfSettingsViewModel = viewModel(),
     onBack: () -> Unit = {}
 ) {
     val uploadEnabled by vm.uploadEnabled.collectAsState()
@@ -71,8 +90,16 @@ fun UploadSettingsScreen(
     val outputFormat by vm.outputFormat.collectAsState()
     val status by vm.status.collectAsState()
 
+    val imsConfig by imsVm.config.collectAsState()
+
     val intervalText = remember(intervalSec) { mutableStateOf(intervalSec.toString()) }
     val formatState = remember(outputFormat) { mutableStateOf(outputFormat) }
+    val allowedLatencyMsText =
+        remember(imsConfig.allowedLatencyMs) { mutableStateOf(imsConfig.allowedLatencyMs.toString()) }
+    val gpsIntervalOverrideMsText =
+        remember(imsConfig.gpsIntervalMsOverride) {
+            mutableStateOf(imsConfig.gpsIntervalMsOverride?.toString().orEmpty())
+        }
 
     val timezoneExpanded = remember { mutableStateOf(false) }
     val selectedTimezone: TimezoneOption? =
@@ -80,10 +107,16 @@ fun UploadSettingsScreen(
     val timezoneLabel =
         selectedTimezone?.label ?: zoneId
 
+    val useCaseExpanded = remember { mutableStateOf(false) }
+    val useCaseLabel =
+        USE_CASE_OPTIONS.firstOrNull { it.value == imsConfig.useCase }?.label ?: imsConfig.useCase.name
+
     Column(
         modifier = Modifier
+            .fillMaxSize()
             .padding(16.dp)
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
             // Upload on/off
@@ -246,5 +279,88 @@ fun UploadSettingsScreen(
                 text = "When interval is 0 or equals the sampling interval, uploads are triggered on every new sample.",
                 style = MaterialTheme.typography.bodySmall
             )
+
+            Text("GPS correction (EKF)", style = MaterialTheme.typography.titleMedium)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Enabled")
+                Switch(
+                    checked = imsConfig.enabled,
+                    onCheckedChange = { imsVm.setEnabled(it) }
+                )
+            }
+
+            Text("Use case", style = MaterialTheme.typography.titleMedium)
+            Box(modifier = Modifier.fillMaxWidth()) {
+                val enabled = imsConfig.enabled
+                val alpha = if (enabled) 1f else 0.5f
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(alpha)
+                        .clickable(enabled = enabled) {
+                            if (enabled) {
+                                useCaseExpanded.value = true
+                            }
+                        }
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = useCaseLabel)
+                    Text(text = "v")
+                }
+
+                DropdownMenu(
+                    expanded = useCaseExpanded.value,
+                    onDismissRequest = { useCaseExpanded.value = false }
+                ) {
+                    USE_CASE_OPTIONS.forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt.label) },
+                            onClick = {
+                                useCaseExpanded.value = false
+                                imsVm.setUseCase(opt.value)
+                            }
+                        )
+                    }
+                }
+            }
+
+            Text("Allowed latency (ms)", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = imsConfig.enabled,
+                value = allowedLatencyMsText.value,
+                onValueChange = { raw ->
+                    allowedLatencyMsText.value = raw.filter { it.isDigit() }.take(8)
+                    val ms = allowedLatencyMsText.value.toLongOrNull() ?: 0L
+                    imsVm.setAllowedLatencyMs(ms)
+                },
+                label = { Text("0 = no extra smoothing") }
+            )
+
+            Text("GPS interval override (ms)", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                modifier = Modifier.fillMaxWidth(),
+                enabled = imsConfig.enabled,
+                value = gpsIntervalOverrideMsText.value,
+                onValueChange = { raw ->
+                    gpsIntervalOverrideMsText.value = raw.filter { it.isDigit() }.take(8)
+                    val overrideMs =
+                        gpsIntervalOverrideMsText.value.toLongOrNull()?.takeIf { it > 0L }
+                    imsVm.setGpsIntervalOverrideMs(overrideMs)
+                },
+                label = { Text("Blank = use sampling interval") }
+            )
+
+            Text(
+                text = "When enabled, corrected samples are saved as provider=gps_corrected and can be shown on the Map screen.",
+                style = MaterialTheme.typography.bodySmall
+            )
+
+            OutlinedButton(onClick = onBack) { Text("Back") }
         }
     }

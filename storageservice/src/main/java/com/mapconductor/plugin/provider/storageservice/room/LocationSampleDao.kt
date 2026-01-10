@@ -29,7 +29,11 @@ internal interface LocationSampleDao {
         SELECT * FROM location_samples
         ORDER BY
           timeMillis DESC,
-          CASE WHEN provider = 'gps' THEN 0 ELSE 1 END,
+          CASE
+            WHEN provider = 'gps' THEN 0
+            WHEN provider = 'gps_corrected' THEN 1
+            ELSE 2
+          END,
           id DESC
         LIMIT :limit
         """

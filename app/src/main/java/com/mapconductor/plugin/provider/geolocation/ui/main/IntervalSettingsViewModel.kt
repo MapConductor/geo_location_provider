@@ -171,7 +171,7 @@ class IntervalSettingsViewModel(
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
             action = GeoLocationService.ACTION_START
         }
-        appContext.startService(intent)
+        ContextCompat.startForegroundService(appContext, intent)
     }
 
     private fun applyDrIntervalToService(sec: Int) {

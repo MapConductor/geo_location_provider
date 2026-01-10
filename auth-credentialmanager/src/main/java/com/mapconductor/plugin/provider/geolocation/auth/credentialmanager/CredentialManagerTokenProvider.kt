@@ -3,13 +3,12 @@ package com.mapconductor.plugin.provider.geolocation.auth.credentialmanager
 import android.content.Context
 import android.util.Log
 import androidx.credentials.CredentialManager
+import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -45,7 +44,6 @@ import kotlinx.coroutines.withContext
  *   If user interaction is required, this method returns null and the app should run
  *   an AuthorizationClient flow with resolution on its own.
  */
-@Suppress("DEPRECATION")
 class CredentialManagerTokenProvider(
     private val context: Context,
     private val serverClientId: String,
@@ -60,21 +58,6 @@ class CredentialManagerTokenProvider(
     }
 
     private val credentialManager: CredentialManager = CredentialManager.create(context)
-
-    /**
-     * GoogleSignInOptions is used only to create a client for signOut.
-     * Access tokens themselves are obtained from AuthorizationClient instead.
-     */
-    @Suppress("DEPRECATION")
-    private val googleSignInOptions: GoogleSignInOptions =
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).apply {
-            requestEmail()
-
-            val scopeObjects = scopes.map { Scope(it) }
-            if (scopeObjects.isNotEmpty()) {
-                requestScopes(scopeObjects.first(), *scopeObjects.drop(1).toTypedArray())
-            }
-        }.build()
 
     /**
      * Starts a sign in flow using Credential Manager and returns a GoogleIdTokenCredential
@@ -183,18 +166,14 @@ class CredentialManagerTokenProvider(
     /**
      * Signs the user out.
      *
-     * This method only calls GoogleSignInClient.signOut for simplicity.
-     * If you need deeper cleanup you can also use CredentialManager.clearCredentialState
-     * from the app layer.
+     * This implementation clears Credential Manager state so that a subsequent sign-in
+     * requires user selection again.
      */
-    @Suppress("DEPRECATION")
     suspend fun signOut() = withContext(Dispatchers.IO) {
         try {
-            val client = GoogleSignIn.getClient(context, googleSignInOptions)
-            client.signOut().await()
+            credentialManager.clearCredentialState(ClearCredentialStateRequest())
         } catch (e: Exception) {
             Log.w(TAG, "Sign-out failed", e)
         }
     }
 }
-

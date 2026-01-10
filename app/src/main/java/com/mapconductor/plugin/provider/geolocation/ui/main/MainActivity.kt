@@ -211,7 +211,7 @@ private fun AppTopBar(
                 ROUTE_PICKUP -> "Pickup"
                 ROUTE_MAP -> "Map"
                 ROUTE_DRIVE_SETTINGS -> "Google Drive Settings"
-                ROUTE_UPLOAD_SETTINGS -> "Upload settings"
+                ROUTE_UPLOAD_SETTINGS -> "Settings"
                 else -> "GeoLocation"
             }
             Text(title)
@@ -234,7 +234,7 @@ private fun AppTopBar(
 
                 TextButton(onClick = onOpenDriveSettings) { Text("Drive") }
 
-                TextButton(onClick = onOpenUploadSettings) { Text("Upload") }
+                TextButton(onClick = onOpenUploadSettings) { Text("Settings") }
 
                 ServiceToggleAction()
             }

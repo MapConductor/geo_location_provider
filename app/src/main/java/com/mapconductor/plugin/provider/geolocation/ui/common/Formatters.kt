@@ -44,6 +44,7 @@ import kotlin.math.roundToInt
  */
 enum class ProviderKind {
     Gps,
+    GpsCorrected,
     DeadReckoning,
     Network,
     Other
@@ -69,6 +70,8 @@ object Formatters {
     fun providerKind(raw: String?): ProviderKind {
         val v = raw?.trim()?.lowercase(Locale.ROOT) ?: return ProviderKind.Other
         return when {
+            v == "gps_corrected" || v.contains("gps_corrected") || v.contains("corrected") || v.contains("ekf") ->
+                ProviderKind.GpsCorrected
             v.contains("dead") || v == "dr" -> ProviderKind.DeadReckoning
             v == "gps" || v == "fused" || v.contains("gnss") || v.contains("satellite") ->
                 ProviderKind.Gps
@@ -88,6 +91,7 @@ object Formatters {
         when (providerKind(raw)) {
             ProviderKind.DeadReckoning -> "DeadReckoning"
             ProviderKind.Gps -> "GPS"
+            ProviderKind.GpsCorrected -> "GPS(corrected)"
             ProviderKind.Network -> "Network"
             ProviderKind.Other -> raw?.takeIf { it.isNotBlank() } ?: "-"
         }
@@ -311,4 +315,3 @@ object Formatters {
         )
     }
 }
-

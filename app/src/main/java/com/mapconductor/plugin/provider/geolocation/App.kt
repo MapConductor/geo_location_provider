@@ -4,6 +4,7 @@ import android.app.Application
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
 import com.mapconductor.plugin.provider.geolocation.auth.AppAuthAuth
 import com.mapconductor.plugin.provider.geolocation.drive.auth.DriveTokenProviderRegistry
+import com.mapconductor.plugin.provider.geolocation.fusion.ImsEkf
 import com.mapconductor.plugin.provider.geolocation.prefs.DrivePrefsRepository
 import com.mapconductor.plugin.provider.geolocation.work.MidnightExportScheduler
 import com.mapconductor.plugin.provider.geolocation.work.RealtimeUploadManager
@@ -24,6 +25,8 @@ class App : Application() {
         DriveTokenProviderRegistry.registerBackgroundProvider(
             CredentialManagerAuth.get(this)
         )
+
+        ImsEkf.install(this)
 
         // Adjust background provider based on stored auth method.
         appScope.launch {

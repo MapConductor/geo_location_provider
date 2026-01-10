@@ -186,26 +186,21 @@ class MidnightExportWorker(
             )
 
               // Generate local export as ZIP (GeoJSON or GPX).
-              val exported: Uri? = when (outputFormat) {
-                  UploadOutputFormat.GEOJSON -> GeoJsonExporter.exportToDownloads(
-                      context = applicationContext,
-                      records = records,
-                      baseName = baseName,
-                      compressAsZip = true
-                  )
-                  UploadOutputFormat.GPX -> GpxExporter.exportToDownloads(
-                      context = applicationContext,
-                      records = records,
-                      baseName = baseName,
-                      compressAsZip = true
-                  )
-                  else -> GeoJsonExporter.exportToDownloads(
-                      context = applicationContext,
-                      records = records,
-                      baseName = baseName,
-                      compressAsZip = true
-                  )
-              }
+              val exported: Uri? =
+                  when (outputFormat) {
+                      UploadOutputFormat.GEOJSON -> GeoJsonExporter.exportToDownloads(
+                          context = applicationContext,
+                          records = records,
+                          baseName = baseName,
+                          compressAsZip = true
+                      )
+                      UploadOutputFormat.GPX -> GpxExporter.exportToDownloads(
+                          context = applicationContext,
+                          records = records,
+                          baseName = baseName,
+                          compressAsZip = true
+                      )
+                  }
 
             // Mark local export as succeeded (even for empty day).
             StorageService.markExportedLocal(applicationContext, epochDay)
