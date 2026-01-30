@@ -2,6 +2,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.settings
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.auth.CredentialManagerAuth
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -303,50 +305,36 @@ class DriveSettingsViewModel(app: Application) : AndroidViewModel(app) {
             val now = System.currentTimeMillis()
             val name = "drive-sample-$now.txt"
             val text = "Hello from GeoLocationProvider @ $now\n"
-            val uri = createSampleTextInDownloads(getApplication(), name, text)
+            val sampleFile = createSampleTextInCache(getApplication(), name, text)
                 ?: run {
                     _status.value = "Failed to create sample file"
                     return@launch
                 }
+            val uri = Uri.fromFile(sampleFile)
 
-            when (val r = uploader.upload(uri, parentId, name)) {
-                is UploadResult.Success ->
-                    _status.value = "Upload OK: ${r.name}\n${r.webViewLink}"
-                is UploadResult.Failure ->
-                    _status.value = "Upload NG: ${r.code} ${r.message ?: ""}\n${r.body.take(300)}"
+            try {
+                when (val r = uploader.upload(uri, parentId, name)) {
+                    is UploadResult.Success ->
+                        _status.value = "Upload OK: ${r.name}\n${r.webViewLink}"
+                    is UploadResult.Failure ->
+                        _status.value = "Upload NG: ${r.code} ${r.message ?: ""}\n${r.body.take(300)}"
+                }
+            } finally {
+                runCatching { sampleFile.delete() }
             }
         }
     }
 
-    private fun createSampleTextInDownloads(
+    private fun createSampleTextInCache(
         ctx: Context,
-        displayName: String,
+        fileName: String,
         content: String
-    ): android.net.Uri? {
-        val values = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, displayName)
-            put(android.provider.MediaStore.Downloads.MIME_TYPE, "text/plain")
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
-            }
-        }
-        val uri = ctx.contentResolver.insert(
-            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-            values
-        ) ?: return null
-
-        ctx.contentResolver.openOutputStream(uri)?.use { os ->
-            os.write(content.toByteArray(Charsets.UTF_8))
-            os.flush()
-        } ?: return null
-
-        if (android.os.Build.VERSION.SDK_INT >= 29) {
-            values.clear()
-            values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
-            ctx.contentResolver.update(uri, values, null, null)
-        }
-        return uri
-    }
+    ): File? =
+        runCatching {
+            val file = File(ctx.cacheDir, fileName)
+            file.writeText(content, Charsets.UTF_8)
+            file
+        }.getOrNull()
 
     fun runBacklogNow() {
         viewModelScope.launch(Dispatchers.IO) {

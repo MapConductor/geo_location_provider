@@ -24,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -101,8 +102,9 @@ class MainActivity : ComponentActivity() {
                         composable(ROUTE_HOME) {
                             Surface {
                                 val vm: GeoLocationProviderViewModel = viewModel()
+                                val state by vm.uiState.collectAsStateWithLifecycle()
                                 GeoLocationProviderScreen(
-                                    state = vm.uiState.value,
+                                    state = state,
                                     onButtonClick = { vm.onGeoLocationProviderClicked() }
                                 )
                             }

@@ -11,7 +11,6 @@
 /captures
 .externalNativeBuild
 .cxx
-local.default.properties
 local.properties
 secrets.properties
 GeoLocationProvider.zip
@@ -19,6 +18,7 @@ GeoLocationProvider.zip
 /.idea/
 /.kotlin/
 /secrets.properties
+/secret.properties
 mapbox_access_token.xml
 /herecredentials.properties
 build/

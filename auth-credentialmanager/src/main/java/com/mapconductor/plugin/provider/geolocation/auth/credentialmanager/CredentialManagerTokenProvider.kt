@@ -1,12 +1,17 @@
 package com.mapconductor.plugin.provider.geolocation.auth.credentialmanager
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.Scope
@@ -59,6 +64,25 @@ class CredentialManagerTokenProvider(
 
     private val credentialManager: CredentialManager = CredentialManager.create(context)
 
+    @Volatile
+    private var lastSignInErrorSummary: String? = null
+
+    fun lastSignInError(): String? = lastSignInErrorSummary
+
+    private fun setLastSignInError(message: String) {
+        lastSignInErrorSummary = message
+        Log.w(TAG, message)
+    }
+
+    private fun findActivityOrNull(ctx: Context): Activity? {
+        var current: Context? = ctx
+        while (current is ContextWrapper) {
+            if (current is Activity) return current
+            current = current.baseContext
+        }
+        return if (current is Activity) current else null
+    }
+
     /**
      * Starts a sign in flow using Credential Manager and returns a GoogleIdTokenCredential
      * when successful.
@@ -71,38 +95,68 @@ class CredentialManagerTokenProvider(
      */
     suspend fun signIn(activityContext: Context = context): GoogleIdTokenCredential? =
         withContext(Dispatchers.IO) {
+            lastSignInErrorSummary = null
+
+            if (serverClientId.isBlank() || serverClientId.startsWith("YOUR_")) {
+                setLastSignInError("Credential Manager sign-in blocked: serverClientId is not set.")
+                return@withContext null
+            }
+
+            val activity = findActivityOrNull(activityContext)
+            if (activity == null) {
+                setLastSignInError("Credential Manager sign-in failed: Activity context is required.")
+                return@withContext null
+            }
+
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(serverClientId)
+                .build()
+
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
+
             try {
-                val googleIdOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(serverClientId)
-                    .build()
-
-                val request = GetCredentialRequest.Builder()
-                    .addCredentialOption(googleIdOption)
-                    .build()
-
-                val result: GetCredentialResponse = credentialManager.getCredential(
-                    context = activityContext,
-                    request = request
-                )
+                val result: GetCredentialResponse = withContext(Dispatchers.Main) {
+                    credentialManager.getCredential(
+                        context = activity,
+                        request = request
+                    )
+                }
 
                 when (val credential = result.credential) {
                     is CustomCredential -> {
                         if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                             GoogleIdTokenCredential.createFrom(credential.data)
                         } else {
-                            Log.w(TAG, "Unexpected credential type: ${credential.type}")
+                            setLastSignInError("Credential Manager sign-in failed: unexpected credential type.")
                             null
                         }
                     }
 
                     else -> {
-                        Log.w(TAG, "Unexpected credential class: ${result.credential}")
+                        setLastSignInError("Credential Manager sign-in failed: unexpected credential class.")
                         null
                     }
                 }
+            } catch (e: GetCredentialCancellationException) {
+                setLastSignInError("Credential Manager sign-in canceled.")
+                null
+            } catch (e: NoCredentialException) {
+                setLastSignInError("Credential Manager sign-in failed: no eligible credentials.")
+                null
+            } catch (e: GetCredentialException) {
+                Log.w(TAG, "Sign-in failed (GetCredentialException)", e)
+                setLastSignInError(
+                    "Credential Manager sign-in failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}"
+                )
+                null
             } catch (e: Exception) {
                 Log.w(TAG, "Sign-in failed", e)
+                setLastSignInError(
+                    "Credential Manager sign-in failed: ${e.javaClass.simpleName}: ${e.message ?: "no message"}"
+                )
                 null
             }
         }

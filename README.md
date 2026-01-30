@@ -332,7 +332,7 @@ paths:
     client ID (`CREDENTIAL_MANAGER_SERVER_CLIENT_ID`).
   - Good default for background workers and the sample app.
 - **AppAuth** (`:auth-appauth`):
-  - Uses AppAuth for Android with an “installed app” client ID
+  - Uses AppAuth for Android with an "installed app" client ID
     (`APPAUTH_CLIENT_ID`) and a custom scheme redirect
     `com.mapconductor.plugin.provider.geolocation:/oauth2redirect`.
 

@@ -21,6 +21,7 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appAuthRedirectScheme"] =
             "com.mapconductor.plugin.provider.geolocation"
+        manifestPlaceholders.putIfAbsent("GOOGLE_MAPS_API_KEY", "YOUR_GOOGLE_MAPS_API_KEY")
     }
 
     buildTypes {

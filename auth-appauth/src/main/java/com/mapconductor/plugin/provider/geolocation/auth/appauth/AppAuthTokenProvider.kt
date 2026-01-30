@@ -83,11 +83,13 @@ class AppAuthTokenProvider(
     private var authState: AuthState
         get() {
             val json = prefs.getString(KEY_AUTH_STATE, null)
-            return if (json != null) {
-                AuthState.jsonDeserialize(json)
-            } else {
-                AuthState(serviceConfig)
-            }
+            if (json.isNullOrBlank()) return AuthState(serviceConfig)
+            return runCatching { AuthState.jsonDeserialize(json) }
+                .getOrElse { t ->
+                    Log.w(TAG, "Failed to deserialize AuthState; resetting", t)
+                    prefs.edit().remove(KEY_AUTH_STATE).apply()
+                    AuthState(serviceConfig)
+                }
         }
         set(value) {
             prefs.edit().putString(KEY_AUTH_STATE, value.jsonSerializeString()).apply()

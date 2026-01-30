@@ -47,7 +47,8 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:scheme="com.mapconductor.plugin.provider.geolocation"
-                    android:path="/oauth2redirect" />
+                    android:path="/oauth2redirect"
+                    tools:ignore="AppLinkUrlError" />
             </intent-filter>
         </activity>
 
@@ -59,4 +60,3 @@
     </application>
 
 </manifest>
-

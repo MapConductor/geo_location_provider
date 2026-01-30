@@ -1,6 +1,8 @@
 package com.mapconductor.plugin.provider.geolocation.gps
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationManager
@@ -113,12 +115,8 @@ class FusedLocationGpsEngine(
                 lon = loc.longitude,
                 accuracyM = loc.accuracy,
                 speedMps = loc.speed,
-                bearingDeg = loc.bearing.takeIf { !it.isNaN() },
-                hasBearing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    loc.hasBearing()
-                } else {
-                    !loc.bearing.isNaN()
-                },
+                bearingDeg = loc.bearing.takeIf { loc.hasBearing() && !it.isNaN() },
+                hasBearing = loc.hasBearing(),
                 gnssUsed = gnss?.used,
                 gnssTotal = gnss?.total,
                 cn0Mean = gnss?.cn0Mean?.toDouble()
@@ -132,7 +130,11 @@ class FusedLocationGpsEngine(
     }
 
     override fun start() {
-        if (isStarted) return
+        if (isStarted) {
+            registerGnssStatus()
+            requestLocationUpdates()
+            return
+        }
         isStarted = true
         registerGnssStatus()
         requestLocationUpdates()
@@ -162,6 +164,18 @@ class FusedLocationGpsEngine(
         } catch (t: Throwable) {
             Log.w(TAG, "removeLocationUpdates (restart)", t)
         }
+
+        val hasFine =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        val hasCoarse =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (!hasFine && !hasCoarse) {
+            Log.w(TAG, "requestLocationUpdates: missing location permission")
+            return
+        }
+
         val req = LocationRequest.Builder(intervalMs)
             .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
             .setMinUpdateIntervalMillis(intervalMs)
@@ -171,6 +185,8 @@ class FusedLocationGpsEngine(
         try {
             fusedClient.requestLocationUpdates(req, locationCallback, looper)
             Log.d(TAG, "requestLocationUpdates() issued")
+        } catch (se: SecurityException) {
+            Log.w(TAG, "requestLocationUpdates: permission rejected", se)
         } catch (t: Throwable) {
             Log.e(TAG, "requestLocationUpdates() failed", t)
         }
@@ -178,12 +194,27 @@ class FusedLocationGpsEngine(
 
     private fun registerGnssStatus() {
         val mgr = locationManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val executor = ContextCompat.getMainExecutor(context)
-            mgr.registerGnssStatusCallback(executor, gnssCallback)
-        } else {
-            @Suppress("DEPRECATION")
-            mgr.registerGnssStatusCallback(gnssCallback, Handler(looper))
+        unregisterGnssStatus()
+
+        val hasFine =
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (!hasFine) {
+            Log.w(TAG, "registerGnssStatus: missing ACCESS_FINE_LOCATION")
+            return
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val executor = ContextCompat.getMainExecutor(context)
+                mgr.registerGnssStatusCallback(executor, gnssCallback)
+            } else {
+                @Suppress("DEPRECATION")
+                mgr.registerGnssStatusCallback(gnssCallback, Handler(looper))
+            }
+        } catch (se: SecurityException) {
+            Log.w(TAG, "registerGnssStatus: permission rejected", se)
+        } catch (t: Throwable) {
+            Log.e(TAG, "registerGnssStatus failed", t)
         }
     }
 

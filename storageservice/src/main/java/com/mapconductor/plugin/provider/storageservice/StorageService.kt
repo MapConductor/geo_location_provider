@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.storageservice
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import com.mapconductor.plugin.provider.storageservice.room.AppDatabase
 import com.mapconductor.plugin.provider.storageservice.room.ExportedDay
@@ -26,6 +27,9 @@ import kotlinx.coroutines.withContext
  * instead of relying on DAO implementation details.
  */
 object StorageService {
+
+    private fun isDebuggable(ctx: Context): Boolean =
+        (ctx.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     // ------------------------------------------------------------------------
     // LocationSample API
@@ -97,18 +101,22 @@ object StorageService {
     suspend fun insertLocation(ctx: Context, sample: LocationSample): Long =
         withContext(Dispatchers.IO) {
             val dao = AppDatabase.get(ctx).locationSampleDao()
-            val before = dao.countAll()
-            Log.d(
-                "DB/TRACE",
-                "count-before=$before provider=${sample.provider} t=${sample.timeMillis}"
-            )
+            if (isDebuggable(ctx)) {
+                val before = dao.countAll()
+                Log.d(
+                    "DB/TRACE",
+                    "count-before=$before provider=${sample.provider} t=${sample.timeMillis}"
+                )
 
-            val rowId = dao.insert(sample)
+                val rowId = dao.insert(sample)
 
-            val after = dao.countAll()
-            Log.d("DB/TRACE", "count-after=$after rowId=$rowId")
+                val after = dao.countAll()
+                Log.d("DB/TRACE", "count-after=$after rowId=$rowId")
 
-            rowId
+                rowId
+            } else {
+                dao.insert(sample)
+            }
         }
 
     /**

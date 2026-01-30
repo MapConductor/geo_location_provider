@@ -1,5 +1,8 @@
 package com.mapconductor.plugin.provider.geolocation.ui.map
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,8 +43,10 @@ import com.mapconductor.core.map.MapCameraPositionImpl
 import com.mapconductor.core.polyline.Polyline
 import com.mapconductor.googlemaps.GoogleMapsView
 import com.mapconductor.googlemaps.rememberGoogleMapViewState
+import com.mapconductor.plugin.provider.geolocation.BuildConfig
 import com.mapconductor.plugin.provider.geolocation.ui.common.Formatters
 import com.mapconductor.plugin.provider.geolocation.ui.common.ProviderKind
+import java.security.MessageDigest
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.log2
@@ -61,6 +66,18 @@ fun MapScreen() {
     val state by vm.uiState.collectAsState()
     val session by vm.mapSessionState.collectAsState()
     val context = LocalContext.current
+    val isMapsApiKeyConfigured = remember(context) { isGoogleMapsApiKeyConfigured(context) }
+    val signingCertSha1 = remember(context) { getSigningCertSha1(context) }
+
+    LaunchedEffect(isMapsApiKeyConfigured) {
+        if (!isMapsApiKeyConfigured) {
+            Toast.makeText(
+                context,
+                "Google Maps API key is not configured. See README.md.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     LaunchedEffect(Unit) {
         vm.events.collect { event ->
@@ -328,6 +345,29 @@ fun MapScreen() {
                     }
                 }
 
+                if (!isMapsApiKeyConfigured) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(16.dp)
+                            .background(Color(0xCC000000))
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = "Google Maps API key is not configured.",
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Create secrets.properties in the project root and set GOOGLE_MAPS_API_KEY. If you have secret.properties, rename it to secrets.properties.",
+                            color = Color.White
+                        )
+                        Text(
+                            text = "See README.md for details.",
+                            color = Color.White
+                        )
+                    }
+                }
+
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -381,6 +421,49 @@ fun MapScreen() {
             }
         }
     }
+}
+
+private fun isGoogleMapsApiKeyConfigured(context: android.content.Context): Boolean {
+    val key = runCatching {
+        val ai = context.packageManager.getApplicationInfo(
+            context.packageName,
+            PackageManager.GET_META_DATA
+        )
+        ai.metaData?.getString("com.google.android.geo.API_KEY")
+    }.getOrNull().orEmpty().trim()
+
+    if (key.isBlank()) return false
+    if (key == "YOUR_GOOGLE_MAPS_API_KEY") return false
+    if (key.contains("GOOGLE_MAPS_API_KEY")) return false
+    if (key.contains("\${")) return false
+    return true
+}
+
+private fun getSigningCertSha1(context: Context): String? {
+    return runCatching {
+        val pm = context.packageManager
+        val pkg = context.packageName
+
+        val packageInfo =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pm.getPackageInfo(pkg, PackageManager.GET_SIGNING_CERTIFICATES)
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(pkg, PackageManager.GET_SIGNATURES)
+            }
+
+        val signatures =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.signatures
+            }
+
+        val signatureBytes = signatures?.firstOrNull()?.toByteArray() ?: return null
+        val digest = MessageDigest.getInstance("SHA1").digest(signatureBytes)
+        digest.joinToString(separator = ":") { b -> "%02X".format(b) }
+    }.getOrNull()
 }
 
 @Composable

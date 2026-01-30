@@ -152,7 +152,7 @@ fun DriveSettingsScreen(
                                     // can treat Drive as configured.
                                     vm.markCredentialManagerSignedIn()
                                 } else {
-                                    vm.setStatus("CM sign-in canceled or failed.")
+                                    vm.setStatus(provider.lastSignInError() ?: "CM sign-in canceled or failed.")
                                 }
                             }
                         } else {
