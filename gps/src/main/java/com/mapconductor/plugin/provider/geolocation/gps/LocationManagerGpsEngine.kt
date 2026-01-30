@@ -5,38 +5,30 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.GnssStatus
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationCallback
-import com.google.android.gms.location.LocationRequest
-import com.google.android.gms.location.LocationResult
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
 import kotlin.math.max
 
 /**
- * GPS engine backed by FusedLocationProviderClient and GnssStatus callbacks.
+ * GPS engine backed by the platform LocationManager.
  *
- * It converts platform callbacks into [GpsObservation]s and delivers them
- * to a listener on the calling thread.
+ * This is intended for environments where Google Play services are not present.
  */
-class FusedLocationGpsEngine(
+class LocationManagerGpsEngine(
     private val context: Context,
     private val looper: Looper
 ) : GpsLocationEngine {
 
     companion object {
-        private const val TAG = "FusedLocationGpsEngine"
+        private const val TAG = "LocationManagerGpsEngine"
     }
-
-    private val fusedClient: FusedLocationProviderClient =
-        LocationServices.getFusedLocationProviderClient(context)
 
     private val locationManager: LocationManager? = context.getSystemService()
 
@@ -48,6 +40,8 @@ class FusedLocationGpsEngine(
 
     @Volatile
     private var intervalMs: Long = 30_000L
+
+    private val activeProviders: MutableSet<String> = LinkedHashSet()
 
     private val gnssCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -100,29 +94,17 @@ class FusedLocationGpsEngine(
     @Volatile
     private var lastGnss: GnssSnapshot? = null
 
-    private val locationCallback = object : LocationCallback() {
-        override fun onLocationResult(result: LocationResult) {
-            val loc: Location = result.lastLocation ?: return
-            val now = System.currentTimeMillis()
-            val gnss = lastGnss?.takeIf { snap ->
-                val maxAgeMs = max(5_000L, intervalMs * 2L)
-                (now - snap.timestampMs) <= maxAgeMs
-            }
-            val observation = GpsObservation(
-                timestampMillis = loc.time.takeIf { it > 0L } ?: now,
-                elapsedRealtimeNanos = runCatching { loc.elapsedRealtimeNanos }.getOrNull(),
-                lat = loc.latitude,
-                lon = loc.longitude,
-                accuracyM = loc.accuracy,
-                speedMps = loc.speed,
-                bearingDeg = loc.bearing.takeIf { loc.hasBearing() && !it.isNaN() },
-                hasBearing = loc.hasBearing(),
-                gnssUsed = gnss?.used,
-                gnssTotal = gnss?.total,
-                cn0Mean = gnss?.cn0Mean?.toDouble()
-            )
-            listener?.onGpsObservation(observation)
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            handleLocation(location)
         }
+
+        @Deprecated("Deprecated in Java")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
+
+        override fun onProviderEnabled(provider: String) = Unit
+
+        override fun onProviderDisabled(provider: String) = Unit
     }
 
     override fun setListener(listener: GpsLocationEngine.Listener?) {
@@ -143,12 +125,8 @@ class FusedLocationGpsEngine(
     override fun stop() {
         if (!isStarted) return
         isStarted = false
-        try {
-            fusedClient.removeLocationUpdates(locationCallback)
-        } catch (t: Throwable) {
-            Log.w(TAG, "removeLocationUpdates", t)
-        }
         unregisterGnssStatus()
+        stopLocationUpdates()
     }
 
     override fun updateInterval(intervalMs: Long) {
@@ -158,12 +136,35 @@ class FusedLocationGpsEngine(
         }
     }
 
-    private fun requestLocationUpdates() {
-        try {
-            fusedClient.removeLocationUpdates(locationCallback)
-        } catch (t: Throwable) {
-            Log.w(TAG, "removeLocationUpdates (restart)", t)
+    private fun handleLocation(loc: Location) {
+        val now = System.currentTimeMillis()
+        val gnss = lastGnss?.takeIf { snap ->
+            val maxAgeMs = max(5_000L, intervalMs * 2L)
+            (now - snap.timestampMs) <= maxAgeMs
         }
+        val observation = GpsObservation(
+            timestampMillis = loc.time.takeIf { it > 0L } ?: now,
+            elapsedRealtimeNanos = runCatching { loc.elapsedRealtimeNanos }.getOrNull(),
+            lat = loc.latitude,
+            lon = loc.longitude,
+            accuracyM = loc.accuracy,
+            speedMps = loc.speed,
+            bearingDeg = loc.bearing.takeIf { loc.hasBearing() && !it.isNaN() },
+            hasBearing = loc.hasBearing(),
+            gnssUsed = gnss?.used,
+            gnssTotal = gnss?.total,
+            cn0Mean = gnss?.cn0Mean?.toDouble()
+        )
+        listener?.onGpsObservation(observation)
+    }
+
+    private fun requestLocationUpdates() {
+        val mgr = locationManager
+        if (mgr == null) {
+            Log.w(TAG, "requestLocationUpdates: LocationManager unavailable")
+            return
+        }
+        stopLocationUpdates()
 
         val hasFine =
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
@@ -176,19 +177,49 @@ class FusedLocationGpsEngine(
             return
         }
 
-        val req = LocationRequest.Builder(intervalMs)
-            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-            .setMinUpdateIntervalMillis(intervalMs)
-            .setMinUpdateDistanceMeters(0f)
-            .setWaitForAccurateLocation(false)
-            .build()
+        val candidates: List<String> = buildList {
+            if (hasFine) add(LocationManager.GPS_PROVIDER)
+            if (hasCoarse || hasFine) add(LocationManager.NETWORK_PROVIDER)
+        }
+
+        val chosen: List<String> = candidates.filter { provider ->
+            runCatching { mgr.isProviderEnabled(provider) }.getOrDefault(false)
+        }.ifEmpty { candidates.take(1) }
+
+        if (chosen.isEmpty()) {
+            Log.w(TAG, "requestLocationUpdates: no providers available")
+            return
+        }
+
+        for (provider in chosen) {
+            try {
+                @Suppress("MissingPermission")
+                mgr.requestLocationUpdates(
+                    provider,
+                    intervalMs,
+                    0f,
+                    locationListener,
+                    looper
+                )
+                activeProviders.add(provider)
+                Log.d(TAG, "requestLocationUpdates: provider=$provider intervalMs=$intervalMs")
+            } catch (se: SecurityException) {
+                Log.w(TAG, "requestLocationUpdates: permission rejected provider=$provider", se)
+            } catch (t: Throwable) {
+                Log.e(TAG, "requestLocationUpdates failed provider=$provider", t)
+            }
+        }
+    }
+
+    private fun stopLocationUpdates() {
+        val mgr = locationManager ?: return
+        if (activeProviders.isEmpty()) return
         try {
-            fusedClient.requestLocationUpdates(req, locationCallback, looper)
-            Log.d(TAG, "requestLocationUpdates() issued")
-        } catch (se: SecurityException) {
-            Log.w(TAG, "requestLocationUpdates: permission rejected", se)
+            mgr.removeUpdates(locationListener)
         } catch (t: Throwable) {
-            Log.e(TAG, "requestLocationUpdates() failed", t)
+            Log.w(TAG, "removeUpdates", t)
+        } finally {
+            activeProviders.clear()
         }
     }
 
@@ -203,6 +234,7 @@ class FusedLocationGpsEngine(
             Log.w(TAG, "registerGnssStatus: missing ACCESS_FINE_LOCATION")
             return
         }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val executor = ContextCompat.getMainExecutor(context)

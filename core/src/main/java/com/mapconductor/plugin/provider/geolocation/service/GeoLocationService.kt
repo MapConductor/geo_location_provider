@@ -18,12 +18,13 @@ import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedP
 import com.mapconductor.plugin.provider.geolocation.fusion.GpsCorrectionHint
 import com.mapconductor.plugin.provider.geolocation.fusion.GpsCorrectionEngineRegistry
 import com.mapconductor.plugin.provider.geolocation.fusion.LifecycleAwareGpsCorrectionEngine
-import com.mapconductor.plugin.provider.geolocation.gps.FusedLocationGpsEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsLocationEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsObservation
+import com.mapconductor.plugin.provider.geolocation.gps.LocationManagerGpsEngine
 import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
 import com.mapconductor.plugin.provider.geolocation.debug.DrDebugState
+import com.mapconductor.plugin.provider.geolocation.debug.TempBatteryPercentCsvLogger
 import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import androidx.core.app.NotificationCompat
 import com.mapconductor.plugin.provider.storageservice.StorageService
@@ -84,6 +85,9 @@ class GeoLocationService : Service() {
     private lateinit var headingSensor: HeadingSensor
     private var dr: DeadReckoning? = null
 
+    // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
+    private var tempBatteryLogger: TempBatteryPercentCsvLogger? = null
+
     @Volatile private var updateIntervalMs: Long = 30_000L
     @Volatile private var drMode: DrMode = DrMode.Prediction
     private val isRunning = AtomicBoolean(false)
@@ -139,13 +143,15 @@ class GeoLocationService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate")
-        gpsEngine = FusedLocationGpsEngine(applicationContext, mainLooper).also { engine ->
+        gpsEngine = LocationManagerGpsEngine(applicationContext, mainLooper).also { engine ->
             engine.setListener(object : GpsLocationEngine.Listener {
                 override fun onGpsObservation(observation: GpsObservation) {
                     handleObservation(observation)
                 }
             })
         }
+        // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
+        tempBatteryLogger = TempBatteryPercentCsvLogger(applicationContext, serviceScope)
         headingSensor = HeadingSensor(applicationContext).also { it.start() }
         // Configure DeadReckoning with relaxed static detection so that
         // desk / slow-move scenarios (hand-held use at almost the same
@@ -198,6 +204,9 @@ class GeoLocationService : Service() {
         Log.d(TAG, "onDestroy")
         super.onDestroy()
         stopDrTicker()
+        // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
+        try { tempBatteryLogger?.shutdown() } catch (t: Throwable) { Log.w(TAG, "tempBatteryLogger.shutdown()", t) }
+        tempBatteryLogger = null
         try { gpsEngine.stop() } catch (t: Throwable) { Log.w(TAG, "gpsEngine.stop()", t) }
         try { headingSensor.stop() } catch (t: Throwable) { Log.w(TAG, "headingSensor.stop()", t) }
         try { dr?.stop() } catch (t: Throwable) { Log.w(TAG, "dr.stop()", t) }
@@ -236,6 +245,8 @@ class GeoLocationService : Service() {
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
         startForeground(NOTIFICATION_ID, buildNotification())
+        // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
+        try { tempBatteryLogger?.onTrackingStarted() } catch (t: Throwable) { Log.w(TAG, "tempBatteryLogger.onTrackingStarted()", t) }
         val correction = GpsCorrectionEngineRegistry.get()
         if (correction is LifecycleAwareGpsCorrectionEngine) {
             try { correction.start() } catch (t: Throwable) { Log.w(TAG, "correction.start()", t) }
@@ -251,6 +262,9 @@ class GeoLocationService : Service() {
 
         // Remove foreground service state.
         stopForeground(STOP_FOREGROUND_DETACH)
+
+        // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
+        try { tempBatteryLogger?.onTrackingStopped() } catch (t: Throwable) { Log.w(TAG, "tempBatteryLogger.onTrackingStopped()", t) }
 
         val correction = GpsCorrectionEngineRegistry.get()
         if (correction is LifecycleAwareGpsCorrectionEngine) {
@@ -676,7 +690,10 @@ class GeoLocationService : Service() {
                                 provider = "dead_reckoning",
                                 headingDeg = headingForDr,
                                 courseDeg = courseForDr,
-                                speedMps = (p.speedMps ?: Float.NaN).toDouble(),
+                                speedMps = p.speedMps
+                                    ?.takeIf { it.isFinite() && !it.isNaN() && it >= 0f }
+                                    ?.toDouble()
+                                    ?: 0.0,
                                 gnssUsed = -1,
                                 gnssTotal = -1,
                                 cn0 = 0.0,
@@ -900,7 +917,10 @@ class GeoLocationService : Service() {
                 provider = "dead_reckoning",
                 headingDeg = headingForDr,
                 courseDeg = courseForDr,
-                speedMps = (p.speedMps?.toDouble() ?: endSpeedMps),
+                speedMps = p.speedMps
+                    ?.takeIf { it.isFinite() && !it.isNaN() && it >= 0f }
+                    ?.toDouble()
+                    ?: endSpeedMps,
                 gnssUsed = -1,
                 gnssTotal = -1,
                 cn0 = 0.0,

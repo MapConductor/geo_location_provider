@@ -121,7 +121,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
     implementation(libs.play.services.auth)
-    implementation(libs.play.services.location)
     implementation(platform(libs.androidx.compose.bom))
 
     // Room (KSP)
