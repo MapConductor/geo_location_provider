@@ -1,6 +1,5 @@
 package com.mapconductor.plugin.provider.geolocation.ui.main
 
-import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,7 +64,7 @@ fun GeoLocationProviderScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-                IntervalAndDrArea(intervalVm, ctx)
+                IntervalAndDrArea(intervalVm)
 
                 HorizontalDivider(
                     thickness = DividerDefaults.Thickness,
@@ -90,11 +89,11 @@ fun GeoLocationProviderScreen(
 
 @Composable
 private fun IntervalAndDrArea(
-    vm: IntervalSettingsViewModel,
-    ctx: Context
+    vm: IntervalSettingsViewModel
 ) {
     val sec by vm.secondsText.collectAsState()
     val dr by vm.drIntervalText.collectAsState()
+    val drGps by vm.drGpsIntervalText.collectAsState()
     val mode by vm.drMode.collectAsState()
 
     Row(
@@ -130,6 +129,30 @@ private fun IntervalAndDrArea(
         Button(onClick = { vm.saveAndApply() }) {
             Text("Save & Apply")
         }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        OutlinedTextField(
+            value = drGps,
+            onValueChange = {
+                vm.onDrGpsIntervalChanged(it.filter { c -> c.isDigit() }.take(3))
+            },
+            label = { Text("DR GPS interval (sec)") },
+            enabled = mode == DrMode.Prediction,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            singleLine = true,
+            modifier = Modifier.weight(1f)
+        )
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Keep layout consistent with the top row button.
+        Spacer(modifier = Modifier.width(104.dp))
     }
 
     Spacer(modifier = Modifier.height(8.dp))

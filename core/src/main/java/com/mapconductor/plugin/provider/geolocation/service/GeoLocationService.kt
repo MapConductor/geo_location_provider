@@ -64,6 +64,10 @@ class GeoLocationService : Service() {
         const val ACTION_UPDATE_DR_INTERVAL = "ACTION_UPDATE_DR_INTERVAL"
         const val EXTRA_DR_INTERVAL_SEC = "EXTRA_DR_INTERVAL_SEC"
 
+        /** Update GPS-to-DR correction interval (seconds). */
+        const val ACTION_UPDATE_DR_GPS_INTERVAL = "ACTION_UPDATE_DR_GPS_INTERVAL"
+        const val EXTRA_DR_GPS_INTERVAL_SEC = "EXTRA_DR_GPS_INTERVAL_SEC"
+
         // Maximum number of recent GPS samples kept for DR static clamping.
         private const val GPS_HISTORY_SIZE = 8
 
@@ -96,6 +100,10 @@ class GeoLocationService : Service() {
     // DR ticker for real-time prediction loop.
     private var drTickerJob: Job? = null
     @Volatile private var drIntervalSec: Int = 5  // Default interval in seconds.
+
+    // Throttle for submitting GPS fixes to DR (prediction mode only).
+    @Volatile private var drGpsIntervalSec: Int = 0 // 0 means "every GPS fix" (legacy behavior).
+    @Volatile private var lastDrGpsSubmitMillis: Long = 0L
 
     // Duplicate insertion suppression for GPS and DR.
     @Volatile private var lastInsertMillis: Long = 0L
@@ -197,6 +205,14 @@ class GeoLocationService : Service() {
                     applyDrMode(mode)
                 }
         }
+        // GPS-to-DR correction interval is also synced from a Flow.
+        serviceScope.launch {
+            SettingsRepository.drGpsIntervalSecFlow(applicationContext)
+                .distinctUntilChanged()
+                .collect { sec ->
+                    applyDrGpsInterval(sec)
+                }
+        }
         // ---- end of initial setup ----
     }
 
@@ -236,6 +252,12 @@ class GeoLocationService : Service() {
                 val sec = intent.getIntExtra(EXTRA_DR_INTERVAL_SEC, drIntervalSec)
                 Log.d(TAG, "ACTION_UPDATE_DR_INTERVAL: sec=$sec")
                 applyDrInterval(sec)
+            }
+
+            ACTION_UPDATE_DR_GPS_INTERVAL -> {
+                val sec = intent.getIntExtra(EXTRA_DR_GPS_INTERVAL_SEC, drGpsIntervalSec)
+                Log.d(TAG, "ACTION_UPDATE_DR_GPS_INTERVAL: sec=$sec")
+                applyDrGpsInterval(sec)
             }
         }
         return START_STICKY
@@ -594,10 +616,19 @@ class GeoLocationService : Service() {
         }
 
         // 2) Notify DR of the fix and optionally backfill the previous segment.
+        //
+        // In Prediction mode, this may be throttled by drGpsIntervalSec. In Completion mode,
+        // throttling is intentionally ignored because completion relies on GPS-to-GPS segments.
         if (drIntervalSec > 0) {
+            val modeSnapshot = drMode
             val startMillis = lastFixMillis
             val endMillis = now
-            val modeSnapshot = drMode
+
+            val shouldSubmit: Boolean = when (modeSnapshot) {
+                DrMode.Completion -> true
+                DrMode.Prediction -> shouldSubmitDrGpsFix(endMillis)
+            }
+
             if (modeSnapshot == DrMode.Completion && startMillis != null && endMillis > startMillis) {
                 scheduleDrBackfill(
                     startMillis = startMillis,
@@ -608,22 +639,26 @@ class GeoLocationService : Service() {
                     endSpeedMps = speedMps
                 )
             }
-            lastFixMillis = endMillis
-            serviceScope.launch(Dispatchers.Default) {
-                val engine = dr
-                if (engine != null) {
-                    try {
-                        engine.submitGpsFix(
-                            GpsFix(
-                                timestampMillis = endMillis,
-                                lat = holdLat,
-                                lon = holdLon,
-                                accuracyM = observation.accuracyM,
-                                speedMps = speedMps.takeIf { it > 0f }
+
+            if (shouldSubmit) {
+                lastFixMillis = endMillis
+                lastDrGpsSubmitMillis = endMillis
+                serviceScope.launch(Dispatchers.Default) {
+                    val engine = dr
+                    if (engine != null) {
+                        try {
+                            engine.submitGpsFix(
+                                GpsFix(
+                                    timestampMillis = endMillis,
+                                    lat = holdLat,
+                                    lon = holdLon,
+                                    accuracyM = observation.accuracyM,
+                                    speedMps = speedMps.takeIf { it > 0f }
+                                )
                             )
-                        )
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "dr.submitGpsFix()", t)
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "dr.submitGpsFix()", t)
+                        }
                     }
                 }
             }
@@ -778,13 +813,33 @@ class GeoLocationService : Service() {
         updateDrTicker()
     }
 
+    private fun applyDrGpsInterval(sec: Int) {
+        val clamped = if (sec <= 0) 0 else max(1, sec)
+        Log.d(TAG, "applyDrGpsInterval: $drGpsIntervalSec -> $clamped")
+        drGpsIntervalSec = clamped
+        lastDrGpsSubmitMillis = 0L
+    }
+
     private fun applyDrMode(mode: DrMode) {
         if (mode == drMode) {
             return
         }
         Log.d(TAG, "applyDrMode: $drMode -> $mode")
         drMode = mode
+        lastDrGpsSubmitMillis = 0L
         updateDrTicker()
+    }
+
+    private fun shouldSubmitDrGpsFix(nowMillis: Long): Boolean {
+        val intervalSecSnapshot = drGpsIntervalSec
+        if (intervalSecSnapshot <= 0) {
+            return true
+        }
+        val last = lastDrGpsSubmitMillis
+        if (last <= 0L) {
+            return true
+        }
+        return nowMillis - last >= intervalSecSnapshot * 1000L
     }
 
     private fun updateDrTicker() {

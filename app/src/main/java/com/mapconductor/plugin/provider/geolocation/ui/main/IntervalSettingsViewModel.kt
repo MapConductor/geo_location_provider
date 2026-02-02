@@ -45,6 +45,9 @@ class IntervalSettingsViewModel(
     private val _drIntervalText = MutableStateFlow("5")
     val drIntervalText: StateFlow<String> = _drIntervalText.asStateFlow()
 
+    private val _drGpsIntervalText = MutableStateFlow("0")
+    val drGpsIntervalText: StateFlow<String> = _drGpsIntervalText.asStateFlow()
+
     private val _drMode = MutableStateFlow(DrMode.Prediction)
     val drMode: StateFlow<DrMode> = _drMode.asStateFlow()
 
@@ -57,10 +60,12 @@ class IntervalSettingsViewModel(
             val gpsSec = (SettingsRepository.currentIntervalMs(appContext) / 1000L).toInt()
                 .coerceAtLeast(MIN_INTERVAL_SEC)
             val drSec = SettingsRepository.currentDrIntervalSec(appContext)
+            val drGpsSec = SettingsRepository.currentDrGpsIntervalSec(appContext)
             val mode = SettingsRepository.currentDrMode(appContext)
 
             _secondsText.value = gpsSec.toString()
             _drIntervalText.value = drSec.toString()
+            _drGpsIntervalText.value = drGpsSec.toString()
             _drMode.value = mode
 
             _imuAvailable.value = detectImuAvailable(appContext)
@@ -80,6 +85,10 @@ class IntervalSettingsViewModel(
 
     fun onDrIntervalChanged(text: String) {
         if (text.isEmpty() || text.all { it.isDigit() }) _drIntervalText.value = text
+    }
+
+    fun onDrGpsIntervalChanged(text: String) {
+        if (text.isEmpty() || text.all { it.isDigit() }) _drGpsIntervalText.value = text
     }
 
     fun onDrModeChanged(mode: DrMode) {
@@ -119,6 +128,9 @@ class IntervalSettingsViewModel(
             if (drInterval == 0) {
                 SettingsRepository.setDrIntervalSec(appContext, 0)
                 applyDrIntervalToService(0)
+                if (!saveDrGpsIntervalIfNeeded(gpsInterval)) {
+                    return@launch
+                }
                 launchToast(
                     "Settings saved.\n" +
                         "GPS interval: ${gpsInterval} sec / DR: disabled (GPS only)"
@@ -145,6 +157,10 @@ class IntervalSettingsViewModel(
             SettingsRepository.setDrIntervalSec(appContext, drInterval)
             applyDrIntervalToService(drInterval)
 
+            if (!saveDrGpsIntervalIfNeeded(gpsInterval)) {
+                return@launch
+            }
+
             // Success toast
             launchToast(
                 "Settings saved and applied.\n" +
@@ -153,9 +169,45 @@ class IntervalSettingsViewModel(
         }
     }
 
+    private suspend fun saveDrGpsIntervalIfNeeded(gpsIntervalSec: Int): Boolean {
+        if (_drMode.value == DrMode.Completion) {
+            return true
+        }
+
+        val v = _drGpsIntervalText.value.toIntOrNull()
+        if (v == null) {
+            rollbackDrGpsIntervalWithToast("Please enter a numeric value.")
+            return false
+        }
+
+        // 0 means "every GPS fix to DR" (legacy behavior).
+        if (v == 0) {
+            SettingsRepository.setDrGpsIntervalSec(appContext, 0)
+            applyDrGpsIntervalToService(0)
+            return true
+        }
+
+        if (v < gpsIntervalSec) {
+            rollbackDrGpsIntervalWithToast(
+                "DR GPS interval must be 0 or >= GPS interval (min: $gpsIntervalSec sec)."
+            )
+            return false
+        }
+
+        SettingsRepository.setDrGpsIntervalSec(appContext, v)
+        applyDrGpsIntervalToService(v)
+        return true
+    }
+
     private suspend fun rollbackDrIntervalWithToast(message: String) {
         val saved = SettingsRepository.currentDrIntervalSec(appContext)
         _drIntervalText.value = saved.toString()
+        launchToast(message)
+    }
+
+    private suspend fun rollbackDrGpsIntervalWithToast(message: String) {
+        val saved = SettingsRepository.currentDrGpsIntervalSec(appContext)
+        _drGpsIntervalText.value = saved.toString()
         launchToast(message)
     }
 
@@ -178,6 +230,14 @@ class IntervalSettingsViewModel(
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
             action = GeoLocationService.ACTION_UPDATE_DR_INTERVAL
             putExtra(GeoLocationService.EXTRA_DR_INTERVAL_SEC, sec)
+        }
+        appContext.startService(intent)
+    }
+
+    private fun applyDrGpsIntervalToService(sec: Int) {
+        val intent = Intent(appContext, GeoLocationService::class.java).apply {
+            action = GeoLocationService.ACTION_UPDATE_DR_GPS_INTERVAL
+            putExtra(GeoLocationService.EXTRA_DR_GPS_INTERVAL_SEC, sec)
         }
         appContext.startService(intent)
     }

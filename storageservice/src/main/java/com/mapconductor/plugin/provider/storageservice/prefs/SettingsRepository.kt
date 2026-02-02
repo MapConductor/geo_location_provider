@@ -26,11 +26,13 @@ object SettingsRepository {
     private const val MIN_INTERVAL_SEC = 1          // Minimum 1 second
     private const val DEFAULT_DR_SEC = 5            // Default DR interval in seconds
     private const val MIN_DR_SEC = 1                // Minimum 1 second when enabled
+    private const val DEFAULT_DR_GPS_SEC = 0        // 0 means "every GPS fix"
     private const val FIRST_TIMEOUT_MS = 700L       // Safety timeout for sync getters
     private val DEFAULT_DR_MODE: DrMode = DrMode.Prediction
 
     private val KEY_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("interval_sec")
     private val KEY_DR_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("dr_interval_sec")
+    private val KEY_DR_GPS_INTERVAL_SEC: Preferences.Key<Int> = intPreferencesKey("dr_gps_interval_sec")
     private val KEY_DR_MODE: Preferences.Key<String> = stringPreferencesKey("dr_mode")
 
     // ---------- Flow ----------
@@ -53,6 +55,23 @@ object SettingsRepository {
             if (raw <= 0) 0 else raw.coerceAtLeast(MIN_DR_SEC)
         }
 
+    /** Flow of GPS-to-DR correction interval in seconds.
+     *
+     * Contract:
+     * - 0 means "submit every GPS fix to DR" (legacy behavior).
+     * - When > 0, the value must be >= GPS interval; values smaller than GPS interval are clamped up.
+     */
+    fun drGpsIntervalSecFlow(context: Context): Flow<Int> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            val gpsSec = (prefs[KEY_INTERVAL_SEC] ?: DEFAULT_INTERVAL_SEC).coerceAtLeast(MIN_INTERVAL_SEC)
+            val raw = prefs[KEY_DR_GPS_INTERVAL_SEC] ?: DEFAULT_DR_GPS_SEC
+            when {
+                raw <= 0 -> 0
+                raw < gpsSec -> gpsSec
+                else -> raw
+            }
+        }
+
     /** Flow of DR mode (prediction vs completion). */
     fun drModeFlow(context: Context): Flow<DrMode> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
@@ -73,6 +92,18 @@ object SettingsRepository {
     suspend fun setDrIntervalSec(context: Context, sec: Int) {
         context.applicationContext.settingsDataStore.edit {
             it[KEY_DR_INTERVAL_SEC] = if (sec <= 0) 0 else sec.coerceAtLeast(MIN_DR_SEC)
+        }
+    }
+
+    suspend fun setDrGpsIntervalSec(context: Context, sec: Int) {
+        context.applicationContext.settingsDataStore.edit { prefs ->
+            val gpsSec = (prefs[KEY_INTERVAL_SEC] ?: DEFAULT_INTERVAL_SEC).coerceAtLeast(MIN_INTERVAL_SEC)
+            val v = when {
+                sec <= 0 -> 0
+                sec < gpsSec -> gpsSec
+                else -> sec
+            }
+            prefs[KEY_DR_GPS_INTERVAL_SEC] = v
         }
     }
 
@@ -106,6 +137,15 @@ object SettingsRepository {
             if (v <= 0) 0 else v.coerceAtLeast(MIN_DR_SEC)
         } catch (_: Throwable) {
             DEFAULT_DR_SEC
+        }
+    }
+
+    /** Synchronously returns the current GPS-to-DR correction interval in seconds. */
+    fun currentDrGpsIntervalSec(context: Context): Int = runBlocking {
+        try {
+            withTimeout(FIRST_TIMEOUT_MS) { drGpsIntervalSecFlow(context).first() }
+        } catch (_: Throwable) {
+            DEFAULT_DR_GPS_SEC
         }
     }
 
