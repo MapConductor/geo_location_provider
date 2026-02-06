@@ -6,10 +6,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.Manifest
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import androidx.core.app.ServiceCompat
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoning
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningConfig
 import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.DeadReckoningFactory
@@ -263,10 +267,45 @@ class GeoLocationService : Service() {
         return START_STICKY
     }
 
+    private fun startOrRefreshForegroundNotification(): Boolean {
+        return try {
+            val notification = buildNotification()
+            if (Build.VERSION.SDK_INT >= 29) {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "startForeground failed", t)
+            false
+        }
+    }
+
     private fun startLocation() {
+        if (isRunning.get()) {
+            // If the service is already running, callers may still use startForegroundService().
+            // Refreshing the foreground notification avoids ForegroundServiceDidNotStartInTimeException.
+            startOrRefreshForegroundNotification()
+            return
+        }
+        if (!hasRequiredPermissionsForLocationFgs()) {
+            Log.w(TAG, "startLocation blocked: missing required permissions")
+            stopSelf()
+            return
+        }
         if (isRunning.getAndSet(true)) return
         Log.d(TAG, "startLocation")
-        startForeground(NOTIFICATION_ID, buildNotification())
+        if (!startOrRefreshForegroundNotification()) {
+            isRunning.set(false)
+            stopSelf()
+            return
+        }
         // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
         try { tempBatteryLogger?.onTrackingStarted() } catch (t: Throwable) { Log.w(TAG, "tempBatteryLogger.onTrackingStarted()", t) }
         val correction = GpsCorrectionEngineRegistry.get()
@@ -276,6 +315,20 @@ class GeoLocationService : Service() {
         gpsEngine.updateInterval(updateIntervalMs)
         gpsEngine.start()
         updateDrTicker()
+    }
+
+    private fun hasRequiredPermissionsForLocationFgs(): Boolean {
+        if (Build.VERSION.SDK_INT >= 34) {
+            val fgsOk = checkSelfPermission(Manifest.permission.FOREGROUND_SERVICE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+            if (!fgsOk) return false
+        }
+
+        val fineOk = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        val coarseOk = checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        return fineOk || coarseOk
     }
 
     private fun stopLocation() {

@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.mapconductor.plugin.provider.geolocation.auth.appauth"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 26

@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.mapconductor.plugin.provider.core"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 26

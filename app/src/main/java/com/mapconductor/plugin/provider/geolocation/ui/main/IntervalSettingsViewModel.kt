@@ -9,6 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.mapconductor.plugin.provider.geolocation.service.GeoLocationService
+import com.mapconductor.plugin.provider.geolocation.util.ServiceStateIndicator
 import com.mapconductor.plugin.provider.storageservice.prefs.SettingsRepository
 import com.mapconductor.plugin.provider.storageservice.prefs.DrMode
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.floor
 import kotlin.math.max
 
@@ -217,28 +219,37 @@ class IntervalSettingsViewModel(
         }
     }
 
-    private fun applyIntervalToService(ms: Long) {
-        // Interval is propagated via SettingsRepository; here we ensure the service is running
-        // so it can pick up the new value.
-        val intent = Intent(appContext, GeoLocationService::class.java).apply {
-            action = GeoLocationService.ACTION_START
+    private suspend fun sendToRunningService(intent: Intent) {
+        val running = withContext(Dispatchers.Main) {
+            ServiceStateIndicator.isRunning(appContext, GeoLocationService::class.java)
         }
-        ContextCompat.startForegroundService(appContext, intent)
+        if (!running) return
+        appContext.startService(intent)
     }
 
-    private fun applyDrIntervalToService(sec: Int) {
+    private suspend fun applyIntervalToService(ms: Long) {
+        // Interval is persisted via SettingsRepository.
+        // If the service is already running, request it to apply the new value.
+        val intent = Intent(appContext, GeoLocationService::class.java).apply {
+            action = GeoLocationService.ACTION_UPDATE_INTERVAL
+            putExtra(GeoLocationService.EXTRA_UPDATE_MS, ms)
+        }
+        sendToRunningService(intent)
+    }
+
+    private suspend fun applyDrIntervalToService(sec: Int) {
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
             action = GeoLocationService.ACTION_UPDATE_DR_INTERVAL
             putExtra(GeoLocationService.EXTRA_DR_INTERVAL_SEC, sec)
         }
-        appContext.startService(intent)
+        sendToRunningService(intent)
     }
 
-    private fun applyDrGpsIntervalToService(sec: Int) {
+    private suspend fun applyDrGpsIntervalToService(sec: Int) {
         val intent = Intent(appContext, GeoLocationService::class.java).apply {
             action = GeoLocationService.ACTION_UPDATE_DR_GPS_INTERVAL
             putExtra(GeoLocationService.EXTRA_DR_GPS_INTERVAL_SEC, sec)
         }
-        appContext.startService(intent)
+        sendToRunningService(intent)
     }
 }

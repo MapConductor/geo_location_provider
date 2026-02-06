@@ -9,11 +9,11 @@ plugins {
 
 android {
     namespace = "com.mapconductor.plugin.provider.storageservice"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 34
         consumerProguardFiles(file("consumer-rules.pro"))
     }
 
@@ -57,4 +57,3 @@ room {
     // Output directory for Room schemas
     schemaDirectory("$projectDir/schemas")
 }
-

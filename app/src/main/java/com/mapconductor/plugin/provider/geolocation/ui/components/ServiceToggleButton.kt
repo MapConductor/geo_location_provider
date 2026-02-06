@@ -1,6 +1,12 @@
 package com.mapconductor.plugin.provider.geolocation.ui.components
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,6 +47,65 @@ fun ServiceToggleAction() {
         runningState.value = running
     }
 
+    fun hasLocationPermission(): Boolean {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        return fineGranted || coarseGranted
+    }
+
+    fun hasNotificationPermission(): Boolean {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+    }
+
+    fun startServiceForeground() {
+        ContextCompat.startForegroundService(
+            context,
+            Intent(context, GeoLocationService::class.java).apply {
+                action = GeoLocationService.ACTION_START
+            }
+        )
+    }
+
+    val permLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        val locOk = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        val notifOk = if (Build.VERSION.SDK_INT >= 33) {
+            granted[Manifest.permission.POST_NOTIFICATIONS] == true
+        } else {
+            true
+        }
+
+        if (locOk && notifOk) {
+            startServiceForeground()
+        } else if (!locOk) {
+            Toast.makeText(context, "Location permission is required.", Toast.LENGTH_SHORT).show()
+        }
+
+        scope.launch {
+            try {
+                delay(500)
+                refreshState()
+            } finally {
+                busyState.value = false
+            }
+        }
+    }
+
     // Periodically poll service state
     LaunchedEffect(Unit) {
         while (true) {
@@ -67,10 +132,7 @@ fun ServiceToggleAction() {
             if (busyState.value) return@IconButton
             busyState.value = true
 
-            // Optimistically flip UI state, then correct after service responds
             val currentlyRunning = runningState.value
-            val targetRunning = !currentlyRunning
-            runningState.value = targetRunning
 
             if (currentlyRunning) {
                 // Request stop
@@ -79,24 +141,38 @@ fun ServiceToggleAction() {
                         action = GeoLocationService.ACTION_STOP
                     }
                 )
-            } else {
-                // Request start as foreground service
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, GeoLocationService::class.java).apply {
-                        action = GeoLocationService.ACTION_START
+                scope.launch {
+                    try {
+                        delay(500)
+                        refreshState()
+                    } finally {
+                        busyState.value = false
                     }
-                )
+                }
+                return@IconButton
             }
 
-            // Wait a bit and then re-query the real state
-            scope.launch {
-                try {
-                    delay(500) // Increase to 700-1000ms if needed
-                    refreshState()
-                } finally {
-                    busyState.value = false
+            val need = mutableListOf<String>()
+            if (!hasLocationPermission()) {
+                need += Manifest.permission.ACCESS_FINE_LOCATION
+                need += Manifest.permission.ACCESS_COARSE_LOCATION
+            }
+            if (!hasNotificationPermission() && Build.VERSION.SDK_INT >= 33) {
+                need += Manifest.permission.POST_NOTIFICATIONS
+            }
+
+            if (need.isEmpty()) {
+                startServiceForeground()
+                scope.launch {
+                    try {
+                        delay(500)
+                        refreshState()
+                    } finally {
+                        busyState.value = false
+                    }
                 }
+            } else {
+                permLauncher.launch(need.toTypedArray())
             }
         },
         enabled = !busyState.value

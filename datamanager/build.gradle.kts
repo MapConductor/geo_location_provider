@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.mapconductor.plugin.provider.datamanager"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 26
@@ -42,4 +42,3 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.okio)
 }
-

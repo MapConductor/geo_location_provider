@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.mapconductor.plugin.provider.geolocation.deadreckoning"
-    compileSdk = 36
+    compileSdk = 34
 
     defaultConfig {
         minSdk = 26
@@ -37,4 +37,3 @@ dependencies {
     // Common AndroidX dependencies
     implementation(libs.androidx.core.ktx)
 }
-
