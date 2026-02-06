@@ -22,6 +22,7 @@ import kotlin.math.sqrt
 
 enum class MapCurveMode {
     LINEAR,
+    GAP_AWARE_BEZIER,
     BEZIER,
     SPLINE,
     MOVING_AVERAGE_LINEAR,
@@ -55,7 +56,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val gpsCorrectedEnabled = MutableStateFlow(false)
     private val drEnabled = MutableStateFlow(false)
     private val gpsDrEnabled = MutableStateFlow(false)
-    private val curveMode = MutableStateFlow(MapCurveMode.LINEAR)
+    private val curveMode = MutableStateFlow(MapCurveMode.GAP_AWARE_BEZIER)
     private val pointSelectionMode =
         MutableStateFlow(MapPointSelectionMode.TIME_PRIORITY)
     private val limitText = MutableStateFlow(DEFAULT_LIMIT.toString())
@@ -312,7 +313,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 gpsDrPath = emptyList(),
                 latest = null,
                 filterApplied = false,
-                curveMode = MapCurveMode.LINEAR,
+                curveMode = MapCurveMode.GAP_AWARE_BEZIER,
                 pointSelectionMode = MapPointSelectionMode.TIME_PRIORITY,
                 displayedGpsCount = 0,
                 displayedGpsCorrectedCount = 0,

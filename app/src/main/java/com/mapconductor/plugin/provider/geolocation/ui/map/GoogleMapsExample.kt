@@ -249,36 +249,53 @@ fun MapScreen() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     // Build per-provider polylines, connecting points in time order.
-                    val gpsCorrectedBasePoints = state.markers
+                    val gpsCorrectedSamples = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.GpsCorrected
                         }
                         .sortedBy { it.timeMillis }
-                        .map { sample ->
-                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
-                        }
 
-                    val gpsBasePoints = state.markers
+                    val gpsSamples = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.Gps
                         }
                         .sortedBy { it.timeMillis }
-                        .map { sample ->
-                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
-                        }
 
-                    val drBasePoints = state.markers
+                    val drSamples = state.markers
                         .filter { sample ->
                             Formatters.providerKind(sample.provider) == ProviderKind.DeadReckoning
                         }
                         .sortedBy { it.timeMillis }
-                        .map { sample ->
-                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+
+                    val gpsCorrectedPoints =
+                        if (state.curveMode == MapCurveMode.GAP_AWARE_BEZIER) {
+                            GapAwareBezierPolyline.build(gpsCorrectedSamples)
+                        } else {
+                            val basePoints = gpsCorrectedSamples.map { sample ->
+                                GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                            }
+                            applyCurveMode(basePoints, state.curveMode)
                         }
 
-                    val gpsCorrectedPoints = applyCurveMode(gpsCorrectedBasePoints, state.curveMode)
-                    val gpsPoints = applyCurveMode(gpsBasePoints, state.curveMode)
-                    val drPoints = applyCurveMode(drBasePoints, state.curveMode)
+                    val gpsPoints =
+                        if (state.curveMode == MapCurveMode.GAP_AWARE_BEZIER) {
+                            GapAwareBezierPolyline.build(gpsSamples)
+                        } else {
+                            val basePoints = gpsSamples.map { sample ->
+                                GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                            }
+                            applyCurveMode(basePoints, state.curveMode)
+                        }
+
+                    val drPoints =
+                        if (state.curveMode == MapCurveMode.GAP_AWARE_BEZIER) {
+                            GapAwareBezierPolyline.build(drSamples)
+                        } else {
+                            val basePoints = drSamples.map { sample ->
+                                GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                            }
+                            applyCurveMode(basePoints, state.curveMode)
+                        }
 
                     // Draw corrected GPS polyline first (backmost).
                     if (state.gpsCorrectedChecked && gpsCorrectedPoints.size >= 2) {
@@ -302,11 +319,15 @@ fun MapScreen() {
 
                     // Draw GPS&DR mixed polyline (green) next.
                     if (state.gpsDrChecked && state.gpsDrPath.size >= 2) {
-                        val basePoints = state.gpsDrPath.map { sample ->
-                            GeoPointImpl.fromLatLong(sample.lat, sample.lon)
-                        }
-
-                        val mixedPoints = applyCurveMode(basePoints, state.curveMode)
+                        val mixedPoints =
+                            if (state.curveMode == MapCurveMode.GAP_AWARE_BEZIER) {
+                                GapAwareBezierPolyline.build(state.gpsDrPath)
+                            } else {
+                                val basePoints = state.gpsDrPath.map { sample ->
+                                    GeoPointImpl.fromLatLong(sample.lat, sample.lon)
+                                }
+                                applyCurveMode(basePoints, state.curveMode)
+                            }
 
                         if (mixedPoints.size >= 2) {
                             Polyline(
@@ -324,7 +345,7 @@ fun MapScreen() {
                             points = drPoints,
                             id = "dr-polyline",
                             strokeColor = Color.Red,
-                            strokeWidth = 1.dp
+                            strokeWidth = 6.dp
                         )
                     }
 
@@ -478,6 +499,7 @@ private fun CurveModeDropdown(
     val text =
         when (selected) {
             MapCurveMode.LINEAR -> "Linear"
+            MapCurveMode.GAP_AWARE_BEZIER -> "Gap-aware (Bezier)"
             MapCurveMode.BEZIER -> "Bezier"
             MapCurveMode.SPLINE -> "Spline"
             MapCurveMode.MOVING_AVERAGE_LINEAR -> "Moving average (linear)"
@@ -526,6 +548,7 @@ private fun CurveModeDropdown(
                 val optionText =
                     when (mode) {
                         MapCurveMode.LINEAR -> "Linear"
+                        MapCurveMode.GAP_AWARE_BEZIER -> "Gap-aware (Bezier)"
                         MapCurveMode.BEZIER -> "Bezier"
                         MapCurveMode.SPLINE -> "Spline"
                         MapCurveMode.MOVING_AVERAGE_LINEAR -> "Moving average (linear)"
@@ -754,6 +777,7 @@ private fun applyCurveMode(
 ): List<GeoPointImpl> {
     return when (mode) {
         MapCurveMode.LINEAR -> basePoints
+        MapCurveMode.GAP_AWARE_BEZIER -> basePoints
         MapCurveMode.BEZIER -> buildBezierPolyline(basePoints)
         MapCurveMode.SPLINE -> buildSplinePolyline(basePoints)
         MapCurveMode.MOVING_AVERAGE_LINEAR -> buildMovingAverage3Polyline(basePoints)

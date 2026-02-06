@@ -127,6 +127,7 @@ dependencies {
     ksp(libs.androidx.room.compiler)
 
     // Test / Debug
+    testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.ui.test.junit4)
