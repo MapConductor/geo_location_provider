@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,7 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.mapconductor.plugin.provider.geolocation.condition.SelectedSlot
@@ -53,6 +57,7 @@ enum class ProviderKind {
 object Formatters {
     private val ICON_SIZE: Dp = 16.dp
     private val SPACER_SIZE: Dp = 4.dp
+    private const val COMPACT_WIDTH_DP: Int = 360
     private val zoneJst: ZoneId = ZoneId.of("Asia/Tokyo")
     private val timeFmt: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy/MM/dd(E) HH:mm:ss", Locale.JAPAN)
@@ -141,6 +146,147 @@ object Formatters {
      */
     @Composable
     fun LoggingList(
+        slot: SelectedSlot,
+        modifier: Modifier = Modifier
+    ) {
+        val isCompact = LocalConfiguration.current.screenWidthDp < COMPACT_WIDTH_DP
+        if (isCompact) {
+            LoggingListCompact(slot, modifier)
+        } else {
+            LoggingListWide(slot, modifier)
+        }
+    }
+
+    @Composable
+    private fun LoggingListCompact(
+        slot: SelectedSlot,
+        modifier: Modifier = Modifier
+    ) {
+        val sample = slot.sample
+
+        val provider = providerText(sample?.provider)
+        val providerRaw = sample?.provider ?: "-"
+        val providerValue =
+            if (providerRaw.isNotBlank() && providerRaw != provider) "$provider ($providerRaw)" else provider
+
+        val gnss = gnssUsedTotal(sample?.gnssUsed, sample?.gnssTotal)
+        val cn0 = cn0Text(sample?.cn0?.toFloat())
+        val idealJst = timeJst(slot.idealMs)
+        val delta = slot.deltaMs?.let { "${it} ms" }
+        val time = timeJst(sample?.timeMillis)
+        val battery = batteryText(sample?.batteryPercent, sample?.isCharging)
+        val latlon = if (sample != null) {
+            latLonAcc(sample.lat, sample.lon, sample.accuracy)
+        } else {
+            "-"
+        }
+        val head = headingText(sample?.headingDeg?.toFloat())
+        val course = courseText(sample?.courseDeg?.toFloat())
+        val speed = speedText(sample?.speedMps?.toFloat())
+
+        Column(
+            modifier = modifier.padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            KeyValueRow(
+                icon = Icons.Outlined.GpsFixed,
+                label = "Provider",
+                value = providerValue
+            )
+
+            if (sample != null) {
+                KeyValueRow(
+                    icon = Icons.Outlined.SignalCellularAlt,
+                    label = "GNSS",
+                    value = gnss
+                )
+                KeyValueRow(
+                    icon = Icons.Outlined.SignalCellularAlt,
+                    label = "C/N0",
+                    value = cn0
+                )
+            }
+
+            if (slot.idealMs != 0L || (slot.deltaMs ?: 0L) != 0L) {
+                KeyValueRow(
+                    icon = Icons.Outlined.Schedule,
+                    label = "Ideal",
+                    value = idealJst
+                )
+                if (delta != null) {
+                    KeyValueRow(
+                        icon = Icons.Outlined.Timeline,
+                        label = "Delta t",
+                        value = delta
+                    )
+                }
+            }
+
+            KeyValueRow(
+                icon = Icons.Outlined.AccessTime,
+                label = "Time",
+                value = time
+            )
+            KeyValueRow(
+                icon = Icons.Outlined.BatteryFull,
+                label = "Battery",
+                value = battery
+            )
+            KeyValueRow(
+                icon = Icons.Outlined.LocationOn,
+                label = "Lat/Lon/Acc",
+                value = latlon,
+                maxLines = 3
+            )
+            KeyValueRow(
+                icon = Icons.Outlined.CompassCalibration,
+                label = "Heading",
+                value = head
+            )
+            KeyValueRow(
+                icon = Icons.Outlined.Explore,
+                label = "Course",
+                value = course
+            )
+            KeyValueRow(
+                icon = Icons.Outlined.Speed,
+                label = "Speed",
+                value = speed,
+                maxLines = 3
+            )
+        }
+    }
+
+    @Composable
+    private fun KeyValueRow(
+        icon: ImageVector,
+        label: String,
+        value: String,
+        maxLines: Int = 2
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                modifier = Modifier.size(ICON_SIZE)
+            )
+            Spacer(Modifier.width(SPACER_SIZE))
+            BoldLabel(label)
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+                maxLines = maxLines,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+
+    @Composable
+    private fun LoggingListWide(
         slot: SelectedSlot,
         modifier: Modifier = Modifier
     ) {
