@@ -8,9 +8,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -22,7 +30,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,6 +49,8 @@ import com.mapconductor.plugin.provider.geolocation.ui.map.MapScreen
 import com.mapconductor.plugin.provider.geolocation.ui.pickup.PickupScreen
 import com.mapconductor.plugin.provider.geolocation.ui.settings.DriveSettingsScreen
 import com.mapconductor.plugin.provider.geolocation.ui.settings.UploadSettingsScreen
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 
 private const val ROUTE_HOME = "home"
 private const val ROUTE_PICKUP = "pickup"
@@ -206,40 +221,155 @@ private fun AppTopBar(
     onBack: () -> Unit
 ) {
     val route = currentRoute ?: ROUTE_HOME
+    val isHome = route == ROUTE_HOME
 
-    TopAppBar(
-        title = {
-            val title = when (route) {
-                ROUTE_PICKUP -> "Pickup"
-                ROUTE_MAP -> "Map"
-                ROUTE_DRIVE_SETTINGS -> "Google Drive Settings"
-                ROUTE_UPLOAD_SETTINGS -> "Settings"
-                else -> "GeoLocation"
-            }
-            Text(title)
-        },
-        navigationIcon = {
-            if (route != ROUTE_HOME) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back"
+    val title = when (route) {
+        ROUTE_PICKUP -> "Pickup"
+        ROUTE_MAP -> "Map"
+        ROUTE_DRIVE_SETTINGS -> "Google Drive Settings"
+        ROUTE_UPLOAD_SETTINGS -> "Settings"
+        else -> "GeoLocation"
+    }
+
+    BoxWithConstraints {
+        val density = LocalDensity.current
+        val layoutDirection = LocalLayoutDirection.current
+        val textMeasurer = rememberTextMeasurer()
+        val titleStyle = MaterialTheme.typography.titleLarge
+        val actionStyle = MaterialTheme.typography.labelLarge
+
+        val buttonPadding = ButtonDefaults.TextButtonContentPadding
+        val buttonPaddingPx = with(density) {
+            (buttonPadding.calculateLeftPadding(layoutDirection) +
+                buttonPadding.calculateRightPadding(layoutDirection)).toPx()
+        }
+        val minButtonWidthPx = with(density) { ButtonDefaults.MinWidth.toPx() }
+
+        fun buttonWidthPx(label: String): Float {
+            val textWidth = textMeasurer.measure(
+                text = AnnotatedString(label),
+                style = actionStyle
+            ).size.width.toFloat()
+            return maxOf(minButtonWidthPx, textWidth + buttonPaddingPx)
+        }
+
+        val titleWidthPx = textMeasurer.measure(
+            text = AnnotatedString(title),
+            style = titleStyle
+        ).size.width.toFloat()
+
+        val actionsWidthPx =
+            buttonWidthPx("Map") +
+                buttonWidthPx("Pickup") +
+                buttonWidthPx("Drive") +
+                buttonWidthPx("Settings") +
+                maxOf(buttonWidthPx("Start"), buttonWidthPx("Stop"))
+
+        val outerPaddingPx = with(density) { (16.dp * 2).toPx() }
+        val shouldSplit =
+            isHome && (titleWidthPx + actionsWidthPx + outerPaddingPx) > with(density) { maxWidth.toPx() }
+        if (!shouldSplit) {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = title,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                navigationIcon = {
+                    if (!isHome) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                    }
+                },
+                actions = {
+                    if (isHome) {
+                        HomeTopBarActions(
+                            onNavigateMap = onNavigateMap,
+                            onNavigatePickup = onNavigatePickup,
+                            onOpenDriveSettings = onOpenDriveSettings,
+                            onOpenUploadSettings = onOpenUploadSettings
+                        )
+                    }
+                }
+            )
+            return@BoxWithConstraints
+        }
+
+        Column {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = title,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
+                navigationIcon = {
+                    if (!isHome) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back"
+                            )
+                        }
+                    }
+                },
+                actions = {}
+            )
+
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HomeTopBarActions(
+                        onNavigateMap = onNavigateMap,
+                        onNavigatePickup = onNavigatePickup,
+                        onOpenDriveSettings = onOpenDriveSettings,
+                        onOpenUploadSettings = onOpenUploadSettings
                     )
                 }
             }
-        },
-        actions = {
-            if (route == ROUTE_HOME) {
-                TextButton(onClick = onNavigateMap) { Text("Map") }
-
-                TextButton(onClick = onNavigatePickup) { Text("Pickup") }
-
-                TextButton(onClick = onOpenDriveSettings) { Text("Drive") }
-
-                TextButton(onClick = onOpenUploadSettings) { Text("Settings") }
-
-                ServiceToggleAction()
-            }
         }
+    }
+}
+
+@Composable
+private fun HomeTopBarActions(
+    onNavigateMap: () -> Unit,
+    onNavigatePickup: () -> Unit,
+    onOpenDriveSettings: () -> Unit,
+    onOpenUploadSettings: () -> Unit
+) {
+    TextButton(onClick = onNavigateMap) { TopBarActionText("Map") }
+
+    TextButton(onClick = onNavigatePickup) { TopBarActionText("Pickup") }
+
+    TextButton(onClick = onOpenDriveSettings) { TopBarActionText("Drive") }
+
+    TextButton(onClick = onOpenUploadSettings) { TopBarActionText("Settings") }
+
+    ServiceToggleAction()
+}
+
+@Composable
+private fun TopBarActionText(text: String) {
+    Text(
+        text = text,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Ellipsis
     )
 }

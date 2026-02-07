@@ -1,6 +1,7 @@
 package com.mapconductor.plugin.provider.geolocation.ui.common
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,8 +27,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -382,27 +386,7 @@ object Formatters {
             }
 
             // Line 4: Time / Battery
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.AccessTime,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Time")
-                Text(time, style = MaterialTheme.typography.bodyMedium)
-
-                Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
-                Icon(
-                    Icons.Outlined.BatteryFull,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Battery")
-                Text(battery, style = MaterialTheme.typography.bodyMedium)
-            }
+            TimeBatteryLine(time = time, battery = battery)
 
             // Line 5: Lat/Lon/Acc
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -417,37 +401,214 @@ object Formatters {
             }
 
             // Line 6: Heading / Course / Speed
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.CompassCalibration,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Heading")
-                Text(head, style = MaterialTheme.typography.bodyMedium)
+            HeadingCourseSpeedLine(head = head, course = course, speed = speed)
+        }
+    }
 
-                Text(" / ", style = MaterialTheme.typography.bodyMedium)
+    @Composable
+    private fun HeadingCourseSpeedLine(
+        head: String,
+        course: String,
+        speed: String
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val bodyStyle = MaterialTheme.typography.bodyMedium
+            val labelStyle = bodyStyle.copy(fontWeight = FontWeight.Bold)
 
-                Icon(
-                    Icons.Outlined.Explore,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Course")
-                Text(course, style = MaterialTheme.typography.bodyMedium)
+            fun measureTextPx(text: String, isLabel: Boolean): Float {
+                val style = if (isLabel) labelStyle else bodyStyle
+                return textMeasurer.measure(
+                    text = AnnotatedString(text),
+                    style = style
+                ).size.width.toFloat()
+            }
 
-                Text(" / ", style = MaterialTheme.typography.bodyMedium)
+            val fixedPx = with(density) {
+                ((ICON_SIZE * 3f) + (SPACER_SIZE * 3f)).toPx()
+            }
+            val measuredPx =
+                measureTextPx("Heading : ", isLabel = true) +
+                    measureTextPx(head, isLabel = false) +
+                    measureTextPx(" / ", isLabel = false) +
+                    measureTextPx("Course : ", isLabel = true) +
+                    measureTextPx(course, isLabel = false) +
+                    measureTextPx(" / ", isLabel = false) +
+                    measureTextPx("Speed : ", isLabel = true) +
+                    measureTextPx(speed, isLabel = false)
 
-                Icon(
-                    Icons.Outlined.Speed,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Speed")
-                Text(speed, style = MaterialTheme.typography.bodyMedium)
+            val shouldSplit = fixedPx + measuredPx > with(density) { maxWidth.toPx() }
+            if (shouldSplit) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.CompassCalibration,
+                            contentDescription = null,
+                            modifier = Modifier.size(ICON_SIZE)
+                        )
+                        Spacer(Modifier.width(SPACER_SIZE))
+                        BoldLabel("Heading")
+                        Text(
+                            head,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                        Icon(
+                            Icons.Outlined.Explore,
+                            contentDescription = null,
+                            modifier = Modifier.size(ICON_SIZE)
+                        )
+                        Spacer(Modifier.width(SPACER_SIZE))
+                        BoldLabel("Course")
+                        Text(
+                            course,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    KeyValueRow(
+                        icon = Icons.Outlined.Speed,
+                        label = "Speed",
+                        value = speed,
+                        maxLines = 3
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.CompassCalibration,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Heading")
+                    Text(
+                        head,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                    Icon(
+                        Icons.Outlined.Explore,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Course")
+                    Text(
+                        course,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                    Icon(
+                        Icons.Outlined.Speed,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Speed")
+                    Text(
+                        speed,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun TimeBatteryLine(
+        time: String,
+        battery: String
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val bodyStyle = MaterialTheme.typography.bodyMedium
+            val labelStyle = bodyStyle.copy(fontWeight = FontWeight.Bold)
+
+            fun measureTextPx(text: String, isLabel: Boolean): Float {
+                val style = if (isLabel) labelStyle else bodyStyle
+                return textMeasurer.measure(
+                    text = AnnotatedString(text),
+                    style = style
+                ).size.width.toFloat()
+            }
+
+            val fixedPx = with(density) {
+                ((ICON_SIZE * 2f) + (SPACER_SIZE * 2f)).toPx()
+            }
+            val measuredPx =
+                measureTextPx("Time : ", isLabel = true) +
+                    measureTextPx(time, isLabel = false) +
+                    measureTextPx(" / ", isLabel = false) +
+                    measureTextPx("Battery : ", isLabel = true) +
+                    measureTextPx(battery, isLabel = false)
+
+            val shouldSplit = fixedPx + measuredPx > with(density) { maxWidth.toPx() }
+            if (shouldSplit) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    KeyValueRow(
+                        icon = Icons.Outlined.AccessTime,
+                        label = "Time",
+                        value = time,
+                        maxLines = 1
+                    )
+                    KeyValueRow(
+                        icon = Icons.Outlined.BatteryFull,
+                        label = "Battery",
+                        value = battery,
+                        maxLines = 1
+                    )
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.AccessTime,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Time")
+                    Text(
+                        time,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                    Icon(
+                        Icons.Outlined.BatteryFull,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Battery")
+                    Text(
+                        battery,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

@@ -40,6 +40,27 @@ internal interface LocationSampleDao {
     )
     fun latestFlow(limit: Int): Flow<List<LocationSample>>
 
+    /**
+     * Returns the latest [limit] rows ordered newest first.
+     *
+     * - Uses the same ordering as [latestFlow] so callers can treat it as a snapshot.
+     */
+    @Query(
+        """
+        SELECT * FROM location_samples
+        ORDER BY
+          timeMillis DESC,
+          CASE
+            WHEN provider = 'gps' THEN 0
+            WHEN provider = 'gps_corrected' THEN 1
+            ELSE 2
+          END,
+          id DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun latestOnce(limit: Int): List<LocationSample>
+
     /** Watches the most recent row as a Flow. */
     @Query(
         """
@@ -72,6 +93,61 @@ internal interface LocationSampleDao {
         """
     )
     suspend fun findBetween(from: Long, to: Long): List<LocationSample>
+
+    /**
+     * Returns up to [softLimit] rows in the range [from, to) ordered by timeMillis DESC.
+     *
+     * Intended for:
+     * - UI snapshot loading where "latest first" is convenient for clipping / paging.
+     */
+    @Query(
+        """
+        SELECT *
+        FROM location_samples
+        WHERE timeMillis >= :from AND timeMillis < :to
+        ORDER BY
+          timeMillis DESC,
+          CASE
+            WHEN provider = 'gps' THEN 0
+            WHEN provider = 'gps_corrected' THEN 1
+            ELSE 2
+          END,
+          id DESC
+        LIMIT :softLimit
+        """
+    )
+    suspend fun getInRangeDescOnce(
+        from: Long,
+        to: Long,
+        softLimit: Int
+    ): List<LocationSample>
+
+    /**
+     * Returns up to [softLimit] rows with timeMillis < [toExclusive], ordered newest first.
+     *
+     * Intended for:
+     * - UI snapshot loading for a "window ending at X".
+     */
+    @Query(
+        """
+        SELECT *
+        FROM location_samples
+        WHERE timeMillis < :toExclusive
+        ORDER BY
+          timeMillis DESC,
+          CASE
+            WHEN provider = 'gps' THEN 0
+            WHEN provider = 'gps_corrected' THEN 1
+            ELSE 2
+          END,
+          id DESC
+        LIMIT :softLimit
+        """
+    )
+    suspend fun getBeforeDescOnce(
+        toExclusive: Long,
+        softLimit: Int
+    ): List<LocationSample>
 
     /**
      * Returns up to [softLimit] rows in the range [from, to) ordered by timeMillis ASC.

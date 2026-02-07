@@ -7,7 +7,7 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -127,9 +128,9 @@ fun ServiceToggleAction() {
         }
     }
 
-    IconButton(
+    TextButton(
         onClick = {
-            if (busyState.value) return@IconButton
+            if (busyState.value) return@TextButton
             busyState.value = true
 
             val currentlyRunning = runningState.value
@@ -149,7 +150,7 @@ fun ServiceToggleAction() {
                         busyState.value = false
                     }
                 }
-                return@IconButton
+                return@TextButton
             }
 
             val need = mutableListOf<String>()
@@ -177,6 +178,11 @@ fun ServiceToggleAction() {
         },
         enabled = !busyState.value
     ) {
-        Text(if (runningState.value) "Stop" else "Start")
+        Text(
+            text = if (runningState.value) "Stop" else "Start",
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }

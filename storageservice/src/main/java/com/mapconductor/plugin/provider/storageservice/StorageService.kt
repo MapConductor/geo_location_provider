@@ -49,6 +49,17 @@ object StorageService {
         AppDatabase.get(ctx).locationSampleDao().latestFlow(limit)
 
     /**
+     * Returns the latest [limit] LocationSample rows ordered newest first.
+     *
+     * Intended for:
+     * - UI snapshots that do not need continuous updates via Flow.
+     */
+    suspend fun latestOnce(ctx: Context, limit: Int): List<LocationSample> =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).locationSampleDao().latestOnce(limit)
+        }
+
+    /**
      * Returns all LocationSample rows ordered ascending by timeMillis.
      *
      * Intended for:
@@ -87,6 +98,39 @@ object StorageService {
         withContext(Dispatchers.IO) {
             AppDatabase.get(ctx).locationSampleDao()
                 .getInRangeAscOnce(from = from, to = to, softLimit = softLimit)
+        }
+
+    /**
+     * Returns LocationSample rows in the half open interval [from, to) ordered descending by timeMillis.
+     *
+     * Intended for:
+     * - UI snapshot loading where newest-first ordering is convenient for clipping.
+     */
+    suspend fun getLocationsBetweenDesc(
+        ctx: Context,
+        from: Long,
+        to: Long,
+        softLimit: Int = 1_000_000
+    ): List<LocationSample> =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).locationSampleDao()
+                .getInRangeDescOnce(from = from, to = to, softLimit = softLimit)
+        }
+
+    /**
+     * Returns LocationSample rows with timeMillis < [toExclusive] ordered newest first.
+     *
+     * Intended for:
+     * - UI snapshot loading for a "window ending at X".
+     */
+    suspend fun getLocationsBeforeDesc(
+        ctx: Context,
+        toExclusive: Long,
+        softLimit: Int = 1_000_000
+    ): List<LocationSample> =
+        withContext(Dispatchers.IO) {
+            AppDatabase.get(ctx).locationSampleDao()
+                .getBeforeDescOnce(toExclusive = toExclusive, softLimit = softLimit)
         }
 
     /**

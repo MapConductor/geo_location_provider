@@ -60,7 +60,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val pointSelectionMode =
         MutableStateFlow(MapPointSelectionMode.TIME_PRIORITY)
     private val limitText = MutableStateFlow(DEFAULT_LIMIT.toString())
+    private val rangeText = MutableStateFlow("")
     private val appliedFilter = MutableStateFlow<Filter?>(null)
+    private val appliedBaseSamples = MutableStateFlow<List<LocationSample>>(emptyList())
     private val mapSession = MutableStateFlow(0)
     private var lastFollowedDrTimeMillis: Long? = null
     private val eventsFlow = MutableSharedFlow<Event>()
@@ -74,7 +76,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val gps: Boolean,
         val gpsCorrected: Boolean,
         val dr: Boolean,
-        val limit: Int
+        val limit: Int,
+        val rangeSpec: MapRangeSpecParser.Spec
     )
 
     sealed class Event {
@@ -87,6 +90,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val drChecked: Boolean,
         val gpsDrChecked: Boolean,
         val limitText: String,
+        val rangeText: String,
         val markers: List<LocationSample>,
         val gpsDrPath: List<LocationSample>,
         val latest: LocationSample?,
@@ -113,25 +117,29 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     val uiState: StateFlow<UiState> =
         combine(
             sourceFlow,
+            appliedBaseSamples,
             gpsEnabled,
             gpsCorrectedEnabled,
             drEnabled,
             gpsDrEnabled,
             limitText,
+            rangeText,
             appliedFilter,
             curveMode,
             pointSelectionMode
         ) { values ->
             @Suppress("UNCHECKED_CAST")
             val samples = values[0] as List<LocationSample>
-            val gps = values[1] as Boolean
-            val gpsCorrected = values[2] as Boolean
-            val dr = values[3] as Boolean
-            val gpsDr = values[4] as Boolean
-            val limitStr = values[5] as String
-            val filter = values[6] as Filter?
-            val currentCurveMode = values[7] as MapCurveMode
-            val currentPointSelectionMode = values[8] as MapPointSelectionMode
+            val baseSamples = values[1] as List<LocationSample>
+            val gps = values[2] as Boolean
+            val gpsCorrected = values[3] as Boolean
+            val dr = values[4] as Boolean
+            val gpsDr = values[5] as Boolean
+            val limitStr = values[6] as String
+            val rangeStr = values[7] as String
+            val filter = values[8] as Filter?
+            val currentCurveMode = values[9] as MapCurveMode
+            val currentPointSelectionMode = values[10] as MapPointSelectionMode
 
             val filterApplied = filter != null
 
@@ -151,7 +159,11 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 markers = emptyList()
                 latest = null
             } else {
-                val filtered = normalized
+                val baseNormalized = baseSamples.map { sample ->
+                    sample to Formatters.providerKind(sample.provider)
+                }
+
+                val filtered = baseNormalized
                     .filter { (_, kind) ->
                         val isGps = kind == ProviderKind.Gps
                         val isGpsCorrected = kind == ProviderKind.GpsCorrected
@@ -169,20 +181,19 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     .map { it.first }
 
-                val clipped = filtered.take(filter.limit)
-                markers = clipped
-                latest = clipped.firstOrNull()
+                markers = filtered
+                latest = filtered.firstOrNull()
             }
 
             val gpsDrPath: List<LocationSample> =
                 if (filter != null && gpsDr) {
-                    val candidates = normalized
+                    val candidates = baseSamples
+                        .map { sample -> sample to Formatters.providerKind(sample.provider) }
                         .filter { (_, kind) ->
                             kind == ProviderKind.Gps ||
                                 kind == ProviderKind.DeadReckoning
                         }
                         .map { it.first }
-                        .take(filter.limit)
 
                     val hasGps = candidates.any { sample ->
                         Formatters.providerKind(sample.provider) == ProviderKind.Gps
@@ -258,7 +269,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             // When a DR-only filter is applied, follow the latest DR point by
             // bumping the map session whenever a new DR sample arrives.
-            if (filter != null && filter.dr && !filter.gps) {
+            if (filter != null && filter.dr && !filter.gps && !filter.gpsCorrected) {
                 val latestDrTime = latestDr?.timeMillis
                 if (latestDrTime != null) {
                     val prev = lastFollowedDrTimeMillis
@@ -279,12 +290,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 drChecked = dr,
                 gpsDrChecked = gpsDr,
                 limitText = limitStr,
+                rangeText = rangeStr,
                 markers = markers,
                 gpsDrPath = gpsDrPath,
                 latest = latest,
                 filterApplied = filterApplied,
-                 curveMode = currentCurveMode,
-                 pointSelectionMode = currentPointSelectionMode,
+                curveMode = currentCurveMode,
+                pointSelectionMode = currentPointSelectionMode,
                 displayedGpsCount = displayedGpsCount,
                 displayedGpsCorrectedCount = displayedGpsCorrectedCount,
                 displayedDrCount = displayedDrCount,
@@ -309,6 +321,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 drChecked = false,
                 gpsDrChecked = false,
                 limitText = DEFAULT_LIMIT.toString(),
+                rangeText = "",
                 markers = emptyList(),
                 gpsDrPath = emptyList(),
                 latest = null,
@@ -362,6 +375,17 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun onRangeChanged(text: String) {
+        val trimmed = text.take(64)
+        val ok =
+            trimmed.all { c ->
+                c.isDigit() || c == '/' || c == '-' || c == '_' || c == ':' || c == ' '
+            }
+        if (ok) {
+            rangeText.value = trimmed
+        }
+    }
+
     val events: SharedFlow<Event> = eventsFlow
     val mapSessionState: StateFlow<Int> = mapSession
 
@@ -370,6 +394,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         if (currentFilter != null) {
             // Cancel: clear filter and return to editable state.
             appliedFilter.value = null
+            appliedBaseSamples.value = emptyList()
             lastFollowedDrTimeMillis = null
             return
         }
@@ -385,24 +410,139 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val parsed = raw.toIntOrNull()
         val (limit, message) =
             when {
-                parsed == null -> DEFAULT_LIMIT to "Count must be a number between 1 and $SOURCE_LIMIT."
-                parsed < 1 -> 1 to "Count must be at least 1."
+                parsed == null -> DEFAULT_LIMIT to "Count must be a number between 0 and $SOURCE_LIMIT."
                 parsed > SOURCE_LIMIT -> SOURCE_LIMIT to "Count must not exceed $SOURCE_LIMIT."
                 else -> parsed to null
             }
 
         limitText.value = limit.toString()
-        appliedFilter.value = Filter(
-            gps = gpsEnabled.value,
-            gpsCorrected = gpsCorrectedEnabled.value,
-            dr = drEnabled.value,
-            limit = limit
+        val nowMillis = System.currentTimeMillis()
+        val rangeParse = MapRangeSpecParser.parse(
+            raw = rangeText.value,
+            nowMillis = nowMillis,
+            zone = java.time.ZoneId.systemDefault()
         )
+
+        val rangeSpec =
+            when (rangeParse) {
+                is MapRangeSpecParser.Result.Ok -> rangeParse.spec
+                is MapRangeSpecParser.Result.Error -> {
+                    viewModelScope.launch {
+                        eventsFlow.emit(Event.ShowToast(rangeParse.message))
+                    }
+                    return
+                }
+            }
+
+        val filter =
+            Filter(
+                gps = gpsEnabled.value,
+                gpsCorrected = gpsCorrectedEnabled.value,
+                dr = drEnabled.value,
+                limit = limit,
+                rangeSpec = rangeSpec
+            )
+
+        appliedFilter.value = filter
         mapSession.value = mapSession.value + 1
+
+        viewModelScope.launch {
+            val ctx = getApplication<Application>().applicationContext
+            val load = loadBaseSamples(ctx, filter)
+            appliedBaseSamples.value = load.samples
+            if (load.toastMessage != null) {
+                eventsFlow.emit(Event.ShowToast(load.toastMessage))
+            }
+        }
 
         if (message != null) {
             viewModelScope.launch {
                 eventsFlow.emit(Event.ShowToast(message))
+            }
+        }
+    }
+
+    private data class LoadResult(
+        val samples: List<LocationSample>,
+        val toastMessage: String?
+    )
+
+    private suspend fun loadBaseSamples(
+        ctx: android.content.Context,
+        filter: Filter
+    ): LoadResult {
+        val count = filter.limit.coerceIn(0, SOURCE_LIMIT)
+        val warnLimit = SOURCE_LIMIT + 1
+
+        return when (val spec = filter.rangeSpec) {
+            is MapRangeSpecParser.Spec.None -> {
+                if (count == 0) {
+                    val list = StorageService.latestOnce(ctx, warnLimit)
+                    if (list.size > SOURCE_LIMIT) {
+                        LoadResult(
+                            samples = list.take(SOURCE_LIMIT),
+                            toastMessage = "Result exceeds 5000 samples; clipped to 5000."
+                        )
+                    } else {
+                        LoadResult(samples = list, toastMessage = null)
+                    }
+                } else {
+                    LoadResult(
+                        samples = StorageService.latestOnce(ctx, count),
+                        toastMessage = null
+                    )
+                }
+            }
+
+            is MapRangeSpecParser.Spec.TimeWindow -> {
+                val inRange = StorageService.getLocationsBetweenDesc(
+                    ctx = ctx,
+                    from = spec.fromMillisInclusive,
+                    to = spec.toMillisExclusive,
+                    softLimit = warnLimit
+                )
+
+                if (count == 0 || inRange.size > count) {
+                    if (inRange.size > SOURCE_LIMIT) {
+                        LoadResult(
+                            samples = inRange.take(SOURCE_LIMIT),
+                            toastMessage = "Result exceeds 5000 samples; clipped to 5000."
+                        )
+                    } else {
+                        LoadResult(samples = inRange, toastMessage = null)
+                    }
+                } else {
+                    LoadResult(
+                        samples = StorageService.getLocationsBeforeDesc(
+                            ctx = ctx,
+                            toExclusive = spec.toMillisExclusive,
+                            softLimit = count
+                        ),
+                        toastMessage = null
+                    )
+                }
+            }
+
+            is MapRangeSpecParser.Spec.OffsetWindow -> {
+                val base = StorageService.latestOnce(ctx, SOURCE_LIMIT)
+                if (base.isEmpty()) {
+                    return LoadResult(samples = emptyList(), toastMessage = null)
+                }
+
+                val start = spec.startOffset.coerceAtLeast(0)
+                if (start >= base.size) {
+                    return LoadResult(samples = emptyList(), toastMessage = "Offset range is out of bounds.")
+                }
+
+                val end = spec.endOffsetInclusive.coerceIn(start, base.size - 1)
+                val inRange = base.subList(start, end + 1)
+
+                if (count == 0 || inRange.size > count) {
+                    LoadResult(samples = inRange.toList(), toastMessage = null)
+                } else {
+                    val end2 = (start + count - 1).coerceAtMost(base.size - 1)
+                    LoadResult(samples = base.subList(start, end2 + 1).toList(), toastMessage = null)
+                }
             }
         }
     }

@@ -9,9 +9,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -187,28 +189,10 @@ fun MapScreen() {
             )
             Text(text = "GPS(corrected)")
 
-            OutlinedTextField(
-                value = state.limitText,
-                onValueChange = { vm.onLimitChanged(it) },
-                label = { Text("Count") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                singleLine = true,
-                enabled = !state.filterApplied,
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .weight(1f)
-            )
-        }
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
             Checkbox(
                 checked = state.gpsDrChecked,
                 onCheckedChange = { vm.onGpsDrCheckedChange(it) },
+                modifier = Modifier.padding(start = 8.dp),
                 enabled = !state.filterApplied
             )
             Text(text = "GPS&DR")
@@ -219,9 +203,40 @@ fun MapScreen() {
                 modifier = Modifier.padding(start = 8.dp),
                 enabled = !state.filterApplied,
             )
-            Text(text = "DeadReckoning")
+            Text(text = "Dead Reckoning")
+        }
 
-            Box(modifier = Modifier.weight(1f))
+        OutlinedTextField(
+            value = state.rangeText,
+            onValueChange = { vm.onRangeChanged(it) },
+            label = { Text("Range (optional)") },
+            placeholder = {
+                Text("yyyy/MM/dd[-yyyy/MM/dd], yyyy/MM/dd_HH:mm:ss[-...], or n-m")
+            },
+            singleLine = true,
+            enabled = !state.filterApplied,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = state.limitText,
+                onValueChange = { vm.onLimitChanged(it) },
+                label = { Text("Count (0 = all)") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                enabled = !state.filterApplied,
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
 
             Button(
                 onClick = { vm.onApplyClicked() }
