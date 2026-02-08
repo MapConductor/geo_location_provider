@@ -91,16 +91,16 @@ object Formatters {
 
     /**
      * Provider string to friendly display text.
-     * - Dead reckoning identifiers ("dead", "deadreckoning", "dr") -> "DeadReckoning"
+     * - Dead reckoning identifiers ("dead", "deadreckoning", "dr") -> "Dead Reckoning"
      * - GPS, fused, and network values are normalized to "GPS" or "Network"
      * - Null or blank -> "-"
      * - Otherwise the raw string is returned.
      */
     fun providerText(raw: String?): String =
         when (providerKind(raw)) {
-            ProviderKind.DeadReckoning -> "DeadReckoning"
+            ProviderKind.DeadReckoning -> "Dead Reckoning"
             ProviderKind.Gps -> "GPS"
-            ProviderKind.GpsCorrected -> "GPS(corrected)"
+            ProviderKind.GpsCorrected -> "GPS(EKF)"
             ProviderKind.Network -> "Network"
             ProviderKind.Other -> raw?.takeIf { it.isNotBlank() } ?: "-"
         }
@@ -169,9 +169,6 @@ object Formatters {
         val sample = slot.sample
 
         val provider = providerText(sample?.provider)
-        val providerRaw = sample?.provider ?: "-"
-        val providerValue =
-            if (providerRaw.isNotBlank() && providerRaw != provider) "$provider ($providerRaw)" else provider
 
         val gnss = gnssUsedTotal(sample?.gnssUsed, sample?.gnssTotal)
         val cn0 = cn0Text(sample?.cn0?.toFloat())
@@ -195,7 +192,7 @@ object Formatters {
             KeyValueRow(
                 icon = Icons.Outlined.GpsFixed,
                 label = "Provider",
-                value = providerValue
+                value = provider
             )
 
             if (sample != null) {
@@ -297,7 +294,6 @@ object Formatters {
         val sample = slot.sample
 
         val provider = providerText(sample?.provider)
-        val providerRaw = sample?.provider ?: "-"
         val gnss = gnssUsedTotal(sample?.gnssUsed, sample?.gnssTotal)
         val cn0 = cn0Text(sample?.cn0?.toFloat())
         val idealJst = timeJst(slot.idealMs)
@@ -317,48 +313,13 @@ object Formatters {
             modifier = modifier.padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Line 1: provider classification and raw provider
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    Icons.Outlined.GpsFixed,
-                    contentDescription = null,
-                    modifier = Modifier.size(ICON_SIZE)
-                )
-                Spacer(Modifier.width(SPACER_SIZE))
-                BoldLabel("Provider")
-                Text(provider, style = MaterialTheme.typography.bodyMedium)
-
-                if (providerRaw.isNotBlank() && providerRaw != provider) {
-                    Text(" (", style = MaterialTheme.typography.bodyMedium)
-                    Text(providerRaw, style = MaterialTheme.typography.bodyMedium)
-                    Text(")", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-
-            // Line 2: GNSS / C/N0
-            if (sample != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.SignalCellularAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE)
-                    )
-                    Spacer(Modifier.width(SPACER_SIZE))
-                    BoldLabel("GNSS")
-                    Text(gnss, style = MaterialTheme.typography.bodyMedium)
-
-                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
-
-                    Icon(
-                        Icons.Outlined.SignalCellularAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(ICON_SIZE)
-                    )
-                    Spacer(Modifier.width(SPACER_SIZE))
-                    BoldLabel("C/N0")
-                    Text(cn0, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+            // Line 1/2: Provider and (optional) GNSS/CN0.
+            ProviderGnssLine(
+                provider = provider,
+                gnss = gnss,
+                cn0 = cn0,
+                showGnss = sample != null
+            )
 
             // Line 3: Ideal / Delta t
             if (slot.idealMs != 0L || (slot.deltaMs ?: 0L) != 0L) {
@@ -402,6 +363,143 @@ object Formatters {
 
             // Line 6: Heading / Course / Speed
             HeadingCourseSpeedLine(head = head, course = course, speed = speed)
+        }
+    }
+
+    @Composable
+    private fun ProviderGnssLine(
+        provider: String,
+        gnss: String,
+        cn0: String,
+        showGnss: Boolean
+    ) {
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val density = LocalDensity.current
+            val textMeasurer = rememberTextMeasurer()
+            val bodyStyle = MaterialTheme.typography.bodyMedium
+            val labelStyle = bodyStyle.copy(fontWeight = FontWeight.Bold)
+
+            fun measureTextPx(text: String, isLabel: Boolean): Float {
+                val style = if (isLabel) labelStyle else bodyStyle
+                return textMeasurer.measure(
+                    text = AnnotatedString(text),
+                    style = style
+                ).size.width.toFloat()
+            }
+
+            if (!showGnss) {
+                KeyValueRow(
+                    icon = Icons.Outlined.GpsFixed,
+                    label = "Provider",
+                    value = provider,
+                    maxLines = 1
+                )
+                return@BoxWithConstraints
+            }
+
+            val fixedPx = with(density) {
+                ((ICON_SIZE * 3f) + (SPACER_SIZE * 3f)).toPx()
+            }
+            val measuredPx =
+                measureTextPx("Provider : ", isLabel = true) +
+                    measureTextPx(provider, isLabel = false) +
+                    measureTextPx(" / ", isLabel = false) +
+                    measureTextPx("GNSS : ", isLabel = true) +
+                    measureTextPx(gnss, isLabel = false) +
+                    measureTextPx(" / ", isLabel = false) +
+                    measureTextPx("C/N0 : ", isLabel = true) +
+                    measureTextPx(cn0, isLabel = false)
+
+            val shouldSplit = fixedPx + measuredPx > with(density) { maxWidth.toPx() }
+            if (shouldSplit) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    KeyValueRow(
+                        icon = Icons.Outlined.GpsFixed,
+                        label = "Provider",
+                        value = provider,
+                        maxLines = 1
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Outlined.SignalCellularAlt,
+                            contentDescription = null,
+                            modifier = Modifier.size(ICON_SIZE)
+                        )
+                        Spacer(Modifier.width(SPACER_SIZE))
+                        BoldLabel("GNSS")
+                        Text(
+                            gnss,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+
+                        Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                        Icon(
+                            Icons.Outlined.SignalCellularAlt,
+                            contentDescription = null,
+                            modifier = Modifier.size(ICON_SIZE)
+                        )
+                        Spacer(Modifier.width(SPACER_SIZE))
+                        BoldLabel("C/N0")
+                        Text(
+                            cn0,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.GpsFixed,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("Provider")
+                    Text(
+                        provider,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                    Icon(
+                        Icons.Outlined.SignalCellularAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("GNSS")
+                    Text(
+                        gnss,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(" / ", style = MaterialTheme.typography.bodyMedium)
+
+                    Icon(
+                        Icons.Outlined.SignalCellularAlt,
+                        contentDescription = null,
+                        modifier = Modifier.size(ICON_SIZE)
+                    )
+                    Spacer(Modifier.width(SPACER_SIZE))
+                    BoldLabel("C/N0")
+                    Text(
+                        cn0,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
         }
     }
 

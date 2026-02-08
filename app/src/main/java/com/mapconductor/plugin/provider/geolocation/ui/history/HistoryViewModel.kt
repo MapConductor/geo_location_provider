@@ -8,10 +8,16 @@ import com.mapconductor.plugin.provider.storageservice.room.LocationSample
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
+
+    companion object {
+        private const val MIN_BUFFER_LIMIT: Int = 3
+        private const val DEFAULT_BUFFER_LIMIT: Int = 6
+    }
 
     /**
      * In-memory buffer for the history list.
@@ -20,7 +26,8 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
      * - Records remain in this buffer even when Room rows are deleted by upload/export,
      *   and are dropped only when the buffer exceeds [bufferLimit].
      */
-    private val bufferLimit: Int = 6
+    private val bufferLimitFlow: MutableStateFlow<Int> =
+        MutableStateFlow(DEFAULT_BUFFER_LIMIT)
 
     private val _items: MutableStateFlow<List<LocationSample>> =
         MutableStateFlow(emptyList())
@@ -30,10 +37,29 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     init {
         val ctx = app.applicationContext
         viewModelScope.launch(Dispatchers.IO) {
-            StorageService.latestFlow(ctx, limit = bufferLimit)
+            bufferLimitFlow
+                .flatMapLatest { limit ->
+                    StorageService.latestFlow(ctx, limit = limit)
+                }
                 .collect { latest ->
                     updateBuffer(latest)
                 }
+        }
+    }
+
+    fun setBufferLimit(limit: Int) {
+        val next = limit.coerceAtLeast(MIN_BUFFER_LIMIT)
+        if (bufferLimitFlow.value == next) return
+        bufferLimitFlow.value = next
+
+        val comparator =
+            compareByDescending<LocationSample> { it.timeMillis }
+                .thenBy { providerRank(it.provider) }
+                .thenByDescending { it.id }
+
+        val current = _items.value
+        if (current.size > next) {
+            _items.value = current.sortedWith(comparator).take(next)
         }
     }
 
@@ -43,6 +69,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        val bufferLimit: Int = bufferLimitFlow.value.coerceAtLeast(MIN_BUFFER_LIMIT)
         val comparator =
             compareByDescending<LocationSample> { it.timeMillis }
                 .thenBy { providerRank(it.provider) }

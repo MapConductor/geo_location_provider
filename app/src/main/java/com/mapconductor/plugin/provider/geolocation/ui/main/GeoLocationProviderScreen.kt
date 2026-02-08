@@ -2,6 +2,7 @@ package com.mapconductor.plugin.provider.geolocation.ui.main
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,10 +21,15 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -72,13 +78,37 @@ fun GeoLocationProviderScreen(
                 )
 
                 // History area; UI does not touch Room directly.
-                Box(
+                BoxWithConstraints(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
+                    val configuration = LocalConfiguration.current
+                    val isCompact = configuration.screenWidthDp < 360
+                    val density = LocalDensity.current
+                    val firstRowHeightPx = remember { mutableStateOf(0) }
+
+                    LaunchedEffect(configuration.screenWidthDp, configuration.screenHeightDp) {
+                        firstRowHeightPx.value = 0
+                    }
+
+                    val availableHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(0f)
+                    val fallbackRowHeightPx =
+                        with(density) { (if (isCompact) 240.dp else 160.dp).toPx() }
+                            .coerceAtLeast(1f)
+                    val rowHeightPx =
+                        firstRowHeightPx.value.toFloat().takeIf { it > 0f } ?: fallbackRowHeightPx
+
+                    val computed =
+                        (availableHeightPx / rowHeightPx).toInt()
+                            .coerceAtLeast(3)
+                            .coerceAtMost(50)
+                    LaunchedEffect(computed) {
+                        historyVm.setBufferLimit(computed)
+                    }
                     LocationHistoryList(
                         records = records,
+                        onFirstRowHeightPx = { px -> firstRowHeightPx.value = px },
                         modifier = Modifier.fillMaxSize()
                     )
                 }

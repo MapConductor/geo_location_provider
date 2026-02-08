@@ -187,7 +187,7 @@ fun MapScreen() {
                 modifier = Modifier.padding(start = 8.dp),
                 enabled = !state.filterApplied
             )
-            Text(text = "GPS(corrected)")
+            Text(text = "GPS(EKF)")
 
             Checkbox(
                 checked = state.gpsDrChecked,

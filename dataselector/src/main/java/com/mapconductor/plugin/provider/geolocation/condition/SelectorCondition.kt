@@ -37,10 +37,10 @@ enum class SortOrder {
  * One row of grid-snapped or direct extraction result.
  * - idealMs: target (ideal) timestamp.
  * - sample : selected sample around idealMs (null when gap).
- * - deltaMs: sample.createdAt - idealMs (when sample is not null).
+ * - deltaMs: sample.timeMillis - idealMs (when sample is not null).
  *
  * In direct extraction (intervalSec == null),
- *   idealMs = sample.createdAt and deltaMs = 0.
+ *   idealMs = sample.timeMillis and deltaMs = 0.
  */
 data class SelectedSlot(
     val idealMs: Long,
