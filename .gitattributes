@@ -1,0 +1,5 @@
+## Line ending normalization
+#
+# This repo is often edited on Windows where `core.autocrlf=true` is common.
+# Enforce LF for Markdown so docs have consistent line endings across platforms.
+*.md text eol=lf
