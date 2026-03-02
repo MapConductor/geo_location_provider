@@ -76,7 +76,7 @@ context.startService(intent)
 ## Recetas (qué hacer -> qué ocurre)
 
 - Solo tracking: se insertan muestras `provider="gps"`.
-- DR habilitado: se insertan muestras `provider="dead_reckoning"` según el modo.
+- DR habilitado: se insertan muestras `provider="dead_reckoning"` según el modo (requiere acelerómetro + giroscopio; si faltan, se suprime DR).
 - Corrección EKF habilitada: se insertan muestras `provider="gps_corrected"` cuando aplica.
 - Cambios de settings: el servicio observa flows y actualiza el comportamiento en vivo.
 
@@ -137,6 +137,7 @@ Lo que escribes:
 
 - `drIntervalSec = 0` deshabilita DR completamente.
 - `drIntervalSec > 0` habilita DR; `drMode` define la forma de salida.
+  - En dispositivos sin IMU requerido (acelerómetro + giroscopio), `drIntervalSec > 0` no produce muestras DR (se suprime DR).
 
 Lo que obtienes:
 

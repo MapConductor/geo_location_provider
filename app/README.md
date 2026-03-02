@@ -9,7 +9,7 @@ This is the Jetpack Compose sample application. More importantly, it is a refere
 When you run the app on a device and press `Start`:
 
 - A foreground location service starts (`:core`), collects GPS observations (`:gps`), and persists samples (`:storageservice`).
-- Optional Dead Reckoning (DR) runs (`:deadreckoning`) and emits predicted points as additional samples.
+- Optional Dead Reckoning (DR) runs (`:deadreckoning`) and emits predicted points as additional samples (requires accelerometer + gyroscope; otherwise DR is suppressed).
 - Optional GPS correction can be enabled (IMU-aided EKF via `ImsEkf`) and stored as `gps_corrected` samples.
 - Export and upload pipelines can run (`:datamanager`):
   - nightly backlog export/upload (Worker)

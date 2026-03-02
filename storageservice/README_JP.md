@@ -64,6 +64,7 @@ Gradle モジュール: `:storageservice`
 
 - `intervalSecFlow(context)`: GPS インターバル(秒)
 - `drIntervalSecFlow(context)`: DR インターバル(秒、0 で無効)
+  - 注: 端末に必要な IMU センサー(加速度 + ジャイロ)が無い場合、`drIntervalSecFlow > 0` でも DR サンプルは生成されません(`:core` 側で抑制されます)。
 - `drGpsIntervalSecFlow(context)`: GPS->DR 投入の間引き(秒、0 は毎回)
 - `drModeFlow(context)`: Prediction / Completion
 

@@ -116,6 +116,7 @@ ASCII-only ルール(本番コード):
 
 DR モード:
 
+- IMU センサー(加速度 + ジャイロ)が必要です。未搭載の場合、`drIntervalSec > 0` でも `:core` 側で DR 出力は抑制されます。
 - `DrMode.Prediction`: ticker で realtime の `dead_reckoning` を追加挿入。
 - `DrMode.Completion`: GPS fix 間を backfill して `dead_reckoning` を挿入(リアルタイム ticker は使わない)。
 

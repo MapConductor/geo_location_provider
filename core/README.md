@@ -66,6 +66,7 @@ What you do:
 What happens:
 
 - The service submits GPS fixes to the DR engine.
+- If required IMU sensors are missing (accelerometer + gyroscope), DR is suppressed and no `provider="dead_reckoning"` samples are inserted.
 - Depending on DR mode:
   - Prediction: periodic DR points are inserted as `provider="dead_reckoning"`.
   - Completion: DR points are backfilled between GPS fixes and inserted as `provider="dead_reckoning"`.
@@ -172,6 +173,7 @@ DR behavior is controlled by `SettingsRepository` flows (`drIntervalSecFlow`, `d
 What you write:
 
 - Set `drIntervalSec` to `0` to disable DR, or `> 0` to enable it.
+- On devices without required IMU sensors (accelerometer + gyroscope), `drIntervalSec > 0` does not produce DR samples (DR is suppressed).
 - Choose `DrMode`:
   - `Prediction`: emit realtime DR samples on a ticker.
   - `Completion`: do not emit realtime points; instead backfill between GPS fixes.

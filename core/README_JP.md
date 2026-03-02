@@ -109,6 +109,7 @@ context.startService(intent)
 起きること:
 
 - サービスが GPS fix を DR エンジンへ投入します。
+- 必要な IMU センサー(加速度 + ジャイロ)が未搭載の場合、DR は抑制され `provider="dead_reckoning"` は生成されません。
 - DR mode により:
   - Prediction: ticker で DR 点を `provider="dead_reckoning"` として保存
   - Completion: GPS-GPS 間をバックフィルし `provider="dead_reckoning"` として保存
@@ -191,6 +192,7 @@ viewModelScope.launch {
 
 - `drIntervalSec = 0` で DR を完全に無効化。
 - `drIntervalSec > 0` で DR を有効化し、`drMode` で出力形を選ぶ。
+  - 必要な IMU センサー(加速度 + ジャイロ)が未搭載の場合、`drIntervalSec > 0` でも DR は生成されません(抑制されます)。
 
 起きること:
 

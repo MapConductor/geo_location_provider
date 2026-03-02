@@ -5,7 +5,7 @@ GeoLocationProvider は、位置情報を記録・保存・エクスポート・
 概要:
 
 - 位置サンプルを Room DB に保存
-- (任意) Dead Reckoning (DR) サンプルを生成
+- (任意) Dead Reckoning (DR) サンプルを生成 (加速度 + ジャイロが必要。未搭載の場合は DR を抑制)
 - GeoJSON / GPX へエクスポート (任意で ZIP 化)
 - Google Drive へアップロード (夜間バックアップ + 任意のリアルタイムアップロード)
 

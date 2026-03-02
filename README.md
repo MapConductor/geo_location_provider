@@ -5,7 +5,7 @@ GeoLocationProvider is an Android multi-module SDK and sample app for recording,
 At a high level, it:
 
 - records location samples into a Room database
-- optionally generates Dead Reckoning (DR) samples
+- optionally generates Dead Reckoning (DR) samples (requires accelerometer + gyroscope; otherwise DR is suppressed)
 - exports data as GeoJSON or GPX (optionally zipped)
 - uploads exports/snapshots to Google Drive (nightly backup and optional realtime upload)
 

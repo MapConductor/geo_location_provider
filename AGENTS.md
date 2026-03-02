@@ -171,6 +171,7 @@ Dead Reckoning notes (summary):
 
 - DR is created via `DeadReckoningFactory.create(context, config)`.
 - GPS fixes are submitted using the hold position as the anchor.
+- DR requires IMU sensors (accelerometer + gyroscope). If sensors are missing, `:core` suppresses DR output even when `drIntervalSec > 0`.
 - Modes:
   - `DrMode.Prediction`: ticker inserts additional realtime `dead_reckoning` samples.
   - `DrMode.Completion`: backfills `dead_reckoning` samples between GPS fixes (no realtime ticker points).

@@ -9,7 +9,7 @@ Este módulo es una aplicación de ejemplo con Jetpack Compose. También sirve c
 Al ejecutar la app en un dispositivo y presionar `Start`:
 
 - El servicio en primer plano (`:core`) empieza a recolectar GPS (`:gps`) y a persistir en Room vía `:storageservice`.
-- (Opcional) Dead Reckoning (`:deadreckoning`) produce muestras adicionales.
+- (Opcional) Dead Reckoning (`:deadreckoning`) produce muestras adicionales (requiere acelerómetro + giroscopio; si faltan, se suprime DR).
 - (Opcional) corrección EKF asistida por IMU (`ImsEkf`) produce muestras corregidas `gps_corrected`.
 - Puedes configurar export/upload (`:datamanager`) para nightly (nocturno) y realtime (tiempo real).
 

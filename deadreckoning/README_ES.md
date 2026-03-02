@@ -8,9 +8,16 @@ Este módulo provee un motor de dead reckoning basado en IMU que puede predecir 
 
 Entradas:
 
-- Sensores IMU disponibles.
+- Sensores IMU disponibles (acelerómetro + giroscopio).
 - Fix GPS vía `submitGpsFix(...)`.
 - Rango de tiempo vía `predict(fromMillis, toMillis)`.
+
+Sensores usados:
+
+- Acelerómetro (`Sensor.TYPE_ACCELEROMETER`)
+  - Se usa la magnitud de la aceleración horizontal para ayudar a actualizar la velocidad interna y para detección de estático (ventana de varianza).
+- Giroscopio (`Sensor.TYPE_GYROSCOPE`)
+  - Se usa la magnitud de la velocidad angular para detección de estático (ventana de varianza).
 
 Salidas:
 

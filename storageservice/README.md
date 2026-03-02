@@ -65,6 +65,7 @@ Settings flows used by the service/UI:
 
 - `intervalSecFlow(context)`: GPS interval seconds (defaults + minimum applied)
 - `drIntervalSecFlow(context)`: DR interval seconds (0 disables DR)
+  - Note: `drIntervalSecFlow > 0` does not guarantee DR samples on devices without required IMU sensors (accelerometer + gyroscope); `:core` may suppress DR.
 - `drGpsIntervalSecFlow(context)`: GPS->DR submit throttle (0 = every fix)
 - `drModeFlow(context)`: Prediction vs Completion
 

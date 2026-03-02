@@ -12,6 +12,13 @@ Gradle モジュール: `:deadreckoning`
 - GPS fix を `submitGpsFix(...)` で投入すること
 - 予測したい時間範囲を `predict(fromMillis, toMillis)` で指定すること
 
+使用センサー:
+
+- 加速度センサー (`Sensor.TYPE_ACCELEROMETER`)
+  - 水平方向の加速度の大きさを使い、速度更新の補助と静止判定(分散ウィンドウ)に利用します。
+- ジャイロセンサー (`Sensor.TYPE_GYROSCOPE`)
+  - 角速度の大きさを静止判定(分散ウィンドウ)に利用します。
+
 出力:
 
 - 指定範囲の `PredictedPoint` リスト

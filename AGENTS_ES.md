@@ -116,6 +116,7 @@ Providers en `LocationSample.provider`:
 
 Modos DR:
 
+- Requiere sensores IMU (acelerómetro + giroscopio). Si faltan, `:core` suprime DR incluso si `drIntervalSec > 0`.
 - `DrMode.Prediction`: ticker inserta puntos realtime `dead_reckoning`.
 - `DrMode.Completion`: backfill entre fixes GPS (sin ticker realtime).
 

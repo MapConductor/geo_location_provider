@@ -37,6 +37,7 @@ Archivo: `storageservice/src/main/java/com/mapconductor/plugin/provider/storages
 `SettingsRepository` (DataStore):
 
 - `intervalSecFlow`, `drIntervalSecFlow`, `drGpsIntervalSecFlow`, `drModeFlow`
+  - Nota: `drIntervalSecFlow > 0` no garantiza muestras DR en dispositivos sin IMU requerido (acelerómetro + giroscopio); `:core` puede suprimir DR.
 
 ## Recetas
 
