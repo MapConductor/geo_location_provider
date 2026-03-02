@@ -12,6 +12,7 @@ import com.mapconductor.plugin.provider.geolocation.deadreckoning.api.PredictedP
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
@@ -21,8 +22,8 @@ import kotlin.math.sqrt
  * - Uses GPS fixes as hard anchors for absolute position.
  * - Integrates a 1D motion state along the latest GPS direction so that
  *   the DR position always stays on that straight line.
- * - Static / moving state is decided inside this class based on GPS
- *   speed with hysteresis and exposed via isLikelyStatic().
+ * - Static / moving state is decided inside this class based on GPS speed
+ *   with hysteresis and IMU variance and exposed via isLikelyStatic().
  * - Accelerometer input is used to drive speed changes toward the latest
  *   GPS speed while keeping the straight-line constraint.
  */
@@ -66,6 +67,9 @@ internal class DeadReckoningImpl(
 
         // Relaxation time constant for speed convergence [s].
         private const val SPEED_RELAXATION_TIME_SEC = 1.0
+
+        // Reference value that matches DeadReckoningConfig default.
+        private const val DEFAULT_VELOCITY_GAIN = 0.1f
 
         // Maximum allowed integration gap between accelerometer samples [s].
         private const val MAX_INTEGRATION_GAP_SEC = 5.0
@@ -131,8 +135,10 @@ internal class DeadReckoningImpl(
     @Volatile
     private var sensorListener: SensorEventListener? = null
 
-    private val accelLock = Any()
-    private val accelWindow = HorizontalAccelWindow(ACC_WINDOW_MILLIS)
+    private val imuLock = Any()
+    private val accelMeanWindow = HorizontalAccelWindow(ACC_WINDOW_MILLIS)
+    private val accelVarWindow = VarianceWindow(max(1, config.windowSize))
+    private val gyroVarWindow = VarianceWindow(max(1, config.windowSize))
 
     override fun start() {
         val mgr = sensorManager ?: return
@@ -140,23 +146,35 @@ internal class DeadReckoningImpl(
             return
         }
         val accSensor = mgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) ?: return
+        val gyroSensor = mgr.getDefaultSensor(Sensor.TYPE_GYROSCOPE) ?: return
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
-                if (event.sensor.type != Sensor.TYPE_ACCELEROMETER) {
-                    return
-                }
-                if (event.values.size < 2) {
-                    return
-                }
-                val ax = event.values[0]
-                val ay = event.values[1]
-                val horizontal = sqrt(ax * ax + ay * ay)
                 val now = System.currentTimeMillis()
-                synchronized(accelLock) {
-                    accelWindow.push(now, horizontal)
+                when (event.sensor.type) {
+                    Sensor.TYPE_ACCELEROMETER -> {
+                        if (event.values.size < 2) {
+                            return
+                        }
+                        val ax = event.values[0]
+                        val ay = event.values[1]
+                        val horizontal = sqrt(ax * ax + ay * ay)
+                        synchronized(imuLock) {
+                            accelMeanWindow.push(now, horizontal)
+                            accelVarWindow.push(horizontal)
+                        }
+                        onAccelerometerSample(now, horizontal.toDouble())
+                    }
+                    Sensor.TYPE_GYROSCOPE -> {
+                        val wx = event.values.getOrNull(0) ?: return
+                        val wy = event.values.getOrNull(1) ?: return
+                        val wz = event.values.getOrNull(2) ?: 0f
+                        val w = sqrt(wx * wx + wy * wy + wz * wz)
+                        synchronized(imuLock) {
+                            gyroVarWindow.push(w)
+                        }
+                    }
                 }
-                onAccelerometerSample(now, horizontal.toDouble())
             }
 
             override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
@@ -165,6 +183,7 @@ internal class DeadReckoningImpl(
         }
         sensorListener = listener
         mgr.registerListener(listener, accSensor, SensorManager.SENSOR_DELAY_GAME)
+        mgr.registerListener(listener, gyroSensor, SensorManager.SENSOR_DELAY_GAME)
     }
 
     override fun stop() {
@@ -174,8 +193,10 @@ internal class DeadReckoningImpl(
             mgr.unregisterListener(listener)
         }
         sensorListener = null
-        synchronized(accelLock) {
-            accelWindow.clear()
+        synchronized(imuLock) {
+            accelMeanWindow.clear()
+            accelVarWindow.clear()
+            gyroVarWindow.clear()
         }
     }
 
@@ -321,7 +342,8 @@ internal class DeadReckoningImpl(
     override fun isImuCapable(): Boolean {
         val mgr = sensorManager ?: return false
         val acc = mgr.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        return acc != null
+        val gyro = mgr.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        return acc != null && gyro != null
     }
 
     override fun isLikelyStatic(): Boolean {
@@ -379,7 +401,13 @@ internal class DeadReckoningImpl(
                 1.0
             }
 
-            val accelParallel = motionFactor * (speedError / relaxation)
+            val gain =
+                if (DEFAULT_VELOCITY_GAIN > 0f) {
+                    (config.velocityGain / DEFAULT_VELOCITY_GAIN).toDouble().coerceAtLeast(0.0)
+                } else {
+                    1.0
+                }
+            val accelParallel = motionFactor * gain * (speedError / relaxation)
             var newSpeed = currentSpeed + accelParallel * dtSec
 
             if (newSpeed < 0.0) {
@@ -429,8 +457,8 @@ internal class DeadReckoningImpl(
         val nowMillis = fix.timestampMillis
 
         val effectiveSpeed = computeEffectiveSpeedMpsForStatic(fix)
-        val meanAccel: Float? = synchronized(accelLock) {
-            accelWindow.meanAbs()
+        val (meanAccel: Float?, accelVar: Float?, gyroVar: Float?) = synchronized(imuLock) {
+            Triple(accelMeanWindow.meanAbs(), accelVarWindow.variance(), gyroVarWindow.variance())
         }
 
         // High-speed regime: force moving and skip static detection entirely.
@@ -450,6 +478,11 @@ internal class DeadReckoningImpl(
         val accelLow = meanAccel?.let { it <= ACC_STATIC_THRESHOLD } ?: false
         val accelHigh = meanAccel?.let { it >= ACC_MOVING_THRESHOLD } ?: false
 
+        val accelVarOk = accelVar?.let { it <= config.staticAccelVarThreshold } ?: true
+        val gyroVarOk = gyroVar?.let { it <= config.staticGyroVarThreshold } ?: true
+        val imuOkForStatic = accelVarOk && gyroVarOk
+        val imuSuggestsMoving = !(accelVarOk && gyroVarOk)
+
         // When accelerometer window is not ready, fall back to speed-only.
         // For recent high-speed motion (for example trains), allow speed-only
         // static detection so that station stops are recognized even when
@@ -460,8 +493,8 @@ internal class DeadReckoningImpl(
             (meanAccel == null) || accelLow
         }
 
-        val staticCandidate = speedLow && accelOkForStatic
-        val movingCandidate = speedHigh || accelHigh
+        val staticCandidate = speedLow && accelOkForStatic && (recentlyHighSpeed || imuOkForStatic)
+        val movingCandidate = speedHigh || accelHigh || (!recentlyHighSpeed && imuSuggestsMoving)
 
         if (staticCandidate) {
             val start = staticEnterStartMillis ?: nowMillis
@@ -682,6 +715,58 @@ internal class DeadReckoningImpl(
                     break
                 }
             }
+        }
+    }
+
+    /**
+     * Fixed-size variance window.
+     *
+     * variance() returns null until the window is full so callers can ignore
+     * early startup values.
+     */
+    private class VarianceWindow(
+        private val capacity: Int
+    ) {
+        private val values = FloatArray(capacity)
+        private var size: Int = 0
+        private var index: Int = 0
+        private var sum: Double = 0.0
+        private var sumSq: Double = 0.0
+
+        fun push(value: Float) {
+            if (size < capacity) {
+                values[index] = value
+                size++
+                sum += value.toDouble()
+                sumSq += (value * value).toDouble()
+                index = (index + 1) % capacity
+                return
+            }
+
+            val old = values[index]
+            values[index] = value
+            sum += value.toDouble() - old.toDouble()
+            sumSq += (value * value).toDouble() - (old * old).toDouble()
+            index = (index + 1) % capacity
+        }
+
+        fun clear() {
+            size = 0
+            index = 0
+            sum = 0.0
+            sumSq = 0.0
+        }
+
+        fun variance(): Float? {
+            if (size < capacity) {
+                return null
+            }
+            val mean = sum / size.toDouble()
+            val v = (sumSq / size.toDouble()) - (mean * mean)
+            if (!v.isFinite()) {
+                return null
+            }
+            return v.toFloat().coerceAtLeast(0f)
         }
     }
 }

@@ -12,6 +12,13 @@ Inputs:
 - Periodic GPS fixes provided by the host (`submitGpsFix`).
 - A time range to predict (`predict(fromMillis, toMillis)`).
 
+Sensors used:
+
+- Accelerometer (`Sensor.TYPE_ACCELEROMETER`)
+  - Horizontal acceleration magnitude is used to drive the internal speed relaxation and for static detection (variance window).
+- Gyroscope (`Sensor.TYPE_GYROSCOPE`)
+  - Angular rate magnitude is used for static detection (variance window).
+
 Outputs:
 
 - `PredictedPoint` values for the requested time range.

@@ -92,6 +92,7 @@ class GeoLocationService : Service() {
     private lateinit var gpsEngine: GpsLocationEngine
     private lateinit var headingSensor: HeadingSensor
     private var dr: DeadReckoning? = null
+    @Volatile private var drImuCapable: Boolean = false
 
     // TEMP_BATTERY_LOGGER_REMOVE_BEFORE_SDK_RELEASE
     private var tempBatteryLogger: TempBatteryPercentCsvLogger? = null
@@ -175,7 +176,20 @@ class GeoLocationService : Service() {
             velocityGain = 0.4f,
             windowSize = 96
         )
-        dr = DeadReckoningFactory.create(applicationContext, drConfig).also { it.start() }
+        dr =
+            DeadReckoningFactory.create(applicationContext, drConfig).also { engine ->
+                engine.start()
+                drImuCapable =
+                    try {
+                        engine.isImuCapable()
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "dr.isImuCapable() failed", t)
+                        false
+                    }
+                if (!drImuCapable) {
+                    Log.w(TAG, "DR IMU sensors not available, DR will be suppressed")
+                }
+            }
         ensureChannel()
         // GPS sampling interval is always synced from SettingsRepository.intervalSecFlow().
         serviceScope.launch {
@@ -672,7 +686,7 @@ class GeoLocationService : Service() {
         //
         // In Prediction mode, this may be throttled by drGpsIntervalSec. In Completion mode,
         // throttling is intentionally ignored because completion relies on GPS-to-GPS segments.
-        if (drIntervalSec > 0) {
+        if (drIntervalSec > 0 && drImuCapable) {
             val modeSnapshot = drMode
             val startMillis = lastFixMillis
             val endMillis = now
@@ -724,6 +738,10 @@ class GeoLocationService : Service() {
     private fun startDrTicker() {
         stopDrTicker()
         val d = dr ?: return
+        if (!drImuCapable) {
+            Log.w(TAG, "startDrTicker: IMU not available, DR suppressed")
+            return
+        }
         if (drIntervalSec <= 0) {
             Log.d(TAG, "startDrTicker: DR disabled (intervalSec=$drIntervalSec)")
             return
@@ -899,6 +917,11 @@ class GeoLocationService : Service() {
         if (!isRunning.get()) {
             return
         }
+        if (!drImuCapable && drIntervalSec > 0) {
+            Log.w(TAG, "updateDrTicker: IMU not available, DR suppressed")
+            stopDrTicker()
+            return
+        }
         when {
             drIntervalSec <= 0 -> {
                 Log.d(TAG, "updateDrTicker: DR disabled (intervalSec=$drIntervalSec)")
@@ -922,6 +945,9 @@ class GeoLocationService : Service() {
         endAccuracyM: Float?,
         endSpeedMps: Float
     ) {
+        if (!drImuCapable) {
+            return
+        }
         val engine = dr ?: return
         if (endMillis <= startMillis) {
             return
