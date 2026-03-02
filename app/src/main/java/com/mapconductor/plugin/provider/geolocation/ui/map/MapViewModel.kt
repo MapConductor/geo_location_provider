@@ -65,6 +65,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
     private val appliedBaseSamples = MutableStateFlow<List<LocationSample>>(emptyList())
     private val mapSession = MutableStateFlow(0)
     private var lastFollowedDrTimeMillis: Long? = null
+    @Volatile private var pendingRecenterOnData: Boolean = false
     private val eventsFlow = MutableSharedFlow<Event>()
 
     private val sourceFlow = StorageService.latestFlow(
@@ -76,6 +77,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
         val gps: Boolean,
         val gpsCorrected: Boolean,
         val dr: Boolean,
+        val gpsDr: Boolean,
         val limit: Int,
         val rangeSpec: MapRangeSpecParser.Spec
     )
@@ -154,30 +156,57 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             val markers: List<LocationSample>
             val latest: LocationSample?
+            val effectiveBaseSamples: List<LocationSample> =
+                if (filter == null) {
+                    emptyList()
+                } else {
+                    val count = filter.limit.coerceIn(0, SOURCE_LIMIT)
+                    when (val spec = filter.rangeSpec) {
+                        is MapRangeSpecParser.Spec.None -> {
+                            if (count == 0) samples else samples.take(count)
+                        }
+
+                        is MapRangeSpecParser.Spec.OffsetWindow -> {
+                            if (samples.isEmpty()) {
+                                emptyList()
+                            } else {
+                                val start = spec.startOffset.coerceAtLeast(0)
+                                if (start >= samples.size) {
+                                    emptyList()
+                                } else {
+                                    val end = spec.endOffsetInclusive.coerceIn(start, samples.size - 1)
+                                    val inRange = samples.subList(start, end + 1)
+                                    if (count == 0 || inRange.size > count) {
+                                        inRange.toList()
+                                    } else {
+                                        val end2 = (start + count - 1).coerceAtMost(samples.size - 1)
+                                        samples.subList(start, end2 + 1).toList()
+                                    }
+                                }
+                            }
+                        }
+
+                        is MapRangeSpecParser.Spec.TimeWindow -> {
+                            baseSamples
+                        }
+                    }
+                }
 
             if (filter == null) {
                 markers = emptyList()
                 latest = null
             } else {
-                val baseNormalized = baseSamples.map { sample ->
-                    sample to Formatters.providerKind(sample.provider)
-                }
+                val wantGps = filter.gps || filter.gpsDr
+                val wantGpsCorrected = filter.gpsCorrected
+                val wantDr = filter.dr || filter.gpsDr
 
-                val filtered = baseNormalized
+                val filtered = effectiveBaseSamples
+                    .map { sample -> sample to Formatters.providerKind(sample.provider) }
                     .filter { (_, kind) ->
                         val isGps = kind == ProviderKind.Gps
                         val isGpsCorrected = kind == ProviderKind.GpsCorrected
                         val isDr = kind == ProviderKind.DeadReckoning
-                        when {
-                            filter.gps && !filter.gpsCorrected && !filter.dr -> isGps
-                            !filter.gps && filter.gpsCorrected && !filter.dr -> isGpsCorrected
-                            !filter.gps && !filter.gpsCorrected && filter.dr -> isDr
-                            filter.gps && filter.gpsCorrected && !filter.dr -> isGps || isGpsCorrected
-                            filter.gps && !filter.gpsCorrected && filter.dr -> isGps || isDr
-                            !filter.gps && filter.gpsCorrected && filter.dr -> isGpsCorrected || isDr
-                            filter.gps && filter.gpsCorrected && filter.dr -> isGps || isGpsCorrected || isDr
-                            else -> false
-                        }
+                        (wantGps && isGps) || (wantGpsCorrected && isGpsCorrected) || (wantDr && isDr)
                     }
                     .map { it.first }
 
@@ -187,7 +216,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             val gpsDrPath: List<LocationSample> =
                 if (filter != null && gpsDr) {
-                    val candidates = baseSamples
+                    val candidates = effectiveBaseSamples
                         .map { sample -> sample to Formatters.providerKind(sample.provider) }
                         .filter { (_, kind) ->
                             kind == ProviderKind.Gps ||
@@ -267,9 +296,19 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                     s.coerceIn(0.1, 1.0)
                 }
 
-            // When a DR-only filter is applied, follow the latest DR point by
+            if (filter != null && pendingRecenterOnData && latest != null) {
+                pendingRecenterOnData = false
+                mapSession.value = mapSession.value + 1
+            }
+
+            // When a DR-only filter is applied (live mode), follow the latest DR point by
             // bumping the map session whenever a new DR sample arrives.
-            if (filter != null && filter.dr && !filter.gps && !filter.gpsCorrected) {
+            if (filter != null &&
+                filter.rangeSpec is MapRangeSpecParser.Spec.None &&
+                filter.dr &&
+                !filter.gps &&
+                !filter.gpsCorrected
+            ) {
                 val latestDrTime = latestDr?.timeMillis
                 if (latestDrTime != null) {
                     val prev = lastFollowedDrTimeMillis
@@ -396,6 +435,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
             appliedFilter.value = null
             appliedBaseSamples.value = emptyList()
             lastFollowedDrTimeMillis = null
+            pendingRecenterOnData = false
             return
         }
 
@@ -439,12 +479,13 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 gps = gpsEnabled.value,
                 gpsCorrected = gpsCorrectedEnabled.value,
                 dr = drEnabled.value,
+                gpsDr = gpsDrEnabled.value,
                 limit = limit,
                 rangeSpec = rangeSpec
             )
 
         appliedFilter.value = filter
-        mapSession.value = mapSession.value + 1
+        pendingRecenterOnData = true
 
         viewModelScope.launch {
             val ctx = getApplication<Application>().applicationContext
