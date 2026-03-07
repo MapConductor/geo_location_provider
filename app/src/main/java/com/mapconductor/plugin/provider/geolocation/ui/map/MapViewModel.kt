@@ -149,7 +149,9 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 sample to Formatters.providerKind(sample.provider)
             }
 
-            val dbGpsCount = normalized.count { (_, kind) -> kind == ProviderKind.Gps }
+            val dbGpsCount = normalized.count { (_, kind) ->
+                kind == ProviderKind.Gps || kind == ProviderKind.Network
+            }
             val dbGpsCorrectedCount = normalized.count { (_, kind) -> kind == ProviderKind.GpsCorrected }
             val dbDrCount = normalized.count { (_, kind) -> kind == ProviderKind.DeadReckoning }
             val dbTotalCount = samples.size
@@ -203,7 +205,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 val filtered = effectiveBaseSamples
                     .map { sample -> sample to Formatters.providerKind(sample.provider) }
                     .filter { (_, kind) ->
-                        val isGps = kind == ProviderKind.Gps
+                        val isGps = kind == ProviderKind.Gps || kind == ProviderKind.Network
                         val isGpsCorrected = kind == ProviderKind.GpsCorrected
                         val isDr = kind == ProviderKind.DeadReckoning
                         (wantGps && isGps) || (wantGpsCorrected && isGpsCorrected) || (wantDr && isDr)
@@ -220,12 +222,14 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                         .map { sample -> sample to Formatters.providerKind(sample.provider) }
                         .filter { (_, kind) ->
                             kind == ProviderKind.Gps ||
+                                kind == ProviderKind.Network ||
                                 kind == ProviderKind.DeadReckoning
                         }
                         .map { it.first }
 
                     val hasGps = candidates.any { sample ->
-                        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+                        val kind = Formatters.providerKind(sample.provider)
+                        kind == ProviderKind.Gps || kind == ProviderKind.Network
                     }
                     val hasDr = candidates.any { sample ->
                         Formatters.providerKind(sample.provider) ==
@@ -247,7 +251,8 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
             val displayedGpsCount = markers.count {
-                Formatters.providerKind(it.provider) == ProviderKind.Gps
+                val kind = Formatters.providerKind(it.provider)
+                kind == ProviderKind.Gps || kind == ProviderKind.Network
             }
             val displayedGpsCorrectedCount = markers.count {
                 Formatters.providerKind(it.provider) == ProviderKind.GpsCorrected
@@ -259,7 +264,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
             // Debug: latest GPS / DR samples.
             val latestGps = normalized.firstOrNull { (_, kind) ->
-                kind == ProviderKind.Gps
+                kind == ProviderKind.Gps || kind == ProviderKind.Network
             }?.first
             val latestDr = normalized.firstOrNull { (_, kind) ->
                 kind == ProviderKind.DeadReckoning
@@ -685,7 +690,7 @@ class MapViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun providerSortKey(provider: String): Int {
         return when (Formatters.providerKind(provider)) {
-            ProviderKind.Gps -> 0
+            ProviderKind.Gps, ProviderKind.Network -> 0
             ProviderKind.DeadReckoning -> 1
             else -> 2
         }

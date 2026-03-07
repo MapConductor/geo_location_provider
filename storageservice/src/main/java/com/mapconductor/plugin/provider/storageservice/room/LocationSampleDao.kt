@@ -31,8 +31,9 @@ internal interface LocationSampleDao {
           timeMillis DESC,
           CASE
             WHEN provider = 'gps' THEN 0
-            WHEN provider = 'gps_corrected' THEN 1
-            ELSE 2
+            WHEN provider = 'network' THEN 1
+            WHEN provider = 'gps_corrected' THEN 2
+            ELSE 3
           END,
           id DESC
         LIMIT :limit
@@ -52,8 +53,9 @@ internal interface LocationSampleDao {
           timeMillis DESC,
           CASE
             WHEN provider = 'gps' THEN 0
-            WHEN provider = 'gps_corrected' THEN 1
-            ELSE 2
+            WHEN provider = 'network' THEN 1
+            WHEN provider = 'gps_corrected' THEN 2
+            ELSE 3
           END,
           id DESC
         LIMIT :limit
@@ -109,8 +111,9 @@ internal interface LocationSampleDao {
           timeMillis DESC,
           CASE
             WHEN provider = 'gps' THEN 0
-            WHEN provider = 'gps_corrected' THEN 1
-            ELSE 2
+            WHEN provider = 'network' THEN 1
+            WHEN provider = 'gps_corrected' THEN 2
+            ELSE 3
           END,
           id DESC
         LIMIT :softLimit
@@ -137,8 +140,9 @@ internal interface LocationSampleDao {
           timeMillis DESC,
           CASE
             WHEN provider = 'gps' THEN 0
-            WHEN provider = 'gps_corrected' THEN 1
-            ELSE 2
+            WHEN provider = 'network' THEN 1
+            WHEN provider = 'gps_corrected' THEN 2
+            ELSE 3
           END,
           id DESC
         LIMIT :softLimit

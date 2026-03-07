@@ -95,11 +95,12 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun providerRank(provider: String?): Int {
-        val v = provider?.trim()?.lowercase(Locale.ROOT) ?: return 2
+        val v = provider?.trim()?.lowercase(Locale.ROOT) ?: return 3
         return when (v) {
             "gps" -> 0
-            "gps_corrected" -> 1
-            else -> 2
+            "network" -> 1
+            "gps_corrected" -> 2
+            else -> 3
         }
     }
 }

@@ -35,7 +35,8 @@ This module provides the foreground service (`GeoLocationService`). It is the "r
 
 - Inserts `LocationSample` rows via `StorageService.insertLocation(...)`.
   - `provider="gps"` for raw GPS observations.
-  - `provider="gps_corrected"` when a correction engine returns a different observation.
+  - `provider="network"` for raw network-provider observations.
+  - `provider="gps_corrected"` when a correction engine returns a different observation for a GPS-sourced fix.
   - `provider="dead_reckoning"` for DR points (when enabled).
 
 ### Effects while running
@@ -80,7 +81,7 @@ What you do:
 What happens:
 
 - For each GPS observation, the correction engine produces a fused observation.
-- If it differs from the raw one, an additional `LocationSample` is inserted as `provider="gps_corrected"`.
+- If it differs from a GPS-sourced raw fix, an additional `LocationSample` is inserted as `provider="gps_corrected"`.
 
 ### Recipe: Update sampling while running
 
@@ -249,7 +250,7 @@ What you get:
   - does not emit a ticker stream
   - inserts backfilled points between GPS fixes as `provider="dead_reckoning"`
 
-### Consume providers explicitly (GPS vs corrected vs DR)
+### Consume providers explicitly (GPS/network vs corrected vs DR)
 
 What you write:
 
@@ -257,7 +258,7 @@ What you write:
 
 ```kotlin
 StorageService.latestFlow(context, limit = 500).collect { rows ->
-  val gps = rows.filter { it.provider == "gps" }
+  val gpsLike = rows.filter { it.provider == "gps" || it.provider == "network" }
   val ekf = rows.filter { it.provider == "gps_corrected" }
   val dr = rows.filter { it.provider == "dead_reckoning" }
   // plot / export / compare as needed

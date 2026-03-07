@@ -17,6 +17,13 @@ data class GpsObservation(
     val hasBearing: Boolean,
     val gnssUsed: Int?,
     val gnssTotal: Int?,
-    val cn0Mean: Double?
+    val cn0Mean: Double?,
+    val sourceProvider: GpsSourceProvider
 )
+
+enum class GpsSourceProvider {
+    GPS,
+    NETWORK,
+    OTHER
+}
 

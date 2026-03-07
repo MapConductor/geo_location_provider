@@ -28,6 +28,7 @@ class LocationManagerGpsEngine(
 
     companion object {
         private const val TAG = "LocationManagerGpsEngine"
+        private const val NETWORK_ACCEPT_IF_NO_GPS_MS_MIN = 12_000L
     }
 
     private val locationManager: LocationManager? = context.getSystemService()
@@ -93,6 +94,14 @@ class LocationManagerGpsEngine(
 
     @Volatile
     private var lastGnss: GnssSnapshot? = null
+    @Volatile
+    private var lastAcceptedTimestampMillis: Long = 0L
+    @Volatile
+    private var lastAcceptedElapsedRealtimeNanos: Long? = null
+    @Volatile
+    private var lastAcceptedGpsTimestampMillis: Long = 0L
+    @Volatile
+    private var lastAcceptedGpsElapsedRealtimeNanos: Long? = null
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -127,6 +136,7 @@ class LocationManagerGpsEngine(
         isStarted = false
         unregisterGnssStatus()
         stopLocationUpdates()
+        resetAcceptanceState()
     }
 
     override fun updateInterval(intervalMs: Long) {
@@ -138,13 +148,32 @@ class LocationManagerGpsEngine(
 
     private fun handleLocation(loc: Location) {
         val now = System.currentTimeMillis()
+        val elapsedRealtimeNanos = runCatching { loc.elapsedRealtimeNanos }.getOrNull()
+        val locationTimestampMillis = loc.time.takeIf { it > 0L } ?: now
+        val sourceProvider = classifySourceProvider(loc.provider)
+        if (shouldSuppressNetworkObservation(sourceProvider, now, elapsedRealtimeNanos)) {
+            Log.d(
+                TAG,
+                "drop network location while GPS is recent ts=$locationTimestampMillis now=$now"
+            )
+            return
+        }
+        if (isStaleLocation(locationTimestampMillis, elapsedRealtimeNanos, now)) {
+            Log.d(
+                TAG,
+                "drop stale location provider=${loc.provider} ts=$locationTimestampMillis now=$now"
+            )
+            return
+        }
+
         val gnss = lastGnss?.takeIf { snap ->
             val maxAgeMs = max(5_000L, intervalMs * 2L)
             (now - snap.timestampMs) <= maxAgeMs
         }
+        val observationTimestampMillis = locationTimestampMillis.coerceAtMost(now + 1_000L)
         val observation = GpsObservation(
-            timestampMillis = loc.time.takeIf { it > 0L } ?: now,
-            elapsedRealtimeNanos = runCatching { loc.elapsedRealtimeNanos }.getOrNull(),
+            timestampMillis = observationTimestampMillis,
+            elapsedRealtimeNanos = elapsedRealtimeNanos,
             lat = loc.latitude,
             lon = loc.longitude,
             accuracyM = loc.accuracy,
@@ -153,8 +182,15 @@ class LocationManagerGpsEngine(
             hasBearing = loc.hasBearing(),
             gnssUsed = gnss?.used,
             gnssTotal = gnss?.total,
-            cn0Mean = gnss?.cn0Mean?.toDouble()
+            cn0Mean = gnss?.cn0Mean?.toDouble(),
+            sourceProvider = sourceProvider
         )
+        lastAcceptedTimestampMillis = observationTimestampMillis
+        lastAcceptedElapsedRealtimeNanos = elapsedRealtimeNanos
+        if (sourceProvider == GpsSourceProvider.GPS) {
+            lastAcceptedGpsTimestampMillis = observationTimestampMillis
+            lastAcceptedGpsElapsedRealtimeNanos = elapsedRealtimeNanos
+        }
         listener?.onGpsObservation(observation)
     }
 
@@ -177,14 +213,30 @@ class LocationManagerGpsEngine(
             return
         }
 
-        val candidates: List<String> = buildList {
-            if (hasFine) add(LocationManager.GPS_PROVIDER)
-            if (hasCoarse || hasFine) add(LocationManager.NETWORK_PROVIDER)
-        }
+        val preferredCandidates: List<String> =
+            if (hasFine) {
+                listOf(LocationManager.GPS_PROVIDER)
+            } else {
+                listOf(LocationManager.NETWORK_PROVIDER)
+            }
+        val fallbackCandidates: List<String> =
+            if (hasFine && hasCoarse) {
+                listOf(LocationManager.NETWORK_PROVIDER)
+            } else {
+                emptyList()
+            }
 
-        val chosen: List<String> = candidates.filter { provider ->
+        val preferredEnabled: List<String> = preferredCandidates.filter { provider ->
             runCatching { mgr.isProviderEnabled(provider) }.getOrDefault(false)
-        }.ifEmpty { candidates.take(1) }
+        }
+        val fallbackEnabled: List<String> = fallbackCandidates.filter { provider ->
+            runCatching { mgr.isProviderEnabled(provider) }.getOrDefault(false)
+        }
+        val selected = LinkedHashSet<String>()
+        selected.addAll(preferredEnabled)
+        selected.addAll(fallbackEnabled)
+        val chosen: List<String> =
+            selected.toList()
 
         if (chosen.isEmpty()) {
             Log.w(TAG, "requestLocationUpdates: no providers available")
@@ -258,5 +310,76 @@ class LocationManagerGpsEngine(
             Log.w(TAG, "unregisterGnssStatusCallback", t)
         }
     }
-}
 
+    private fun isStaleLocation(
+        timestampMillis: Long,
+        elapsedRealtimeNanos: Long?,
+        nowMillis: Long
+    ): Boolean {
+        val staleThresholdMs = max(15_000L, intervalMs * 3L)
+        if (timestampMillis < nowMillis - staleThresholdMs) {
+            return true
+        }
+        if (timestampMillis > nowMillis + 5_000L) {
+            return true
+        }
+
+        val lastTs = lastAcceptedTimestampMillis
+        if (lastTs > 0L && timestampMillis + 1_000L < lastTs) {
+            return true
+        }
+
+        val lastElapsed = lastAcceptedElapsedRealtimeNanos
+        if (elapsedRealtimeNanos != null && lastElapsed != null && elapsedRealtimeNanos <= lastElapsed) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun shouldSuppressNetworkObservation(
+        sourceProvider: GpsSourceProvider,
+        nowMillis: Long,
+        nowElapsedRealtimeNanos: Long?
+    ): Boolean {
+        if (sourceProvider != GpsSourceProvider.NETWORK) {
+            return false
+        }
+        return hasRecentGpsFix(nowMillis, nowElapsedRealtimeNanos)
+    }
+
+    private fun hasRecentGpsFix(
+        nowMillis: Long,
+        nowElapsedRealtimeNanos: Long?
+    ): Boolean {
+        val windowMs = max(NETWORK_ACCEPT_IF_NO_GPS_MS_MIN, intervalMs + 5_000L)
+        val lastGpsElapsed = lastAcceptedGpsElapsedRealtimeNanos
+        if (nowElapsedRealtimeNanos != null && lastGpsElapsed != null) {
+            val deltaMs = (nowElapsedRealtimeNanos - lastGpsElapsed) / 1_000_000L
+            if (deltaMs in 0..windowMs) {
+                return true
+            }
+        }
+
+        val lastGpsTs = lastAcceptedGpsTimestampMillis
+        if (lastGpsTs <= 0L) {
+            return false
+        }
+        return (nowMillis - lastGpsTs) <= windowMs
+    }
+
+    private fun resetAcceptanceState() {
+        lastAcceptedTimestampMillis = 0L
+        lastAcceptedElapsedRealtimeNanos = null
+        lastAcceptedGpsTimestampMillis = 0L
+        lastAcceptedGpsElapsedRealtimeNanos = null
+    }
+
+    private fun classifySourceProvider(raw: String?): GpsSourceProvider {
+        return when (raw) {
+            LocationManager.GPS_PROVIDER -> GpsSourceProvider.GPS
+            LocationManager.NETWORK_PROVIDER -> GpsSourceProvider.NETWORK
+            else -> GpsSourceProvider.OTHER
+        }
+    }
+}

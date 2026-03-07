@@ -16,12 +16,13 @@ Inputs:
 Outputs:
 
 - A stream of `GpsObservation` values delivered to `GpsLocationEngine.Listener`.
-  - Each observation includes lat/lon/accuracy and optional GNSS metadata (used/total satellites, CN0 mean).
+  - Each observation includes lat/lon/accuracy, optional GNSS metadata (used/total satellites, CN0 mean), and source provider classification (`GPS` / `NETWORK` / `OTHER`).
 
 ## Public API (what other modules depend on)
 
 - `GpsLocationEngine`: start/stop, update interval, set listener
 - `GpsObservation`: one location observation plus optional GNSS metadata
+- `GpsSourceProvider`: coarse source classification for each observation
 
 Files:
 
@@ -33,6 +34,8 @@ Files:
 - `LocationManagerGpsEngine`
   - Uses Android `LocationManager` and `GnssStatus.Callback`.
   - Intended for environments where Google Play Services are not available.
+  - Prioritizes `GPS_PROVIDER` observations when fine location is available, while accepting `NETWORK_PROVIDER` as fallback when recent GPS fixes are unavailable.
+  - Drops stale or out-of-order callbacks before emitting `GpsObservation`.
   - Exposes GNSS quality signals when available (used/total satellites, CN0 mean).
 
 File:

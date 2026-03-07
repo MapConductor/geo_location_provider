@@ -24,6 +24,7 @@ import com.mapconductor.plugin.provider.geolocation.fusion.GpsCorrectionEngineRe
 import com.mapconductor.plugin.provider.geolocation.fusion.LifecycleAwareGpsCorrectionEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsLocationEngine
 import com.mapconductor.plugin.provider.geolocation.gps.GpsObservation
+import com.mapconductor.plugin.provider.geolocation.gps.GpsSourceProvider
 import com.mapconductor.plugin.provider.geolocation.gps.LocationManagerGpsEngine
 import com.mapconductor.plugin.provider.geolocation.util.BatteryStatusReader
 import com.mapconductor.plugin.provider.geolocation.util.HeadingSensor
@@ -55,6 +56,7 @@ class GeoLocationService : Service() {
         private const val TAG = "GeoLocationService"
         private const val NOTIFICATION_ID = 1
         private const val PROVIDER_GPS = "gps"
+        private const val PROVIDER_NETWORK = "network"
         private const val PROVIDER_GPS_CORRECTED = "gps_corrected"
 
         const val ACTION_START = "ACTION_START_LOCATION"
@@ -406,7 +408,10 @@ class GeoLocationService : Service() {
                 updateIntervalMs = updateIntervalMs
             )
         )
-        val hasCorrected: Boolean = correctedObservation !== observation
+        val rawProvider: String = rawProviderFromSource(observation.sourceProvider)
+        val hasCorrected: Boolean =
+            correctedObservation !== observation &&
+                observation.sourceProvider == GpsSourceProvider.GPS
 
         // --- Estimate course (direction of travel) ---
         val prevLat = lastCourseLat
@@ -561,7 +566,7 @@ class GeoLocationService : Service() {
                 lat = observation.lat,
                 lon = observation.lon,
                 accuracy = observation.accuracyM,
-                provider = PROVIDER_GPS,
+                provider = rawProvider,
                 headingDeg = headingDeg.toDouble(),
                 courseDeg = courseDeg,
                 speedMps = speedMps.toDouble(),
@@ -593,24 +598,24 @@ class GeoLocationService : Service() {
                   serviceScope.launch(Dispatchers.IO) {
                       Log.d(
                           "DB/TRACE",
-                          "before-insert provider=${PROVIDER_GPS} t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
+                          "before-insert provider=${sample.provider} t=${sample.timeMillis} lat=${sample.lat} lon=${sample.lon}"
                       )
                       try {
                           StorageService.insertLocation(applicationContext, sample)
                           Log.d(
                               "DB/TRACE",
-                              "after-insert ok provider=${PROVIDER_GPS} t=${sample.timeMillis}"
+                              "after-insert ok provider=${sample.provider} t=${sample.timeMillis}"
                           )
                       } catch (t: Throwable) {
                           Log.e(
                               "DB/TRACE",
-                              "insert failed provider=${PROVIDER_GPS} t=${sample.timeMillis}",
+                              "insert failed provider=${sample.provider} t=${sample.timeMillis}",
                               t
                           )
                       }
                   }
             } else {
-                Log.d("DB/TRACE", "gps insert skipped (dup guard)")
+                Log.d("DB/TRACE", "${sample.provider} insert skipped (dup guard)")
             }
         }
 
@@ -1285,5 +1290,13 @@ class GeoLocationService : Service() {
         val east = dLonRad * cos(meanLatRad) * 6371000.0
 
         return hypot(east, north)
+    }
+
+    private fun rawProviderFromSource(sourceProvider: GpsSourceProvider): String {
+        return when (sourceProvider) {
+            GpsSourceProvider.GPS -> PROVIDER_GPS
+            GpsSourceProvider.NETWORK -> PROVIDER_NETWORK
+            GpsSourceProvider.OTHER -> PROVIDER_GPS
+        }
     }
 }

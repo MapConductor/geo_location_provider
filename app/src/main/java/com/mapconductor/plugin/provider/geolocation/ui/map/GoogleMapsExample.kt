@@ -91,8 +91,12 @@ fun MapScreen() {
         }
     }
 
+    fun isGpsLike(kind: ProviderKind): Boolean {
+        return kind == ProviderKind.Gps || kind == ProviderKind.Network
+    }
+
     val gpsLatestSample = state.markers.firstOrNull { sample ->
-        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+        isGpsLike(Formatters.providerKind(sample.provider))
     }
     val gpsCorrectedLatestSample = state.markers.firstOrNull { sample ->
         Formatters.providerKind(sample.provider) == ProviderKind.GpsCorrected
@@ -272,7 +276,7 @@ fun MapScreen() {
 
                     val gpsSamples = state.markers
                         .filter { sample ->
-                            Formatters.providerKind(sample.provider) == ProviderKind.Gps
+                            isGpsLike(Formatters.providerKind(sample.provider))
                         }
                         .sortedBy { it.timeMillis }
 
@@ -366,7 +370,7 @@ fun MapScreen() {
 
                     // Draw accuracy circle for the latest GPS sample, if available.
                     val latestGpsSample = state.markers.firstOrNull { sample ->
-                        Formatters.providerKind(sample.provider) == ProviderKind.Gps
+                        isGpsLike(Formatters.providerKind(sample.provider))
                     }
                     if (latestGpsSample != null && latestGpsSample.accuracy > 0f) {
                         val center = GeoPointImpl.fromLatLong(latestGpsSample.lat, latestGpsSample.lon)

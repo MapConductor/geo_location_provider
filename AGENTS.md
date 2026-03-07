@@ -159,13 +159,16 @@ Selection behavior summary:
 Providers persisted into `LocationSample.provider`:
 
 - `"gps"`: raw GPS observations
-- `"gps_corrected"`: corrected observations (only when correction is enabled and differs from raw)
+- `"network"`: raw network-provider observations (coarse fallback path)
+- `"gps_corrected"`: corrected observations (only when correction is enabled, differs from raw, and the raw source is GPS)
 - `"dead_reckoning"`: DR points (when enabled)
 
 GPS notes:
 
 - Duplicate suppression uses a compact signature to avoid flooding the DB.
 - A "GPS hold" position is maintained and blended over time (jitter reduction while staying responsive).
+- `LocationManagerGpsEngine` prioritizes GPS observations when fine location is available; NETWORK observations are used as fallback when recent GPS fixes are not available.
+- Stale/out-of-order location callbacks are filtered in `:gps` before they reach `:core`.
 
 Dead Reckoning notes (summary):
 
@@ -261,6 +264,7 @@ The sample app is a reference host that wires modules together:
 Map visualization conventions:
 
 - GPS: `provider="gps"`
+- Network: `provider="network"`
 - GPS(EKF): `provider="gps_corrected"`
 - Dead Reckoning: `provider="dead_reckoning"`
 
@@ -301,4 +305,4 @@ The intended stable library surface is small. Types listed here should stay publ
 - `:deadreckoning`:
   - `DeadReckoning`, `GpsFix`, `PredictedPoint`, `DeadReckoningConfig`, `DeadReckoningFactory`
 - `:gps`:
-  - `GpsLocationEngine`, `GpsObservation`
+  - `GpsLocationEngine`, `GpsObservation`, `GpsSourceProvider`
